@@ -4,15 +4,16 @@
 #include "CNC.h"
 #include <Commdlg.h>
 
-
 #include "motor.h"
 #include "gcode.h"
 #include "socket.h"
+#include "3Dview.h"
+#include "fileParser.h"
 
 #define MAX_LOADSTRING 100
 
 // Global Variables:
-HWND hMainWindow = NULL;
+HWND hMainWindow = NULL;						// main window handle
 HINSTANCE hInst;								// current instance
 TCHAR szTitle[MAX_LOADSTRING];					// The title bar text
 TCHAR szWindowClass[MAX_LOADSTRING];			// the main window class name
@@ -23,95 +24,19 @@ BOOL				InitInstance(HINSTANCE, int);
 LRESULT CALLBACK	WndProc(HWND, UINT, WPARAM, LPARAM);
 INT_PTR CALLBACK	About(HWND, UINT, WPARAM, LPARAM);
 
-
-#define MAX_LINE 5000
-
+// Relative movement
 #define RELMOVE "G91 G40 G1 "
-
 // 1/256 of an inch.
 #define SMALL_MOVE ".00390625"
+
 
 tStatus parseLine(char* cmd)
 {
 	tStatus ret = retSuccess;
-	char* pt;
-
-	pt = strstr(cmd, "\n");
-	if (pt)
-	{
-		*pt = 0;
-		pt++;
-	}
-
-	//printf( "Parsing '%s'\n", cmd );
 
 	if (strstr(cmd, "RUN ") == cmd)
 	{
-		HANDLE hFile;
-		char *fileName = cmd + 4;
-		char* buffer;
-		char* eol;
-		char line[80];
-		float read = 0.0;
-		int l = 0;
-		DWORD fileSize;
 
-		hFile = CreateFileA(fileName, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
-		if( hFile==INVALID_HANDLE_VALUE )
-		{
-			printf("Opening command file '%s' failed.\n", fileName);
-			return retFileNotFound;
-		}
-
-		fileSize = GetFileSize(hFile,NULL);
-
-		buffer = (char*)malloc(fileSize+1);
-		if (buffer == NULL)
-		{
-			printf("Memory allocation for %d bytes failed.\n", buffer );
-			return retOutOfMemory;
-		}
-
-		ReadFile(hFile, buffer, fileSize, NULL, NULL);
-		buffer[fileSize] = 0;
-
-		pt = buffer;
-
-		do {
-			eol = strchr(pt, '\r');
-			if (!eol) eol = strchr(pt, '\n');
-			if(eol)
-			{
-				*eol = 0;
-				eol++;
-				while (*eol == '\n' || *eol == '\r') eol++;
-			}
-			l = strlen(pt);
-			if (l >= sizeof(line))
-			{
-				printf("Line in file is too long(%d).\n", l );
-				return retSyntaxError;
-			}
-
-			if (l > 0)
-			{
-				read += l;
-				sprintf_s(line,sizeof(line), "%.1f%% - %s", (read * 100) / fileSize, pt);
-
-				l = strlen(line);
-				memset(line + l, ' ', sizeof(line) - 1 - l);
-				line[sizeof(line) - 1] = 0;
-
-				//printf("\r%s", line);
-
-				if ((ret = parseLine(pt)) != retSuccess) break;
-			}
-			pt = eol;
-		} while (pt );
-
-		printf("Done.\n");
-		CloseHandle(hFile);
-		free(buffer);
 	}
 	else if (strstr(cmd, "EXP") == cmd)
 	{
@@ -227,6 +152,7 @@ tStatus parseLine(char* cmd)
 	return ret;
 }
 
+
 void OnSocketEvent(CNC_SOCKET_EVENT event, PVOID param)
 {
 	switch (event)
@@ -236,6 +162,7 @@ void OnSocketEvent(CNC_SOCKET_EVENT event, PVOID param)
 		break;
 	}
 }
+
 
 int APIENTRY _tWinMain(_In_ HINSTANCE hInstance,
                      _In_opt_ HINSTANCE hPrevInstance,
@@ -272,13 +199,6 @@ int APIENTRY _tWinMain(_In_ HINSTANCE hInstance,
 	initSpindle();
 
 	initSocketCom(OnSocketEvent);
-
-	/*
-	do
-	{
-		printf("CNC>");
-	} while (parseLine(fgets(cmd, sizeof(cmd), stdin)) != retQuit);
-	*/
 
 	// Main message loop:
 	while (GetMessage(&msg, NULL, 0, 0))
@@ -367,6 +287,7 @@ void OnKey(int key)
 	case VK_LEFT:
 		doGcode(RELMOVE"Y"SMALL_MOVE);
 		break;
+
 		/*
 		case VK_PAGEUP:
 		doGcode(RELMOVE"Z"SMALL_MOVE);
@@ -378,16 +299,15 @@ void OnKey(int key)
 	}
 }
 
-void OnRunGCode(HWND hwnd)
+void OnRunGCode(HWND hWnd)
 {
 	WCHAR szFile[260];       // buffer for file name
 	OPENFILENAME ofn;
-	char cmd[260];
 
 	// Initialize OPENFILENAME
 	memset(&ofn, 0x00, sizeof(ofn));
 	ofn.lStructSize = sizeof(ofn);
-	ofn.hwndOwner = hwnd;
+	ofn.hwndOwner = hWnd;
 	ofn.lpstrFile = szFile;
 	// Set lpstrFile[0] to '\0' so that GetOpenFileName does not 
 	// use the contents of szFile to initialize itself.
@@ -402,8 +322,17 @@ void OnRunGCode(HWND hwnd)
 
 	if (GetOpenFileName(&ofn))
 	{
-		sprintf_s(cmd, sizeof(cmd), "RUN %S\n", szFile);
-		parseLine(cmd);
+		// HalfDome Fine
+//		init3DView(1.0f, 1.0f, 5.25f, 5.25f, 1.5f, 0.005f, 1.0f/32.0f );
+
+		// Maximus
+		init3DView(0.0f, 0.0f, 5.0f, 2.0f, 0.0f, 0.005f, /*1.0f/8.0f*/ 1.0f/8.0f);
+
+		setSimulationMode( buildPath );
+		
+		ParseGCodeFile(szFile,doGcode);
+		
+		saveAltitude(L"C:\\Users\\Eric\\Documents\\altitude.dat");
 	}
 }
 
@@ -446,7 +375,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		break;
 	case WM_PAINT:
 		hdc = BeginPaint(hWnd, &ps);
-		// TODO: Add any drawing code here...
+		OnPaint(hWnd, hdc);
 		EndPaint(hWnd, &ps);
 		break;
 	case WM_DESTROY:

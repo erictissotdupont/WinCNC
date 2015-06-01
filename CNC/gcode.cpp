@@ -20,7 +20,7 @@ typedef struct _tMotion {
   int motion;
 } tMotion;
 
-tPoint theoricalPos = {0,0,0};
+t3DPoint theoricalPos = {0,0,0};
 
 // Cutter compensation buffered moves
 tMotion CompBfrdB = {0,0,0,0,0,0,0,0,0,0}; // Buffered move
@@ -31,7 +31,7 @@ double feedSpeed = 30; // Inches per minute
 double cutterRadius = 0;
 int spindle = 0;
 
-void getCompPos( tPoint* P )
+void getCompPos( t3DPoint* P )
 {
   double cX,cY,cZ;
   
@@ -69,9 +69,9 @@ void getCompPos( tPoint* P )
 // ---------------------- ARCS ------------------------------------
 
 typedef struct {
-  tPoint center;
-  tPoint start;
-  tPoint end;
+  t3DPoint center;
+  t3DPoint start;
+  t3DPoint end;
   double arcAngle;
   double arcT;
   double aRadius;
@@ -81,7 +81,7 @@ typedef struct {
 } tArcInfo;
 
 
-void getArcPosStepAt( tPoint* P, int s, int total, void* pArg )
+void getArcPosStepAt( t3DPoint* P, int s, int total, void* pArg )
 {
   tArcInfo* pInfo = (tArcInfo*)pArg;
   double t = PI + ( pInfo->arcT * s / total );
@@ -104,7 +104,7 @@ void getArcPosStepAt( tPoint* P, int s, int total, void* pArg )
 double lengthOfArc( tArcInfo* pInfo )
 {
   int i;
-  tPoint a,b;
+  t3DPoint a,b;
   double l = 0;
 
   getArcPosStepAt( &a, 0, ARC_LENGTH_APPROX_STEPS, pInfo );
@@ -126,8 +126,8 @@ tStatus arcInXYPlane( double X, double Y, double Z, double I, double J, double P
 
   // Debug
   double err;
-  tPoint start;
-  tPoint end;
+  t3DPoint start;
+  t3DPoint end;
 
   // Start and end of the movement
   getCurPos( &info.start );
@@ -170,7 +170,7 @@ tStatus arcInXYPlane( double X, double Y, double Z, double I, double J, double P
   // Length of the arc
   l = lengthOfArc( &info );
 
-  stepCount = (long)( l / ( getSmalestStep( ) * 100 ));
+  stepCount = 1 + (long)( l / ( getSmalestStep( ) * 100 ));
   duration = l / feedSpeed * IPM_TO_IPMS;
 
   printf( " Ctr:%.3f,%.3f,%.3f - R:%.3f,%.3f - L:%.3f/%d - arc:%.3f t:%.3f - Rot:%.4f\n", 
@@ -204,10 +204,10 @@ tStatus arcInXYPlane( double X, double Y, double Z, double I, double J, double P
 // ------------------------ LINEAR - G1 --------------------------
 typedef struct {
   double x,y,z;
-  tPoint Origin;
+  t3DPoint Origin;
 } linearRelInfo;
 
-void getLinearRelStepAt( tPoint* P, int s, int total, void* pArg )
+void getLinearRelStepAt( t3DPoint* P, int s, int total, void* pArg )
 {
   linearRelInfo* pInfo = (linearRelInfo*)pArg;
   P->x = pInfo->Origin.x + pInfo->x * s / total;
@@ -241,11 +241,11 @@ tStatus linearRel( double x, double y, double z )
 
 // -------------------- Rapid Positioning - G0 ---------------------------
 typedef struct {
-  tPoint Origin;
+  t3DPoint Origin;
   double x,y,z;
 } rapidPosInfo;
 
-void getrapidPosStepAt( tPoint* P, int s, int total, void* pArg )
+void getrapidPosStepAt( t3DPoint* P, int s, int total, void* pArg )
 {
   rapidPosInfo* pInfo = (rapidPosInfo*)pArg;
   P->x = pInfo->Origin.x + pInfo->x * s / total;
@@ -266,7 +266,7 @@ tStatus rapidPosRel( double x, double y, double z )
 }
 
 // --------------------------- Dwell - G4 --------------------------------
-void getDwellPosStepAt( tPoint* P, int s, int total, void* pArg )
+void getDwellPosStepAt( t3DPoint* P, int s, int total, void* pArg )
 {
   getCurPos( P );
 }
@@ -416,34 +416,34 @@ int doCutterCompensation( tMotion* pM, int mode, int loop )
         CompBfrdC.Y = pM->X * cutterRadius / l + CompBfrdC.J;
         CompBfrdC.Z = 0;
         CompBfrdC.P = 1;
-        CompBfrdC.motion = ( mode == 41 ) ? 2 : 3;
+        CompBfrdC.motion = ( mode == 410 ) ? 20 : 30;
 
         addCompensation( CompBfrdC.X, CompBfrdC.Y, 0 );
       }
-    }
-    else
-    {
-      printf( "ERROR: Invalid compensation state (%d)\n", state );
-      exit( 1 );
-    }
+	}
+	else
+	{
+		printf("ERROR: Invalid compensation state (%d)\n", state);
+		exit(1);
+	}
 
-    CompBfrdB.X += CompBfrdB.b1;
-    CompBfrdB.Y += CompBfrdB.b2;
+	CompBfrdB.X += CompBfrdB.b1;
+	CompBfrdB.Y += CompBfrdB.b2;
 
-    addCompensation( CompBfrdB.b1, CompBfrdB.b2, 0 );
+	addCompensation(CompBfrdB.b1, CompBfrdB.b2, 0);
 
-    // Save current move in buffer and return the previous one in pM
-    temp = *pM;
-    *pM = CompBfrdB;
-    CompBfrdB = temp;
+	// Save current move in buffer and return the previous one in pM
+	temp = *pM;
+	*pM = CompBfrdB;
+	CompBfrdB = temp;
 
-    return 1;
+	return 1;
   }
-  else if( CompBfrdZ.motion != 0 )
+  else if (CompBfrdZ.motion != 0)
   {
-    *pM = CompBfrdZ;
-    CompBfrdZ.motion = 0;
-    return 1;
+	  *pM = CompBfrdZ;
+	  CompBfrdZ.motion = 0;
+	  return 1;
   }
 
   return 0;
@@ -452,21 +452,43 @@ int doCutterCompensation( tMotion* pM, int mode, int loop )
 
 // ------------------------- G CODE PARSER ------------------------
 
-const int modal0[] = { 0,1,2,3,38,82,84,85,86,87,88,89, -1 }; // Motion
-const int modal1[] = { 17,18,19, -1 };                        // Plane selection
-const int modal2[] = { 90,91, -1 };                           // Distance mode
-const int modal3[] = { 93,94, -1 };                           // Feed rate mode
-const int modal4[] = { 20,21, -1 };                           // Units
-const int modal5[] = { 40,41,42, -1 };                        // Cutter radius compensation
-const int modal6[] = { 43,49, -1 };                           // Tool length offset
-const int modal7[] = { 98,99, -1 };                           // Return mode in canned cycles
-const int modal8[] = { 54,55,56,57,58,59, -1 };               // Coordinates system selection
-const int modal9[] = { 61,64, -1 };                           // Path control mode
+#define CMD_G0		  0
+#define CMD_G1		 10
+#define CMD_G2		 20
+#define CMD_G3		 30
+#define CMD_G4		 40
 
-const int nonModal[] = { 4,10,28,30,53,92, -1 };              // Non modal group
+#define CMD_G10		100
+#define CMD_G30		300
+#define CMD_G90		900
+#define CMD_G91		910
 
-#define MODALGRPCNT 10
-const int* modalGroup[MODALGRPCNT] = {modal0,modal1,modal2,modal3,modal4,modal5,modal6,modal7,modal8,modal9};
+
+const int modal0[] = { 0, 10, 20, 30, 380, 820, 840, 850, 860, 870, 880, 890, -1 }; // Motion
+const int modal1[] = { 170, 180, 190, -1 };                      // Plane selection
+const int modal2[] = { 900, 910, -1 };                           // Distance mode
+const int modal3[] = { 930, 940, -1 };                           // Feed rate mode
+const int modal4[] = { 200, 210, -1 };                           // Units
+const int modal5[] = { 400, 410, 420, -1 };                      // Cutter radius compensation
+const int modal6[] = { 430, 490, -1 };                           // Tool length offset
+const int modal7[] = { 980, 990, -1 };                           // Return mode in canned cycles
+const int modal8[] = { 540, 550, 560, 570, 580, 590, -1 };       // Coordinates system selection
+const int modal9[] = { 610, 640, -1 };                           // Path control mode
+
+typedef enum groupId { 
+	MG_MOTION = 0,  
+	MG_PLANE = 1,
+	MG_DISTANCE_MODE = 2,
+	MG_FEEDRATE_MODE = 3,
+	MG_UNITS = 4,
+	MG_CUTTER_RADIUS_COMP = 5,
+	MG_TOOL_LENGTH_OFFSET = 6,
+	MG_RTN_MODE = 7,
+	MG_COORDINATES_SELECTION = 8,
+	MG_PATH_CTRL_MODE = 9,
+	MG_COUNT };
+
+const int* modalGroup[MG_COUNT] = { modal0, modal1, modal2, modal3, modal4, modal5, modal6, modal7, modal8, modal9 };
 
 #define GOT_X          0x0001
 #define GOT_X_OFFSET   0x0002
@@ -478,97 +500,114 @@ const int* modalGroup[MODALGRPCNT] = {modal0,modal1,modal2,modal3,modal4,modal5,
 #define GOT_TURN_COUNT 0x0080
 #define GOT_SPINDLE    0x0100
 
-void showDistanceInfo( )
+void showDistanceInfo()
 {
-  tPoint actualPos;
-  tPoint compPos;
-  int x,y,z;
+	t3DPoint actualPos;
+	t3DPoint compPos;
+	int x, y, z;
 
-  printf( "Distance information\n" );
-  
-  getRawStepPos( &x, &y, &z );
-  printf( " Raw Motor Step: X:%d Y:%d Z:%d \n", x,y,z );
+	printf("Distance information\n");
 
-  getCompPos( &compPos );
-  getCurPos( &actualPos );
+	getRawStepPos(&x, &y, &z);
+	printf(" Raw Motor Step: X:%d Y:%d Z:%d \n", x, y, z);
 
-  printf( " Current Error: %.5f (Max err.:%.5f)\n", 
-    distance3D( theoricalPos, compPos ), getMaxDistanceError( ));
-  
-  printf( " Theor.:%.4f,%.4f,%.4f\n", theoricalPos.x,theoricalPos.y,theoricalPos.z );
-  printf( " Actual:%.4f,%.4f,%.4f\n", actualPos.x,actualPos.y,actualPos.z );
-  printf( " Compsd:%.4f,%.4f,%.4f\n", compPos.x,compPos.y,compPos.z );
+	getCompPos(&compPos);
+	getCurPos(&actualPos);
+
+	printf(" Current Error: %.5f (Max err.:%.5f)\n",
+		distance3D(theoricalPos, compPos), getMaxDistanceError());
+
+	printf(" Theor.:%.4f,%.4f,%.4f\n", theoricalPos.x, theoricalPos.y, theoricalPos.z);
+	printf(" Actual:%.4f,%.4f,%.4f\n", actualPos.x, actualPos.y, actualPos.z);
+	printf(" Compsd:%.4f,%.4f,%.4f\n", compPos.x, compPos.y, compPos.z);
 }
 
 
-tStatus doGcode( char* cmd )
+tStatus doGcode(char* cmd)
 {
-  static int activeCmd[MODALGRPCNT] = { 0, 17, 91, 93, 20, 40, 43, 98, 54, 61 }; // Default active commands
-  char *pt;
-  int i,j,n;
-  double val;
-  tMotion M = {0,0,0,0,0,0,0,0,0,0};
-  int loop;
-  long gotWhat = 0; 
-  tPoint compPos;
-  tStatus ret = retUnknownErr;
-  // Debug
-  int cmdInGroup[MODALGRPCNT];
+	static int activeCmd[MG_COUNT] = { 0, 170, 910, 930, 200, 400, 430, 980, 540, 610 }; // Default active commands
+	char *pt;
+	int i, j, n;
+	double val;
+	tMotion M = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+	int loop;
+	long gotWhat = 0;
+	t3DPoint compPos;
+	tStatus ret = retUnknownErr;
 
-  memset( cmdInGroup, 0x00, sizeof( cmdInGroup ));
+	// Debug
+	int cmdInGroup[MG_COUNT];
 
-  // printf( "parseCmd( %s )\n", cmd );
+	memset(cmdInGroup, 0x00, sizeof(cmdInGroup));
 
-  if(( pt = strstr( cmd, "X" )) != NULL )
-  {
-    if( sscanf_s( pt+1, "%lf", &val ) != 1 ) return retInvalidParam; 
-    M.X = val;
-    gotWhat |= GOT_X;
-  }
-  if(( pt = strstr( cmd, "I" )) != NULL )
-  {
-    if( sscanf_s( pt+1, "%lf", &val ) != 1 ) return retInvalidParam; 
-    M.I = val;
-    gotWhat |= GOT_X_OFFSET;
-  }
-  if(( pt = strstr( cmd, "Y" )) != NULL )
-  {
-    if( sscanf_s( pt+1, "%lf", &val ) != 1 ) return retInvalidParam; 
-    M.Y = val;
-    gotWhat |= GOT_Y;
-  }
-  if(( pt = strstr( cmd, "J" )) != NULL )
-  {
-    if( sscanf_s( pt+1, "%lf", &val ) != 1 ) return retInvalidParam; 
-    M.J = val;
-    gotWhat |= GOT_Y_OFFSET;
-  }
-  if(( pt = strstr( cmd, "Z" )) != NULL )
-  {
-    if( sscanf_s( pt+1, "%lf", &val ) != 1 ) return retInvalidParam; 
-    M.Z = val;
-    gotWhat |= GOT_Z;
-  }
-  if(( pt = strstr( cmd, "K" )) != NULL )
-  {
-    if( sscanf_s( pt+1, "%lf", &val ) != 1 ) return retInvalidParam; 
-    M.K = val;
-    gotWhat |= GOT_Z_OFFSET;
-  }
-  if(( pt = strstr( cmd, "D" )) != NULL )
-  {
-    if( sscanf_s( pt+1, "%lf", &val ) != 1 ) return retInvalidParam; 
-    cutterRadius = val;
-    gotWhat |= GOT_DIMENSION;
-  }
-  if(( pt = strstr( cmd, "P" )) != NULL )
-  {
-    if( sscanf_s( pt+1, "%lf", &val ) != 1 ) return retInvalidParam; 
-    M.P = val;
-    gotWhat |= GOT_TURN_COUNT;
-  }
+	// Ignore characters within brackets: Mach3 comments
+	if((pt = strchr(cmd, '(')) != NULL )
+	{
+		char* cp = strchr(pt + 1, ')');
+		if(cp)
+		{
+			while (++pt < cp) { *pt = ' '; }
+		}
+		else return retSyntaxError;
+	}
 
-  if(( pt = strstr( cmd, "F" )) != NULL )
+	// Ignore what's right of semicolon: Siemens Comment
+	if ((pt = strchr(cmd, ';')) != NULL)
+	{
+		while (*pt != 0) { *pt = ' '; pt++; }
+	}
+
+
+	if ((pt = strchr(cmd, 'X' )) != NULL )
+	{
+		if( sscanf_s( pt+1, "%lf", &val ) != 1 ) return retInvalidParam; 
+		M.X = val;
+		gotWhat |= GOT_X;
+	}
+	if(( pt = strchr( cmd, 'I' )) != NULL )
+	{
+		if( sscanf_s( pt+1, "%lf", &val ) != 1 ) return retInvalidParam; 
+		M.I = val;
+		gotWhat |= GOT_X_OFFSET;
+	}
+	if(( pt = strchr( cmd, 'Y' )) != NULL )
+	{
+		if( sscanf_s( pt+1, "%lf", &val ) != 1 ) return retInvalidParam; 
+		M.Y = val;
+		gotWhat |= GOT_Y;
+	}
+	if(( pt = strchr( cmd, 'J' )) != NULL )
+	{
+		if( sscanf_s( pt+1, "%lf", &val ) != 1 ) return retInvalidParam; 
+		M.J = val;
+		gotWhat |= GOT_Y_OFFSET;
+	}
+	if ((pt = strchr(cmd, 'Z' )) != NULL )
+	{
+		if( sscanf_s( pt+1, "%lf", &val ) != 1 ) return retInvalidParam; 
+		M.Z = val;
+		gotWhat |= GOT_Z;
+	}
+	if(( pt = strchr( cmd, 'K' )) != NULL )
+	{
+		if( sscanf_s( pt+1, "%lf", &val ) != 1 ) return retInvalidParam; 
+		M.K = val;
+		gotWhat |= GOT_Z_OFFSET;
+	}
+	if ((pt = strchr(cmd, 'D' )) != NULL )
+	{
+		if( sscanf_s( pt+1, "%lf", &val ) != 1 ) return retInvalidParam; 
+		cutterRadius = val;
+		gotWhat |= GOT_DIMENSION;
+	}
+	if ((pt = strchr(cmd, 'P' )) != NULL )
+	{
+		if( sscanf_s( pt+1, "%lf", &val ) != 1 ) return retInvalidParam; 
+		M.P = val;
+		gotWhat |= GOT_TURN_COUNT;
+	}
+
+  if(( pt = strchr( cmd, 'F' )) != NULL )
   {
     if( sscanf_s( pt+1, "%lf", &val ) != 1 ) return retInvalidParam; 
     if( val > 0 )
@@ -588,13 +627,14 @@ tStatus doGcode( char* cmd )
     else return retInvalidParam;
   }
 
-  if(( pt = strstr( cmd, "M" )) != NULL )
+  if(( pt = strchr( cmd, 'M' )) != NULL )
   {
     if( sscanf_s( pt+1, "%d", &i ) != 1 ) return retInvalidParam; 
     switch( i )
     {
       case 0 :
-      case 1 :        
+      case 1 :
+	  case 2 :
         if( setSpindleState( 0 )) gotWhat |= GOT_SPINDLE;
         break;
       case 3 :
@@ -606,19 +646,20 @@ tStatus doGcode( char* cmd )
   }
  
   pt = cmd;
-  while(( pt = strstr( pt, "G" )) != NULL )
+  while(( pt = strchr( pt, 'G' )) != NULL )
   {
     pt++;
-    if( sscanf_s( pt, "%d", &n ) != 1 ) return retInvalidParam;
+    if( sscanf_s( pt, "%lf", &val ) != 1 ) return retInvalidParam;
+	n = (int)round(val*10);
 
     switch( n )
     {
-    case 4 : // G4 : Dwell
+    case CMD_G4 : // G4 : Dwell
       printf( "Dwell( %.3f sec).\n", M.P );
       dwell( (long)(M.P * 1000));
       break;
 
-    case 10 : // G10 : Reset home position to current
+    case CMD_G10 : // G10 : Reset home position to current
       // Use the actual compensensated position to reset the theorical position
       // in order not to loose the sub-step residual error
       getCompPos( &compPos );
@@ -629,7 +670,7 @@ tStatus doGcode( char* cmd )
       resetMotorPosition( );
       break;
 
-    case 30 : // G30 : Go back home
+    case CMD_G30 : // G30 : Go back home
       printf( "G30-Return home (%.3f,%.3f,%.3f) at feed speed (%.1f)\n", 
         -theoricalPos.x,-theoricalPos.y,-theoricalPos.z, feedSpeed );
       // Move first in X-Y plane and then Z axis
@@ -650,12 +691,13 @@ tStatus doGcode( char* cmd )
       break;
 
     default :
-      for( j=0; j<MODALGRPCNT; j++ )
+	  for (j = 0; j<MG_COUNT; j++)
       {
         for(i=0; modalGroup[j][i]>=0; i++ )
         {
           //printf( "[%d,%d]=%d\n", j,i, modalGroup[j][i] );
-          if( n == modalGroup[j][i] )
+          
+		  if( n == modalGroup[j][i] )
           {
             cmdInGroup[j]++;
             // There can only be one command of each modal group per
@@ -688,8 +730,8 @@ tStatus doGcode( char* cmd )
   //compPos = theoricalPos;   // So that cutter comp works
   //getCurPos( &compPos );  // So that precision remains
 
-  // If active distance mode is absolute
-  if( activeCmd[2] == 90 )
+  // If active distance mode is absolute (G90)
+  if (activeCmd[MG_DISTANCE_MODE] == CMD_G90)
   {
     // Update the theorical position for each Axis we got a new value and make
     // the coordinates relative to current position
@@ -709,8 +751,8 @@ tStatus doGcode( char* cmd )
       M.Z = M.Z - compPos.z;
     }
   }
-  // If activce distance mode is relative
-  else if( activeCmd[2] == 91 )
+  // If activce distance mode is relative (G91)
+  else if (activeCmd[MG_DISTANCE_MODE] == CMD_G91)
   {
     // Update the new theorical tool position
     theoricalPos.x += M.X;
@@ -729,37 +771,34 @@ tStatus doGcode( char* cmd )
   }
 
   // From this point on, everything is relative coordinates
-
   loop = 0;
-  M.motion = activeCmd[0];
+  M.motion = activeCmd[MG_MOTION];
   ret = retSuccess;
 
-  while( doCutterCompensation( &M, activeCmd[5], loop++ ))
+  while (doCutterCompensation(&M, (activeCmd[MG_CUTTER_RADIUS_COMP] / 10), loop++))
   {
     // Depending on the active command in the motion group
     switch( M.motion )
     {
-    case 0 : // Rapid positioning
+    case CMD_G0 : // Rapid positioning
       // printf( "G0-Rapid positioning (%.3f,%.3f,%.3f)\n", M.X,M.Y,M.Z );
       ret = rapidPosRel( M.X,M.Y,M.Z );
       break;
 
-    case 1 : // Linear coordinated feed speed
+    case CMD_G1 : // Linear coordinated feed speed
       // printf( "G1-Linear movement (%.3f,%.3f,%.3f) at feed speed (%.1f)\n", M.X,M.Y,M.Z, feedSpeed );
       ret = linearRel( M.X,M.Y,M.Z );
       break;
 
-    case 2 : // Arc in CW direction
+    case CMD_G2 : // Arc in CW direction
       // printf( "G2-Arc CW movement (%.3f,%.3f,%.3f,%.3f,%.3f,%.3f) at feed speed (%.1f)\n", M.X,M.Y,M.Z,M.I,M.J,-M.P, feedSpeed );
-      
       ret = arcInXYPlane( M.X,M.Y,M.Z,M.I,M.J,-M.P );
       break;
 
-    case 3 : // Arc in CCW direction
+    case CMD_G3 : // Arc in CCW direction
       // printf( "G3-Arc CCW movement (%.3f,%.3f,%.3f,%.3f,%.3f,%.3f) at feed speed (%.1f)\n", M.X,M.Y,M.Z,M.I,M.J,M.P, feedSpeed );
       ret = arcInXYPlane( M.X,M.Y,M.Z,M.I,M.J,M.P );
       break;
-
     }
   }
 

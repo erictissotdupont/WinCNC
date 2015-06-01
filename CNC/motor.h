@@ -13,10 +13,12 @@ typedef struct _tSpindle {
 } tSpindle;
 
 void setExportFile( HANDLE file );
+void setSimulationMode(tStatus(*callback)(t3DPoint, long, long, long, long, long));
+
 void initAxis( int a, double scale );
 void initSpindle( );
 
-void getCurPos( tPoint* P );
+void getCurPos( t3DPoint* P );
 void getRawStepPos( int* x, int* y, int* z );
 
 void resetMotorPosition( );
@@ -30,6 +32,6 @@ double getLargestStep( );
 double getSmalestStep( );
 double getMaxDistanceError( );
 
-tStatus doMove( void(*posAtStep)(tPoint*,int,int,void*), int stepCount, double duration, void* pArg );
+tStatus doMove( void(*posAtStep)(t3DPoint*,int,int,void*), int stepCount, double duration, void* pArg );
 
 int setSpindleState( int state );

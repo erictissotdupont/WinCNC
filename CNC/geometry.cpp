@@ -43,7 +43,7 @@ double minOf2( double a, double b )
   return b;
 }
 
-double vector3DLength( tPoint V )
+double vector3DLength( t3DPoint V )
 {
   return sqrt( V.x*V.x + V.y*V.y + V.z*V.z );
 }
@@ -53,9 +53,9 @@ double vectorLength( double U1, double U2 )
   return sqrt( U1*U1 + U2*U2 );
 }
 
-double distance3D( tPoint A, tPoint B )
+double distance3D( t3DPoint A, t3DPoint B )
 {
-  tPoint V;
+  t3DPoint V;
   V.x = A.x - B.x;
   V.y = A.y - B.y;
   V.z = A.z - B.z;
@@ -77,9 +77,9 @@ double dotProduct( double U1, double U2, double V1, double V2 )
   return U1*V1+U2*V2;
 }
 
-void rotateInXYPlane( tPoint* P, tPoint C, double a )
+void rotateInXYPlane( t3DPoint* P, t3DPoint C, double a )
 {
-  tPoint R;
+  t3DPoint R;
   // Translate axis to orign at C
   R.x = P->x - C.x;
   R.y = P->y - C.y;

@@ -12,9 +12,16 @@ tAxis XMotor,YMotor,ZMotor;
 tAxis* pMotor[] = {&XMotor,&YMotor,&ZMotor};
 tSpindle Spindle;
 
+tStatus(*g_pSimulation)(t3DPoint, long, long, long, long, long) = NULL;
+
 void setExportFile( HANDLE file )
 {
-  exportFile = file;
+	exportFile = file;
+}
+
+void setSimulationMode(tStatus(*callback)(t3DPoint, long, long, long, long, long))
+{
+	g_pSimulation = callback;
 }
 
 void resetCompensation( )
@@ -31,7 +38,7 @@ void getCompensation( double* x, double* y, double* z )
   if( z ) *z = ZMotor.cutComp;
 }
 
-void getCurPos( tPoint* P )
+void getCurPos( t3DPoint* P )
 {
   P->x = XMotor.step * XMotor.scale;
   P->y = YMotor.step * YMotor.scale;
@@ -85,7 +92,7 @@ double getSmalestStep( )
 
 double getMaxDistanceError( )
 {
-  tPoint oneStep;
+  t3DPoint oneStep;
   oneStep.x = XMotor.scale;
   oneStep.y = YMotor.scale;
   oneStep.z = ZMotor.scale;
@@ -117,16 +124,19 @@ long getSpindleState( )
   return( Spindle.nextState == 3 );
 }
 
-tStatus doMove( void(*posAtStep)(tPoint*,int,int,void*), int stepCount, double duration, void* pArg )
+tStatus doMove( void(*posAtStep)(t3DPoint*,int,int,void*), int stepCount, double duration, void* pArg )
 {
   int i;
   long x,y,z,d,s;
-  tPoint Ideal;
+  t3DPoint Ideal;
   char str[ 100 ];
   char tmp[ 30 ];
   tStatus status = retNoOutputFound;
  
-  if( stepCount == 0 ) return retUnknownErr;
+  if (stepCount == 0)
+  {
+	  return retUnknownErr;
+  }
 
   duration = duration / stepCount;
   d = (long)(duration * 1000);
@@ -141,16 +151,30 @@ tStatus doMove( void(*posAtStep)(tPoint*,int,int,void*), int stepCount, double d
     z = calculateMove( &ZMotor, Ideal.z );
     s = getSpindleState( );
 
-    strcpy_s( str, sizeof(str), "@" );
-	if (x) { sprintf_s(tmp, sizeof(tmp), "X%ld", x); strcat_s(str, sizeof(str), tmp); }
-	if (y) { sprintf_s(tmp, sizeof(tmp), "Y%ld", y); strcat_s(str, sizeof(str), tmp); }
-	if (z) { sprintf_s(tmp, sizeof(tmp), "Z%ld", z); strcat_s(str, sizeof(str), tmp); }
-	if (d) { sprintf_s(tmp, sizeof(tmp), "D%ld", d); strcat_s(str, sizeof(str), tmp); }
-	if (s >= 0) { sprintf_s(tmp, sizeof(tmp), "S%ld", s); strcat_s(str, sizeof(str), tmp); }
+	if (g_pSimulation)
+	{
+		status = g_pSimulation(Ideal, x, y, z, d, s);
+	}
+	else
+	{
+		strcpy_s(str, sizeof(str), "@");
+		if (x) { sprintf_s(tmp, sizeof(tmp), "X%ld", x); strcat_s(str, sizeof(str), tmp); }
+		if (y) { sprintf_s(tmp, sizeof(tmp), "Y%ld", y); strcat_s(str, sizeof(str), tmp); }
+		if (z) { sprintf_s(tmp, sizeof(tmp), "Z%ld", z); strcat_s(str, sizeof(str), tmp); }
+		if (d) { sprintf_s(tmp, sizeof(tmp), "D%ld", d); strcat_s(str, sizeof(str), tmp); }
+		if (s >= 0) { sprintf_s(tmp, sizeof(tmp), "S%ld", s); strcat_s(str, sizeof(str), tmp); }
 
-	strcat_s(str, sizeof(str), "\n");
-
-    status = sendCommand( str, (long)duration );
+		if (strcmp(str, "@") != 0)
+		{
+			strcat_s(str, sizeof(str), "\n");
+			status = sendCommand(str, (long)duration);
+		}
+		else
+		{
+			// Empty command. Shouldn't happen. Just skip over.
+			status = retSuccess;
+		}
+	}
 
     if( exportFile )
     {
