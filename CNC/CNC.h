@@ -14,6 +14,18 @@
 #include <stdio.h>	// for printf
 
 #include "resource.h"
-
 #include "status.h"
+
+
+typedef struct
+{
+	double blockX;       // Dimension of the block being machined
+	double blockY;
+	double blockZ;       // Z position has no offset 
+	double offsetX;      // Position block relative to initial tool position
+	double offsetY;
+	double offsetZ;
+	double toolRadius;
+	double toolHeight;   // Max cutting height of the tool
+} tMetaData;
 

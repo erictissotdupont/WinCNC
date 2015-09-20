@@ -29,6 +29,10 @@ INT_PTR CALLBACK	About(HWND, UINT, WPARAM, LPARAM);
 // 1/256 of an inch.
 #define SMALL_MOVE ".00390625"
 
+// Information about the part being machined such as size, 
+// tool position and tool size.
+//
+tMetaData g_MetaData;
 
 tStatus parseLine(char* cmd)
 {
@@ -299,6 +303,7 @@ void OnKey(int key)
 	}
 }
 
+
 void OnRunGCode(HWND hWnd)
 {
 	WCHAR szFile[260];       // buffer for file name
@@ -322,15 +327,30 @@ void OnRunGCode(HWND hWnd)
 
 	if (GetOpenFileName(&ofn))
 	{
-		// HalfDome Fine
-//		init3DView(1.0f, 1.0f, 5.25f, 5.25f, 1.5f, 0.005f, 1.0f/32.0f );
 
+		g_MetaData.blockX = 0;
+		g_MetaData.blockY = 0;
+		g_MetaData.blockZ = 0;
+		g_MetaData.offsetX = 0;
+		g_MetaData.offsetY = 0;
+		g_MetaData.offsetZ = 0;
+		g_MetaData.toolRadius = 0;
+		g_MetaData.toolHeight = 0;
+
+		ParseGCodeFile(szFile, preParse );
+
+		// HalfDome Fine
+//      init3DView(1.0f, 1.0f, 5.25f, 5.25f, 1.5f, 0.005f, 1.0f/32.0f );
+		// HalfDome Coarse
+		//init3DView(1.0f, 1.0f, 5.25f, 5.25f, 1.5f, 0.005f, 1.0f/8.0f );
+		
 		// Maximus
-		init3DView(0.0f, 0.0f, 5.0f, 2.0f, 0.0f, 0.005f, /*1.0f/8.0f*/ 1.0f/8.0f);
+		init3DView( 0.005f );
+//		init3DView(0.0f, 0.0f, 5.0f, 2.0f, 0.0f, 0.005f, /*1.0f/8.0f*/ 1.0f/8.0f);
 
 		setSimulationMode( buildPath );
 		
-		ParseGCodeFile(szFile,doGcode);
+		ParseGCodeFile( szFile, doGcode );
 		
 		saveAltitude(L"C:\\Users\\Eric\\Documents\\altitude.dat");
 	}

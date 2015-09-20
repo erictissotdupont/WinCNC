@@ -219,33 +219,22 @@ HRESULT CompileShaderFromFile( WCHAR* szFileName, LPCSTR szEntryPoint, LPCSTR sz
 }
 
 
-
-void UpdateAltitude()
+BOOL UpdateAltitude( )
 {
 	int n = 0;
-	float Xsz = (g_h->dx - 1) * g_h->res; // 6.0f;
-	float Ysz = (g_h->dy - 1) * g_h->res; // 5.0f;
-	float Xoffset = -(Xsz / 2.0f);
-	float Yoffset = -(Ysz / 2.0f);
-	float x, z;
 	DWORD iX, iY;
 
 	n = 0;
 	for (iX = 0; iX<g_h->dx; iX++) for (iY = 0; iY<g_h->dy; iY++)
 	{
-		x = Xoffset + iX * g_h->res;
-		z = Yoffset + iY * g_h->res;
-		vertices[n].Pos = XMFLOAT3(x, 0, z);
+		vertices[n].Pos.y = g_alt[n]; // g_alt[iX*g_h->dy + iY];
 		n++;
 	}
 
 	n = 0;
-	for (iX = 0; iX<g_h->dx; iX++) for (iY = 0; iY<g_h->dy; iY++)
-	{
-		vertices[n++].Pos.y = g_alt[iX*g_h->dy + iY];
-	}
+	BOOL bUpdateScreen = FALSE;
+	BOOL bUpdateVertex;
 
-	n = 0;
 	for (iX = 0; iX < g_h->dx - 1; iX++) for (iY = 0; iY < g_h->dy - 1; iY++)
 	{
 		int a = g_h->dy * iX + iY;
@@ -254,6 +243,16 @@ void UpdateAltitude()
 		int d = c + 1;
 		float l;
 		XMFLOAT3 V1, V2, P;
+
+		/*
+		bUpdateVertex = FALSE;
+		if (vertices[a].Pos.y != g_alt[a]) { vertices[a].Pos.y = g_alt[a]; bUpdateVertex = TRUE; }
+		if (vertices[b].Pos.y != g_alt[b]) { vertices[b].Pos.y = g_alt[b]; bUpdateVertex = TRUE; }
+		if (vertices[c].Pos.y != g_alt[c]) { vertices[c].Pos.y = g_alt[c]; bUpdateVertex = TRUE; }
+		if (vertices[d].Pos.y != g_alt[d]) { vertices[d].Pos.y = g_alt[d]; bUpdateVertex = TRUE; }
+		if (!bUpdateVertex) continue;
+		bUpdateScreen = TRUE;
+		*/
 
 #define CP(u,v)		u.y*v.z - u.z*v.y, u.z*v.x - u.x*v.z, u.x*v.y - u.y*v.x
 #define DP(u,v)		(u.x*v.x + u.y*v.y + u.z*v.z)
@@ -279,6 +278,8 @@ void UpdateAltitude()
 		if (iX == g_h->dx - 1) vertices[c].Normal = P;
 		if (iY == g_h->dy - 1) vertices[b].Normal = P;
 	}
+
+	return bUpdateScreen;
 }
 
 HRESULT LoadAltitudeFile()
@@ -289,10 +290,12 @@ HRESULT LoadAltitudeFile()
 	int n = 0;
 
 	g_hMapFile = OpenFileMapping(
-		FILE_MAP_ALL_ACCESS,   // read/write access
-		FALSE,                 // do not inherit the name
-		g_szAltDataFile);     // name of mapping object
+		FILE_MAP_ALL_ACCESS,      // read/write access
+		FALSE,                    // do not inherit the name
+		g_szAltDataFile);         // name of mapping object
 
+	// If the memory mapped file doesn't exist, assume the parameter is the name of
+	// an actual file (static view). In this case, the update thread won't get started.
 	if (g_hMapFile == NULL)
 	{
 		hFile = CreateFile(g_szAltDataFile, FILE_READ_ACCESS, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
@@ -300,6 +303,7 @@ HRESULT LoadAltitudeFile()
 		{
 			return S_FALSE;
 		}
+	
 		g_h = (header_t*)malloc(sizeof(header_t));
 		ReadFile(hFile, g_h, sizeof(header_t), NULL, NULL);
 
@@ -385,7 +389,23 @@ HRESULT LoadAltitudeFile()
 		}
 	}
 
+	n = 0;
+	float Xsz = (g_h->dx - 1) * g_h->res; // 6.0f;
+	float Ysz = (g_h->dy - 1) * g_h->res; // 5.0f;
+	float Xoffset = -(Xsz / 2.0f);
+	float Yoffset = -(Ysz / 2.0f);
+	float x, z;
+
+	for (iX = 0; iX<g_h->dx; iX++) for (iY = 0; iY<g_h->dy; iY++)
+	{
+		x = Xoffset + iX * g_h->res;
+		z = Yoffset + iY * g_h->res;
+		vertices[n].Pos = XMFLOAT3(x, 0, z);
+		n++;
+	}
+
 	UpdateAltitude( );
+
 	return S_OK;
 }
 
@@ -558,7 +578,8 @@ HRESULT InitDevice()
 
     UINT createDeviceFlags = 0;
 #ifdef _DEBUG
-    createDeviceFlags |= D3D11_CREATE_DEVICE_DEBUG;
+	// Removed to avoid having to install the D3D SDK for Windows 10
+    // createDeviceFlags |= D3D11_CREATE_DEVICE_DEBUG;
 #endif
 
     D3D_DRIVER_TYPE driverTypes[] =

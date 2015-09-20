@@ -56,8 +56,6 @@ float g_res;
 float *g_alt = NULL;
 header_t *g_header = NULL;
 DWORD g_cbAlt = 0;
-float g_szX,g_szY;
-float g_oX, g_oY;
 HANDLE g_hAltFile = NULL;
 HANDLE g_hMapFile = NULL;
 
@@ -66,7 +64,7 @@ DWORD countX,countY;
 struct {
 	int dx;
 	int dy;
-} toolShape[10000];
+} toolShape[1000];
 
 DWORD iToolPoints = 0;
 
@@ -96,7 +94,6 @@ void startViewer(const WCHAR* szFilePath)
 
 void saveAltitude(WCHAR* szFilePath)
 {
-	header_t h;
 	HANDLE hFile;
 
 	hFile = CreateFile(szFilePath, GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, 0, NULL);
@@ -104,28 +101,23 @@ void saveAltitude(WCHAR* szFilePath)
 	if (hFile != INVALID_HANDLE_VALUE)
 	{
 		DWORD dwWritten;
-		WriteFile(hFile, g_header, sizeof(h), &dwWritten, NULL);
+		WriteFile(hFile, g_header, sizeof(g_header), &dwWritten, NULL);
 		WriteFile(hFile, g_alt, g_cbAlt, &dwWritten, NULL);
 		CloseHandle(hFile);
 	}
 }
 
+extern tMetaData g_MetaData;
 const WCHAR szShareMemName[] = L"CNCFileMappingObject";
 
-void init3DView(float oX, float oY, float dX, float dY, float dZ, float res, float toolRadius)
+void init3DView( float res )
 {
 	volatile int err;
 
-	g_szX = dX;
-	g_szY = dY;
-
-	g_oX = oX;
-	g_oY = oY;
-
 	g_res = res;
 
-	countX = 1 + (DWORD)(dX / res);
-	countY = 1 + (DWORD)(dY / res);
+	countX = 1 + (DWORD)(g_MetaData.blockX / res);
+	countY = 1 + (DWORD)(g_MetaData.blockY / res);
 
 	g_cbAlt = sizeof(float) * countX * countY;
 	DWORD cbMap = g_cbAlt + sizeof(header_t);
@@ -164,18 +156,37 @@ void init3DView(float oX, float oY, float dX, float dY, float dZ, float res, flo
 
 	g_alt = (float*)(g_header+1);
 
+	// Set the height of the block for all the vertexes on the surface
 	for (DWORD x = 0; x < countX; x++) for (DWORD y = 0; y < countY; y++)
 	{
-		g_alt[x*countY + y] = dZ;
+		g_alt[x*countY + y] = (float)(g_MetaData.blockZ - g_MetaData.offsetZ);
 	}
 
-	int iRtool = (int)(toolRadius / res);
+	// Set the 4 edges of the array to the zero offset so that the edges of
+	// the block will be rendered. There is a small vertical line artifact 
+	// when the tool crosses the edge of the block but it's acceptable.
+	for (DWORD x = 0; x < countX; x++)
+	{
+		g_alt[x*countY + countY - 1] = (float)-g_MetaData.offsetZ;
+		g_alt[x*countY] = (float)-g_MetaData.offsetZ;
+	}
+	for (DWORD y = 0; y < countY; y++)
+	{
+		g_alt[y] = (float)-g_MetaData.offsetZ;
+		g_alt[(countX - 1)*countY + y] = (float)-g_MetaData.offsetZ;
+	}
+
+	// Fill a matrix that approximates the points the tool will remove over
+	// the surface. This is an optimization to avoid calculating all the points
+	// contained within the tool for every position of the tool motion.
+	//
+	int iRtool = (int)(g_MetaData.toolRadius / res);
 
 	for (int i = 0; i <= iRtool; i++) for (int j = 0; j <= iRtool; j++)
 	{
 		float x = i*res;
 		float y = j*res;
-		if (sqrt(x*x + y*y) <= toolRadius)
+		if (sqrt(x*x + y*y) <= g_MetaData.toolRadius)
 		{
 			toolShape[iToolPoints].dx = i;
 			toolShape[iToolPoints].dy = j;
@@ -183,6 +194,7 @@ void init3DView(float oX, float oY, float dX, float dY, float dZ, float res, flo
 		}
 	}
 
+	// This launches the 3D viewer window
 	startViewer(szShareMemName);
 }
 
@@ -200,7 +212,7 @@ void end3DView()
 	return;
 }
 
-void toolAt(int x, int y, float z)
+inline void toolAt(int x, int y, float z)
 {
 	if (x >= 0 && y >= 0 && x<countX && y<countY)
 	{
@@ -217,8 +229,8 @@ tStatus buildPath(t3DPoint P, long x, long y, long z, long d, long s)
 	static t3DPoint p = { 0.0, 0.0, 0.0 };
 	t3DPoint v = { P.x - p.x, P.y - p.y, P.z - p.z };
 
-	float l = vector3DLength(v);
-	int step = l / g_res;
+	double l = vector3DLength(v);
+	unsigned long step = (unsigned long)(l / g_res);
 	if (step == 0)
 	{
 		step = 1;
@@ -230,23 +242,23 @@ tStatus buildPath(t3DPoint P, long x, long y, long z, long d, long s)
 		v.z = v.z / step;
 	}
 
-	for (int n = 0; n < step; n++)
+	for (unsigned long n = 0; n < step; n++)
 	{
 		p.x += v.x;
 		p.y += v.y;
 		p.z += v.z;
 
-		DWORD iX = (p.x - g_oX) / g_res;
-		DWORD iY = (p.y - g_oY) / g_res;
+		DWORD iX = (DWORD)((p.x - g_MetaData.offsetX) / g_res);
+		DWORD iY = (DWORD)((p.y - g_MetaData.offsetY) / g_res);
 
-		for (int i = 0; i < iToolPoints; i++)
+		for (DWORD i = 0; i < iToolPoints; i++)
 		{
-			toolAt(iX + toolShape[i].dx, iY + toolShape[i].dy, p.z);
+			toolAt(iX + toolShape[i].dx, iY + toolShape[i].dy, (float)p.z);
 			if (i != 0)
 			{
-				toolAt(iX - toolShape[i].dx, iY + toolShape[i].dy, p.z);
-				toolAt(iX - toolShape[i].dx, iY - toolShape[i].dy, p.z);
-				toolAt(iX + toolShape[i].dx, iY - toolShape[i].dy, p.z);
+				toolAt(iX - toolShape[i].dx, iY + toolShape[i].dy, (float)p.z);
+				toolAt(iX - toolShape[i].dx, iY - toolShape[i].dy, (float)p.z);
+				toolAt(iX + toolShape[i].dx, iY - toolShape[i].dy, (float)p.z);
 			}
 		}
 	}
@@ -269,7 +281,11 @@ tStatus buildPath(t3DPoint P, long x, long y, long z, long d, long s)
 	path[pathSteps++] = P;
 	*/
 
-	Sleep(200);
+	// Normal speed
+	//Sleep( d / 1000 );
+	
+	// 3x faster
+	// Sleep(d / 3000);
 
 	return retSuccess;
 }

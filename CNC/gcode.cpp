@@ -522,6 +522,95 @@ void showDistanceInfo()
 	printf(" Compsd:%.4f,%.4f,%.4f\n", compPos.x, compPos.y, compPos.z);
 }
 
+tStatus getMotion(char* cmd, tMotion& M, unsigned long& gotWhat )
+{
+	double val;
+	char* pt;
+
+	if ((pt = strchr(cmd, 'X')) != NULL)
+	{
+		if (sscanf_s(pt + 1, "%lf", &val) != 1) return retInvalidParam;
+		M.X = val;
+		gotWhat |= GOT_X;
+	}
+	if ((pt = strchr(cmd, 'I')) != NULL)
+	{
+		if (sscanf_s(pt + 1, "%lf", &val) != 1) return retInvalidParam;
+		M.I = val;
+		gotWhat |= GOT_X_OFFSET;
+	}
+	if ((pt = strchr(cmd, 'Y')) != NULL)
+	{
+		if (sscanf_s(pt + 1, "%lf", &val) != 1) return retInvalidParam;
+		M.Y = val;
+		gotWhat |= GOT_Y;
+	}
+	if ((pt = strchr(cmd, 'J')) != NULL)
+	{
+		if (sscanf_s(pt + 1, "%lf", &val) != 1) return retInvalidParam;
+		M.J = val;
+		gotWhat |= GOT_Y_OFFSET;
+	}
+	if ((pt = strchr(cmd, 'Z')) != NULL)
+	{
+		if (sscanf_s(pt + 1, "%lf", &val) != 1) return retInvalidParam;
+		M.Z = val;
+		gotWhat |= GOT_Z;
+	}
+	if ((pt = strchr(cmd, 'K')) != NULL)
+	{
+		if (sscanf_s(pt + 1, "%lf", &val) != 1) return retInvalidParam;
+		M.K = val;
+		gotWhat |= GOT_Z_OFFSET;
+	}
+	if ((pt = strchr(cmd, 'D')) != NULL)
+	{
+		if (sscanf_s(pt + 1, "%lf", &val) != 1) return retInvalidParam;
+		cutterRadius = val;
+		gotWhat |= GOT_DIMENSION;
+	}
+	if ((pt = strchr(cmd, 'P')) != NULL)
+	{
+		if (sscanf_s(pt + 1, "%lf", &val) != 1) return retInvalidParam;
+		M.P = val;
+		gotWhat |= GOT_TURN_COUNT;
+	}
+	return retSuccess;
+}
+
+extern tMetaData g_MetaData;
+
+tStatus preParse(char* cmd)
+{
+	char* pt;
+	tMotion M;
+	unsigned long gotWhat = 0;
+	tStatus ret = retSuccess;
+	// Look for indications in Parenthesis (comments) for Block information
+	if(( pt = strchr(cmd, '(')) != NULL)
+	{
+		if (( pt = strstr(cmd, "BLOCK")) != NULL)
+		{
+			ret = getMotion(pt + 5, M, gotWhat);
+			if( gotWhat & GOT_X ) g_MetaData.blockX = M.X;
+			if (gotWhat & GOT_Y) g_MetaData.blockY = M.Y;
+			if (gotWhat & GOT_Z) g_MetaData.blockZ = M.Z;
+		}
+		else if (( pt = strstr( cmd, "START" )) != NULL )
+		{
+			ret = getMotion(pt + 5, M, gotWhat);
+			if (gotWhat & GOT_X) g_MetaData.offsetX = M.X;
+			if (gotWhat & GOT_Y) g_MetaData.offsetY = M.Y;
+			if (gotWhat & GOT_Z) g_MetaData.offsetZ = M.Z;
+		}
+		else if ((pt = strstr(cmd, "TOOL")) != NULL )
+		{
+			ret = getMotion(pt + 4, M, gotWhat);
+			if (gotWhat & GOT_X) g_MetaData.toolRadius = M.X;
+		}
+	}
+	return ret;
+}
 
 tStatus doGcode(char* cmd)
 {
@@ -531,7 +620,7 @@ tStatus doGcode(char* cmd)
 	double val;
 	tMotion M = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
 	int loop;
-	long gotWhat = 0;
+	unsigned long gotWhat = 0;
 	t3DPoint compPos;
 	tStatus ret = retUnknownErr;
 
@@ -557,75 +646,31 @@ tStatus doGcode(char* cmd)
 		while (*pt != 0) { *pt = ' '; pt++; }
 	}
 
-
-	if ((pt = strchr(cmd, 'X' )) != NULL )
+	ret = getMotion(cmd, M, gotWhat);
+	if (ret != retSuccess)
 	{
-		if( sscanf_s( pt+1, "%lf", &val ) != 1 ) return retInvalidParam; 
-		M.X = val;
-		gotWhat |= GOT_X;
-	}
-	if(( pt = strchr( cmd, 'I' )) != NULL )
-	{
-		if( sscanf_s( pt+1, "%lf", &val ) != 1 ) return retInvalidParam; 
-		M.I = val;
-		gotWhat |= GOT_X_OFFSET;
-	}
-	if(( pt = strchr( cmd, 'Y' )) != NULL )
-	{
-		if( sscanf_s( pt+1, "%lf", &val ) != 1 ) return retInvalidParam; 
-		M.Y = val;
-		gotWhat |= GOT_Y;
-	}
-	if(( pt = strchr( cmd, 'J' )) != NULL )
-	{
-		if( sscanf_s( pt+1, "%lf", &val ) != 1 ) return retInvalidParam; 
-		M.J = val;
-		gotWhat |= GOT_Y_OFFSET;
-	}
-	if ((pt = strchr(cmd, 'Z' )) != NULL )
-	{
-		if( sscanf_s( pt+1, "%lf", &val ) != 1 ) return retInvalidParam; 
-		M.Z = val;
-		gotWhat |= GOT_Z;
-	}
-	if(( pt = strchr( cmd, 'K' )) != NULL )
-	{
-		if( sscanf_s( pt+1, "%lf", &val ) != 1 ) return retInvalidParam; 
-		M.K = val;
-		gotWhat |= GOT_Z_OFFSET;
-	}
-	if ((pt = strchr(cmd, 'D' )) != NULL )
-	{
-		if( sscanf_s( pt+1, "%lf", &val ) != 1 ) return retInvalidParam; 
-		cutterRadius = val;
-		gotWhat |= GOT_DIMENSION;
-	}
-	if ((pt = strchr(cmd, 'P' )) != NULL )
-	{
-		if( sscanf_s( pt+1, "%lf", &val ) != 1 ) return retInvalidParam; 
-		M.P = val;
-		gotWhat |= GOT_TURN_COUNT;
+		return ret;
 	}
 
-  if(( pt = strchr( cmd, 'F' )) != NULL )
-  {
-    if( sscanf_s( pt+1, "%lf", &val ) != 1 ) return retInvalidParam; 
-    if( val > 0 )
-    {
-      if( val > MAX_FEED ) 
-      {
-        feedSpeed = MAX_FEED; 
-        printf( "WRN: MAX feed limit %f IMP.\n", MAX_FEED );
-      }
-      else if( val < MIN_FEED )
-      {
-        feedSpeed = MIN_FEED;
-        printf( "WRN: MIN feed limit %f IMP.\n", MIN_FEED );
-      }
-      else feedSpeed = val;
-    }
-    else return retInvalidParam;
-  }
+	if(( pt = strchr( cmd, 'F' )) != NULL )
+	{
+		if( sscanf_s( pt+1, "%lf", &val ) != 1 ) return retInvalidParam; 
+		if( val > 0 )
+		{
+			if( val > MAX_FEED ) 
+			{
+				feedSpeed = MAX_FEED; 
+				printf( "WRN: MAX feed limit %f IMP.\n", MAX_FEED );
+			}
+			else if( val < MIN_FEED )
+			{
+				feedSpeed = MIN_FEED;
+				printf( "WRN: MIN feed limit %f IMP.\n", MIN_FEED );
+			}
+			else feedSpeed = val;
+		}
+		else return retInvalidParam;
+	}
 
   if(( pt = strchr( cmd, 'M' )) != NULL )
   {
