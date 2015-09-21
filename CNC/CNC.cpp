@@ -3,6 +3,7 @@
 
 #include "CNC.h"
 #include <Commdlg.h>
+#include "BasicShapes.h"
 
 #include "motor.h"
 #include "gcode.h"
@@ -280,16 +281,16 @@ void OnKey(int key)
 	switch (key)
 	{
 	case VK_UP:
-		doGcode(RELMOVE"X"SMALL_MOVE);
+		doGcode(RELMOVE "X" SMALL_MOVE);
 		break;
 	case VK_DOWN:
-		doGcode(RELMOVE"X-"SMALL_MOVE);
+		doGcode(RELMOVE "X-" SMALL_MOVE);
 		break;
 	case VK_RIGHT:
-		doGcode(RELMOVE"Y-"SMALL_MOVE);
+		doGcode(RELMOVE "Y-" SMALL_MOVE);
 		break;
 	case VK_LEFT:
-		doGcode(RELMOVE"Y"SMALL_MOVE);
+		doGcode(RELMOVE "Y" SMALL_MOVE);
 		break;
 
 		/*
@@ -383,6 +384,11 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		case IDM_RUN_GCODE:
 			OnRunGCode(hWnd);
 			break;
+
+		case IDM_BASIC_SHAPE:
+			BasicShapes(hWnd);
+			break;
+
 		case IDM_ABOUT:
 			DialogBox(hInst, MAKEINTRESOURCE(IDD_ABOUTBOX), hWnd, About);
 			break;
