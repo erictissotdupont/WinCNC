@@ -12,6 +12,7 @@
 #include <memory.h>
 #include <tchar.h>
 #include <stdio.h>	// for printf
+#include <Strsafe.h>
 
 #include "resource.h"
 #include "status.h"
