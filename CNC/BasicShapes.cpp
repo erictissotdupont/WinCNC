@@ -234,7 +234,7 @@ BOOL CarveCircle(HWND hWnd)
 		D = g_Params.circleDepth;
 		while (D >= NEAR_ZERO )
 		{
-			d = (D > g_Params.cutDepth) ? g_Params.cutDepth : g_Params.cutDepth - D;
+			d = (D > g_Params.cutDepth) ? g_Params.cutDepth : D;
 			D = D - d;
 			// First quarter (9 to 12) while diving by the cut depth
 			sprintf_s(str, MAX_STR, "G2 X%f Y%f I%f Z%f\r\n", r, r, r, -d);
