@@ -12,7 +12,7 @@ extern Motor Y;
 extern Motor Z;
 extern void Move(long,long,long,long);
 extern unsigned int commandCount;
-extern int error;
+extern unsigned int error;
 
 #define LCD_D0  4
 #define LCD_D1  5
@@ -328,7 +328,7 @@ unsigned long LCD_UpdateTask( unsigned long timeWeHave )
         state = ( row == 0 ) ? LCD_StatePrintZ_Part1 : LCD_StatePrintX_Part1;
       break;
     }
-    
+        
     timeItTook = micros() - timeItTook;
     if( timeItTook > maxTimeForState[ curState ] ) maxTimeForState[ curState ] = timeItTook;
     

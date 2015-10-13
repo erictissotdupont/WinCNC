@@ -10,7 +10,7 @@ public :
   long Done( );
   long GetPos( );
   long FakeMove( long s );
-  bool IsEnd( );
+  bool IsAtTheEnd( );
 private :
   long curPos;
   int curDir;
@@ -29,3 +29,5 @@ private :
   long decelTime;
   long decelDist;
 };
+
+#define ERROR_LIMIT 0x00000001

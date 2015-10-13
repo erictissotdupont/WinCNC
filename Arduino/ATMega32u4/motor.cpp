@@ -2,6 +2,8 @@
 #include "helper.h"
 #include "motor.h"
 
+extern unsigned int error;
+
 Motor::Motor( int sp, int dp, int ep, int s )
 {
   stepPin = sp;
@@ -28,7 +30,7 @@ void Motor::Reset( )
   }
 }
 
-bool Motor::IsEnd( )
+bool Motor::IsAtTheEnd( )
 {
   return(( digitalRead( endPin ) == HIGH ) ? true : false );
 }
@@ -43,7 +45,7 @@ long Motor::InitMove( long s, long t )
 {
   int d = swap;
   if( s < 0 ) { 
-    d = -swap; 
+    d = -swap;
     s = -s; 
   }
   
@@ -82,7 +84,6 @@ long Motor::InitMove( long s, long t )
 #define MIN_SPEED    20
 #define MAX_SPEED    600
 #define IMP_TO_NS    24000
-
 
 long Motor::TimeToNextMove( long t )
 {
@@ -124,21 +125,30 @@ long Motor::TimeToNextMove( long t )
 
 long Motor::Move( long t )
 {
-  if( endPin > 0 && digitalRead( endPin ) == HIGH )
+  // Test the end or rail sensor
+  if( digitalRead( endPin ) == HIGH )
   {
-    int maxBackSteps = 1000;
-    
+    int maxBackSteps = 2000;
     // Wait for 200ms
-    delay( 500 );
+    delay( 200 );
     // Reverse the direction    
     SetDirection( -curDir );
     // And backout slowly
     while( maxBackSteps > 0 && digitalRead( endPin ) == HIGH )
     {
-      delay( 5 );
+      delay( 2 );
       digitalWrite( stepPin, maxBackSteps & 1 ? LOW : HIGH );
       maxBackSteps--;
-    }    
+    }
+    if( maxBackSteps > 200 ) maxBackSteps = 200;
+    while( maxBackSteps > 0 )
+    {
+      delay( 2 );
+      digitalWrite( stepPin, maxBackSteps & 1 ? LOW : HIGH );
+      maxBackSteps--;
+    }
+    
+    error |= ERROR_LIMIT;
     return -1;
   }
   

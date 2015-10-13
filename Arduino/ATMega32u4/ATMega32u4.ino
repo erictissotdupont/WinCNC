@@ -5,19 +5,29 @@
 
 // ------------------------------------------------------------------------
 
+// StepPin, DirPin, EndPin, Direction
 Motor X( 13, 12, A5,  1 );  // 13, 12, A5, 1
 Motor Y( 11, 10, A4,  1 );  // 11, 10, A4, 1
 Motor Z(  3,  2, A3,  1 );  //  3,  2, A3, 1
 
 unsigned int commandCount = 0;
-int error = 0;
-int reset = 3;
+unsigned int error = 0;
 
+// ------------------------------------------------------------------------
+// Move the tool position by the specified # of steps by x,y,z
+// Duration of the motion determines the speed. d is in microseconds
+//
 void Move( long x, long y, long z, long d )
 {
   long s;
   long t = 0;
   long tX,tY,tZ;
+  
+  // If in error state, no move
+  if( error )
+  {
+    return;
+  }
   
   // No movement means dwell
   if( x==0 && y==0 && z==0 )
@@ -37,14 +47,9 @@ void Move( long x, long y, long z, long d )
     // Finds which of the non negative wait time is the shortest
     s = minOf3( tX, tY, tZ );
     
-    // Debug stuff to check for errors
-    if( s <= 0 )
-    {
-      DebugPulse( 7 );
-    }
-
     // Accumulate the sleep time (ignores processing time)
     t = t + s;
+
     // Remove the sleep time from each axis
     tX = tX - s;
     tY = tY - s;
@@ -82,13 +87,12 @@ void Move( long x, long y, long z, long d )
   } while(( tX > 0 ) || ( tY > 0 ) || ( tZ > 0 ));
 
   // Check proper distance was achieved for debug purpose.
+  /*
   if( X.Remain( ) != 0 || Y.Remain( ) != 0 || Z.Remain( ) != 0 )
   {
-    error = 1;
-    reset = 3;
-    LCD_SetStatus( "ERR", 3 );
-    // DebugPulse( 5 );
+    DebugPulse( 5 );
   }
+  */
 }
 
 void Decode( char c )
@@ -103,6 +107,7 @@ void Decode( char c )
   static int SOF = 0;
   static long *pt = NULL;
   static long nextIndex = 0;
+  static int reset = 3;
   
   if( reset == 0 )
   {   
@@ -207,7 +212,6 @@ void Decode( char c )
 
 void setup() {
  
-  reset = 3;
   error = 0;
   
   delay( 250 );
@@ -226,15 +230,27 @@ void setup() {
   Z.Reset( );
 }
 
+// ------------------------------------------------------------------------
+
 void loop() 
 {
   while(Serial1.available( ) > 0 )
   {
     Decode(Serial1.read( ));
   }
-  LCD_UpdateTask( 100000 );
+  // Refresh the LCD outside of the move loop
+  LCD_UpdateTask( 1000 );
+  // Scan the keyboard
   LCD_ButtonTask( );
+  if( error )
+  {
+    LCD_SetStatus( "ERR", 0 );
+  }
+  else
+  {
+    LCD_SetStatus( X.IsAtTheEnd( ) ? "X" : " ", 0 );
+    LCD_SetStatus( Y.IsAtTheEnd( ) ? "Y" : " ", 1 );
+    LCD_SetStatus( Z.IsAtTheEnd( ) ? "Z" : " ", 2 );
+  }
 }
-
-
 
