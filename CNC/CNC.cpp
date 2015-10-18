@@ -305,7 +305,7 @@ void OnKey(int key)
 }
 
 
-void OnRunGCode(HWND hWnd)
+void OnRunGCode(HWND hWnd,BOOL bSimulate)
 {
 	WCHAR szFile[260];       // buffer for file name
 	OPENFILENAME ofn;
@@ -328,32 +328,25 @@ void OnRunGCode(HWND hWnd)
 
 	if (GetOpenFileName(&ofn))
 	{
+		if (bSimulate)
+		{
+			g_MetaData.blockX = 0;
+			g_MetaData.blockY = 0;
+			g_MetaData.blockZ = 0;
+			g_MetaData.offsetX = 0;
+			g_MetaData.offsetY = 0;
+			g_MetaData.offsetZ = 0;
+			g_MetaData.toolRadius = 0;
+			g_MetaData.toolHeight = 0;
 
-		g_MetaData.blockX = 0;
-		g_MetaData.blockY = 0;
-		g_MetaData.blockZ = 0;
-		g_MetaData.offsetX = 0;
-		g_MetaData.offsetY = 0;
-		g_MetaData.offsetZ = 0;
-		g_MetaData.toolRadius = 0;
-		g_MetaData.toolHeight = 0;
+			ParseGCodeFile(szFile, preParse);
 
-		ParseGCodeFile(szFile, preParse );
+			init3DView(0.005f);
 
-		// HalfDome Fine
-//      init3DView(1.0f, 1.0f, 5.25f, 5.25f, 1.5f, 0.005f, 1.0f/32.0f );
-		// HalfDome Coarse
-		//init3DView(1.0f, 1.0f, 5.25f, 5.25f, 1.5f, 0.005f, 1.0f/8.0f );
-		
-		// Maximus
-		init3DView( 0.005f );
-//		init3DView(0.0f, 0.0f, 5.0f, 2.0f, 0.0f, 0.005f, /*1.0f/8.0f*/ 1.0f/8.0f);
-
-		setSimulationMode( buildPath );
+			setSimulationMode(buildPath);
+		}
 		
 		ParseGCodeFile( szFile, doGcode );
-		
-		saveAltitude(L"C:\\Users\\Eric\\Documents\\altitude.dat");
 	}
 }
 
@@ -382,7 +375,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		switch (wmId)
 		{
 		case IDM_RUN_GCODE:
-			OnRunGCode(hWnd);
+			OnRunGCode(hWnd,false);
+			break;
+		case IDM_SIMULATE_GCODE:
+			OnRunGCode(hWnd, true);
 			break;
 
 		case IDM_BASIC_SHAPE:

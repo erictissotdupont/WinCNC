@@ -37,25 +37,29 @@ thread.start_new_thread( broadcast, ( ))
 def receive( c ):
   global cmdCount
   cmdCount = 0
-  while 1:
+  while connected:
     try:
       data = c.recv(BUFFER_SIZE)
     except IOError:
-      q.put('C')
+      print 'IO Error from host.'
       break
-    
     if not data:
-      q.put('C')
+      print 'No data from host.'
       break
+
     for line in string.split(data, '\n'):
-      if not line: break
-      #print " Command:",line
+      if not line:
+        # Got empty line from host. Just ignore.
+        break
       cmdCount = cmdCount + 1
       q.put(line+'\n')
     q.put('A')
 
+  # This will close the connection
+  q.put('C')
+
 try:
-  t=serial.Serial('/dev/ttyATH0',500000,timeout=60)
+  t=serial.Serial('/dev/ttyATH0',500000,timeout=10)
   t.flushOutput()
   t.flushInput()
 except IOError:
@@ -71,71 +75,52 @@ while 1:
   conn, addr = s.accept()
   print 'Connection from:', addr
   connected=True
+  q.queue.clear()
   thread.start_new_thread( receive, (conn,))
 
   rsp=''
 
-  if not t:
-    while 1:
-      cmd = q.get()
-      if( cmd=='C' ): break
-      if( cmd=='A' ):
-        try:
-          conn.send(rsp)
-          rsp=''
-        except socket.error, msg:
-          break
-      else:
-        sys.stdout.write("%03d %s     \r" % (q.qsize(),cmd.rstrip('\n')))
-        sys.stdout.flush()
-        if( cmd=='RST\n' ) :
-          rsp = 'HLO'
-        else : 
-          rsp=rsp+'O'
-          time.sleep(0.01)
+  t.flushOutput()
+  t.flushInput()
+  while 1:
+    cmd = q.get()
 
-  else:
-    t.flushOutput()
-    t.flushInput()
-    while 1:
-      cmd = q.get()
-      if( cmd=='C' ):break
-      if( cmd=='A' ):
-        try:
-          #print " Ack:",rsp
-          conn.send(rsp)
-          rsp=''
-        except socket.error, msg:
-          break
-      else:
-        # print ' Command:',cmd
-        retry = 0
-        while 1:
-          t.write(cmd)        
-          c=t.read(1)
-          if( c != 'E' ): break
-          time.sleep(0.1)
-          t.flushInput()
-          print 'Command Retry:',cmd
-          retry=retry+1
-          if( retry >= 3 ): break
-
-        if( c == 'E' ):
-          print 'Retry failed.'
-          break
+    if( cmd=='C' ):
+      # The termination request comes from receiving thread
+      break
+    if( cmd=='A' ):
+      # This a request to send agreagated response from ATMega to the host
+      try:
+        conn.send(rsp)
+        rsp=''
+      except socket.error, msg:
+        print 'Socket error from host.'
+        break
+    else:
+      # Everything else gets sent down to the ATMega expecting a response
+      retry = 0
+      t.write(cmd)
+      c=t.read(1)
+      if not c:
+        print 'Response timeout.'
+        break
         
-        if( c == 'O' ): 
+      if( c == 'O' ):
+        # Basic GCode command acknowledge
+        rsp=rsp+c
+        ackCount = ackCount + 1
+      else:
+        # String response
+        while(c and c != '\n'):
           rsp=rsp+c
-          ackCount = ackCount + 1
-        else: 
-          while(c != '\n'):
-            #print 'Got:'+c
-            rsp=rsp+c
-            c=t.read(1)
-          ackCount = ackCount + 1
+          c=t.read(1)
+          if not c:
+	    print 'Response timeout.'
+            break
+        if c: ackCount = ackCount + 1
 
-      # sys.stdout.write("%06d-%06d %d \r" % (cmdCount,ackCount,cmdCount-ackCount))
-      # sys.stdout.flush()
+    sys.stdout.write("%06d-%06d %d \r" % (cmdCount,ackCount,cmdCount-ackCount))
+    sys.stdout.flush()
 
   while not q.empty(): q.get()
   conn.close()
