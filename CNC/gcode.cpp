@@ -31,6 +31,13 @@ double feedSpeed = 30; // Inches per minute
 double cutterRadius = 0;
 int spindle = 0;
 
+void getTheoricalPos( float* x, float* y, float* z)
+{
+	if(x) *x = theoricalPos.x;
+	if(y) *y = theoricalPos.y;
+	if(z) *z = theoricalPos.z;
+}
+
 void getCompPos( t3DPoint* P )
 {
   double cX,cY,cZ;

@@ -1,5 +1,7 @@
 #include "CNC.h"
 #include "geometry.h"
+#include "gcode.h"
+#include <wchar.h>
 
 DWORD pathSteps;
 DWORD maxPathSteps;
@@ -32,14 +34,34 @@ const t3DPoint vu3DX = { 1, 0, 0 };
 const t3DPoint vu3DY = { 0, 1, 0 };
 const t3DPoint vu3DZ = { 0, 0, 1 };
 
+#define MARGIN 10
+#define STATUS_WIDTH	800
+#define STATUS_HEIGHT	200
+
 void OnPaint(HWND hWnd, HDC hdc)
 {
-	MoveTo3D(hdc, O3D);
-	LineTo3D(hdc, vu3DX);
-	MoveTo3D(hdc, O3D);
-	LineTo3D(hdc, vu3DY);
-	MoveTo3D(hdc, O3D);
-	LineTo3D(hdc, vu3DZ);
+	float x, y, z;
+	RECT view;
+	RECT rect;
+	HFONT font;
+	WCHAR str[100];
+
+	GetClientRect( hWnd, &view);
+
+	int statusHeight = (view.bottom - view.top - (MARGIN * 2)) / 2;
+
+	rect.left = view.left + MARGIN;
+	rect.right = rect.left + STATUS_WIDTH;
+	rect.top = view.top + MARGIN;
+	rect.bottom = rect.top + statusHeight;
+
+	font = CreateFont(statusHeight/3, 0, 0, 0, FW_REGULAR, false, false, false, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH, L"Arial");
+	SelectObject(hdc, font);
+	getTheoricalPos(&x, &y, &z);
+	swprintf( str, 100, L"X:%.4f\r\nY:%.4f\r\nZ:%.4f", x,y,z );
+	DrawText(hdc, str, -1, &rect, 0);
+
+	DeleteObject(font);
 }
 
 typedef struct
