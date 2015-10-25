@@ -295,7 +295,7 @@ void BasicShapeOneCommand(HWND hWnd)
 	if (cmd)
 	{
 		GetWindowTextA(hItem, cmd, l);
-		ParseBuffer(cmd, doGcode);
+		ParseBuffer(hWnd, cmd, l, doGcode);
 		free(cmd);
 	}
 }

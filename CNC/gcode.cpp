@@ -692,6 +692,9 @@ tStatus doGcode(char* cmd)
       case 3 :
         if( setSpindleState( 3 )) gotWhat |= GOT_SPINDLE;
         break;
+	  // M114 : Get Position
+	  case 114 :
+		  return CheckStatus();
       default:
         return retInvalidParam;
     } 

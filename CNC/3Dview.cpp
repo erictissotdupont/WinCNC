@@ -13,6 +13,8 @@ t2DPoint vuX = { 100, 0 };
 t2DPoint vuY = { 60, -40 };
 t2DPoint vuZ = { 0, -100 };
 
+extern t3DPoint g_displayPos;
+
 void MoveTo3D(HDC hdc, t3DPoint p)
 {
 	int x,y;
@@ -40,7 +42,6 @@ const t3DPoint vu3DZ = { 0, 0, 1 };
 
 void OnPaint(HWND hWnd, HDC hdc)
 {
-	float x, y, z;
 	RECT view;
 	RECT rect;
 	HFONT font;
@@ -57,8 +58,14 @@ void OnPaint(HWND hWnd, HDC hdc)
 
 	font = CreateFont(statusHeight/3, 0, 0, 0, FW_REGULAR, false, false, false, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH, L"Arial");
 	SelectObject(hdc, font);
-	getTheoricalPos(&x, &y, &z);
-	swprintf( str, 100, L"X:%.4f\r\nY:%.4f\r\nZ:%.4f", x,y,z );
+	//getTheoricalPos(&x, &y, &z);
+	//swprintf( str, 100, L"X:%.4f\r\nY:%.4f\r\nZ:%.4f", x,y,z );
+
+	swprintf(str, 100, L"X:%.4f\r\nY:%.4f\r\nZ:%.4f",
+		g_displayPos.x,
+		g_displayPos.y,
+		g_displayPos.z);
+
 	DrawText(hdc, str, -1, &rect, 0);
 
 	DeleteObject(font);

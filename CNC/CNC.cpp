@@ -35,6 +35,8 @@ INT_PTR CALLBACK	About(HWND, UINT, WPARAM, LPARAM);
 //
 tMetaData g_MetaData;
 
+t3DPoint g_displayPos;
+
 tStatus parseLine(char* cmd)
 {
 	tStatus ret = retSuccess;
@@ -157,6 +159,23 @@ tStatus parseLine(char* cmd)
 	return ret;
 }
 
+void UpdatePosition( HWND hWnd, char* str )
+{
+	int x, y, z;
+	
+	char* pt;
+	pt = strchr(str, 'X');
+	if (pt) sscanf_s(pt + 1, "%d", &x);
+	pt = strchr(str, 'Y');
+	if (pt) sscanf_s(pt + 1, "%d", &y);
+	pt = strchr(str, 'Z');
+	if (pt) sscanf_s(pt + 1, "%d", &z);
+
+//	stepToPos(x, y, z, &g_displayPos );
+
+//	InvalidateRgn(hWnd, NULL, false);
+
+}
 
 void OnSocketEvent(CNC_SOCKET_EVENT event, PVOID param)
 {
@@ -165,9 +184,11 @@ void OnSocketEvent(CNC_SOCKET_EVENT event, PVOID param)
 	case CNC_CONNECTED:
 		SetWindowTextA(hMainWindow, (char*)param);
 		break;
+	case CNC_RESPONSE:
+		UpdatePosition(hMainWindow, (char*)param);
+		break;
 	}
 }
-
 
 int APIENTRY _tWinMain(_In_ HINSTANCE hInstance,
                      _In_opt_ HINSTANCE hPrevInstance,
@@ -271,6 +292,8 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
    ShowWindow(hMainWindow, nCmdShow);
    UpdateWindow(hMainWindow);
 
+   SetTimer(hMainWindow, 0, 30, NULL);
+
    return TRUE;
 }
 
@@ -339,14 +362,14 @@ void OnRunGCode(HWND hWnd,BOOL bSimulate)
 			g_MetaData.toolRadius = 0;
 			g_MetaData.toolHeight = 0;
 
-			ParseGCodeFile(szFile, preParse);
+			ParseGCodeFile(hWnd, szFile, preParse);
 
 			init3DView(0.005f);
 
 			setSimulationMode(buildPath);
 		}
 		
-		ParseGCodeFile( szFile, doGcode );
+		ParseGCodeFile( hWnd, szFile, doGcode );
 	}
 }
 
@@ -399,6 +422,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		hdc = BeginPaint(hWnd, &ps);
 		OnPaint(hWnd, hdc);
 		EndPaint(hWnd, &ps);
+		break;
+	case WM_TIMER:
+		getCurPos(&g_displayPos);
+		InvalidateRgn(hWnd, NULL, false);
 		break;
 	case WM_DESTROY:
 		PostQuitMessage(0);

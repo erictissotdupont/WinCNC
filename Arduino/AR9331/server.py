@@ -94,7 +94,8 @@ while 1:
         conn.send(rsp)
         rsp=''
       except socket.error, msg:
-        print 'Socket error from host.'
+        print 'Socket error sending to host.'
+		# This will cause the socket to be closed
         break
     else:
       # Everything else gets sent down to the ATMega expecting a response
@@ -105,18 +106,20 @@ while 1:
         print 'Response timeout.'
         break
         
-      if( c == 'O' ):
-        # Basic GCode command acknowledge
+      if( c == 'O' or c == 'E' ):
+        # Command OKAYed or ERROR
         rsp=rsp+c
         ackCount = ackCount + 1
       else:
-        # String response
-        while(c and c != '\n'):
-          rsp=rsp+c
-          c=t.read(1)
+        # String response. Wait for line return.
+        while 1:
           if not c:
-	    print 'Response timeout.'
+            print 'Response timeout.'
             break
+          rsp=rsp+c
+          if c == '\n':
+            break
+          c=t.read(1)
         if c: ackCount = ackCount + 1
 
     sys.stdout.write("%06d-%06d %d \r" % (cmdCount,ackCount,cmdCount-ackCount))

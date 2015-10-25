@@ -18,9 +18,13 @@
 #define TIMEPIPESIZE	  MAXINPIPE + 10
 
 #define IPSTRSIZE         80
+#define MAX_RESPONSE	  80
 
 void(*g_pNotifCallback)(CNC_SOCKET_EVENT, PVOID) = NULL;
 char cncIP[IPSTRSIZE];
+char response[MAX_RESPONSE];
+int rspCnt = 0;
+HANDLE hResponseReceived = NULL;
 int bConnected = 0;
 int bRun = 1;
 
@@ -60,13 +64,12 @@ tStatus sendCommand( char* cmd, unsigned long d )
   int bl;
 
   if (!bConnected ) return retCncNotConnected;
-  if( errCount ) return retCncError;
   if( cmd == NULL ) return retInvalidParam;
   if( cl > MSGBUFSIZE ) return retInvalidParam;
 
   // Don't push more than 5 seconds worth of commands in the pipe
   timeout = (60 * 1000) / MSGPERIOD;
-  while(( getDurationOfCommandsInPipe( ) > 5000 ) && timeout-- ) Sleep( MSGPERIOD );
+  while(( getDurationOfCommandsInPipe( ) > 5000 ) && timeout-- && errCount == 0 ) Sleep( MSGPERIOD );
 
   // If the command can't fit in the current buffer
   if(( strlen( outBuffer ) + cl + 1 ) >= MSGBUFSIZE )
@@ -74,12 +77,16 @@ tStatus sendCommand( char* cmd, unsigned long d )
     timeout = (60 * 1000) / MSGPERIOD;
     // Wait for the buffer to be empty (1 min timeout)
     // printf( "outBuffer is full...\n" );
-    while( outBuffer[0] != 0 && timeout-- > 0 ) Sleep( MSGPERIOD );
+    while( outBuffer[0] != 0 && timeout-- > 0 && errCount == 0 ) Sleep( MSGPERIOD );
     if( timeout <= 0 )
     {
       printf( "Timeout on TX\n" );
       return retCncCommError;
     }
+  }
+  if (errCount)
+  {
+	  return retCncError;
   }
 
   WaitForSingleObject(mutexBuffer, INFINITE);
@@ -103,7 +110,6 @@ tStatus sendCommand( char* cmd, unsigned long d )
   return retSuccess;
 }
 
-
 void* receiverThread( void* arg )
 {
   int nbytes;
@@ -112,7 +118,7 @@ void* receiverThread( void* arg )
   SOCKET cnc = (SOCKET)arg;
 
   bConnected = true;
-
+  rspCnt = 0;
   if (g_pNotifCallback) g_pNotifCallback(CNC_CONNECTED, cncIP);
 
   while( bRun )
@@ -123,16 +129,31 @@ void* receiverThread( void* arg )
 	  bRun = false;
     }
     tmp = 0;
-    while( nbytes>0 )
-    {
-      switch( msgbuf[--nbytes] )
+	for (int i = 0; i < nbytes;i++)
+	{
+      switch( msgbuf[i] )
       {
       case 'O' : ackCount++;
-         tmp += timePipe[ timePipeOutIdx++ ];  
-         if( timePipeOutIdx >= TIMEPIPESIZE ) timePipeOutIdx = 0;
+		tmp += timePipe[ timePipeOutIdx++ ];  
+		if( timePipeOutIdx >= TIMEPIPESIZE ) timePipeOutIdx = 0;
+		rspCnt = 0;
         break;
-      case 'E' : errCount++; break;
-      case 'T' : errCount++; break;
+      case 'E' : 
+		errCount++;
+		rspCnt = 0;
+		break;
+	  default:
+		  if (rspCnt < MAX_RESPONSE)
+		  {
+			  response[rspCnt++] = msgbuf[i];
+			  if (msgbuf[i] == '\n')
+			  {
+				  response[rspCnt++] = 0;
+				  SetEvent(hResponseReceived);
+				  if (g_pNotifCallback) g_pNotifCallback(CNC_RESPONSE, response );				  
+				  rspCnt = 0;
+			  }
+		  }
       }
     }
 	WaitForSingleObject(mutexBuffer,INFINITE);
@@ -143,6 +164,32 @@ void* receiverThread( void* arg )
   bConnected = false;
 
   return NULL;
+}
+
+tStatus waitForStatus( )
+{
+	tStatus ret = retCncError;
+	char* pt;
+
+	switch (WaitForSingleObject( hResponseReceived, 10000 ))
+	{
+	case WAIT_OBJECT_0 :
+		pt = strchr( response, 'S');
+		if (pt)
+		{
+			int errorLevel;
+			if (sscanf_s(pt + 1, "%d", &errorLevel) == 1)
+			{
+				if (errorLevel == 0) ret = retSuccess;
+			}
+		}
+		break;
+	case WAIT_TIMEOUT :
+		ret = retCncCommError;
+		break;
+	}
+
+	return ret;
 }
 
 wchar_t sockErrStr[260];
@@ -218,7 +265,7 @@ DWORD senderThread(PVOID pParam)
 	}
 
 	msg[cnt] = 0;
-	if (strcmp(msg, "HLO") != 0) {
+	if (strcmp(msg, "HLO\n") != 0) {
 		return 1;
 	}
 
@@ -315,6 +362,7 @@ int initSocketCom(void(*callback)(CNC_SOCKET_EVENT, PVOID))
   memset( outBuffer, 0, sizeof( outBuffer ));
 
   mutexBuffer = CreateMutex(NULL, FALSE, NULL);
+  hResponseReceived = CreateEvent(NULL, FALSE, FALSE, NULL);
 
   g_pNotifCallback = callback;
 

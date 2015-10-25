@@ -18,6 +18,7 @@ void setSimulationMode(tStatus(*callback)(t3DPoint, long, long, long, long, long
 void initAxis( int a, double scale );
 void initSpindle( );
 
+void stepToPos(long x, long y, long z, t3DPoint* P);
 void getCurPos( t3DPoint* P );
 void getRawStepPos( int* x, int* y, int* z );
 
@@ -35,3 +36,5 @@ double getMaxDistanceError( );
 tStatus doMove( void(*posAtStep)(t3DPoint*,int,int,void*), int stepCount, double duration, void* pArg );
 
 int setSpindleState( int state );
+
+tStatus CheckStatus( );

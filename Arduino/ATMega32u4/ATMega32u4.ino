@@ -116,7 +116,7 @@ void Decode( char c )
       if( SOF == 0 ) SOF = 1;
       else
       {
-        Serial.write( 'E' );
+        error |= ERROR_SYNTAX;
       }
     }
     else if( SOF )
@@ -130,21 +130,23 @@ void Decode( char c )
       else if( c >= '0' && c <= '9' )
       {
         if( pt ) *pt = *pt * 10 + ( c - '0' ) * sign;
-        else Serial.write( 'E' );
+        else error |= ERROR_NUMBER;
       }    
       else if( c == '\n' )
-      {
-        if( s >= 0 ) digitalWrite(TOOL_ON_REPLAY, s ? HIGH : LOW);
+      {        
+        Serial1.write( error ? 'E' : 'O' );
         
+        if( s >= 0 )
+        {
+          digitalWrite(TOOL_ON_REPLAY, s ? HIGH : LOW);
+        }
+ 
         if( x != 0 || y != 0 || z != 0 || d != 0 )
         {
           commandCount += 1;
-          Serial1.write( 'O' );
           Move( x,y,z,d );
         }
-        else if( s >= 0 ) Serial1.write( 'O' );
-        else Serial.write( 'E' ); 
-        
+            
         x=0;
         y=0;
         z=0;
@@ -157,7 +159,7 @@ void Decode( char c )
       }
       else
       {
-        Serial.write( 'E' );
+        error |= ERROR_SYNTAX;
       }
     }
     else if( c == 'R' )
@@ -173,6 +175,8 @@ void Decode( char c )
       Serial1.print( Y.GetPos( ));
       Serial1.print( "Z" );
       Serial1.print( Z.GetPos( ));
+      Serial1.print( "S" );
+      Serial1.print( error );
       Serial1.print( "\n" );
     }
     else if( c != 0 && c != '\n' )

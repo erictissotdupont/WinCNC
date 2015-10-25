@@ -30,4 +30,3 @@ private :
   long decelDist;
 };
 
-#define ERROR_LIMIT 0x00000001

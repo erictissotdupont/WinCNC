@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include "CNC.h"
 #include "helper.h"
 #include "motor.h"
 

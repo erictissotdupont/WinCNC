@@ -38,11 +38,16 @@ void getCompensation( double* x, double* y, double* z )
   if( z ) *z = ZMotor.cutComp;
 }
 
+void stepToPos(long x, long y, long z, t3DPoint* P)
+{
+	P->x = x * XMotor.scale;
+	P->y = y * YMotor.scale;
+	P->z = z * ZMotor.scale;
+}
+
 void getCurPos( t3DPoint* P )
 {
-  P->x = XMotor.step * XMotor.scale;
-  P->y = YMotor.step * YMotor.scale;
-  P->z = ZMotor.step * ZMotor.scale;
+	stepToPos(XMotor.step, YMotor.step, ZMotor.step, P);
 }
 
 void getRawStepPos( int* x, int* y, int* z )
@@ -187,4 +192,16 @@ tStatus doMove( void(*posAtStep)(t3DPoint*,int,int,void*), int stepCount, double
   }
 
   return status;
+}
+
+
+tStatus CheckStatus()
+{
+	tStatus ret;
+	ret = sendCommand( "S\n", 1000);
+	if (ret == retSuccess)
+	{
+		ret = waitForStatus( );
+	}
+	return ret;
 }
