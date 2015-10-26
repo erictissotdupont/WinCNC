@@ -13,6 +13,7 @@ typedef struct {
 	HWND hDialog;
 	HANDLE hThread;
 	BOOL bStop;
+	BOOL bPause;
 } tParserJob;
 
 #define PROGRESS_RES 512
@@ -43,16 +44,19 @@ DWORD ParserThread(PVOID pParam)
 		{
 			if ((pJob->status = pJob->cmd(pt)) != retSuccess) break;
 
-			if (pJob->hDialog) PostMessage(pJob->hDialog, WM_USER, progress, (LPARAM)pt);
+			if (pJob->hDialog) PostMessage(pJob->hDialog, WM_UPDATE_PROGRESS, progress, (LPARAM)pt);
 		}
 		pt = eol;
+
+		while (pJob->bPause && !pJob->bStop) Sleep(500);
 	}
-	if (pJob->status == retSuccess)
+
+	if (pJob->status == retSuccess )
 	{
 		pJob->status = pJob->cmd("M114\n");
 	}
 
-	if (pJob->hDialog) PostMessage(pJob->hDialog, WM_USER, PROGRESS_RES, 0);
+	if (pJob->hDialog) PostMessage(pJob->hDialog, WM_UPDATE_PROGRESS, PROGRESS_RES, 0);
 	Sleep(250);
 	pJob->bStop = true;
 	if (pJob->hDialog) PostMessage(pJob->hDialog, WM_CLOSE, 0, 0);
@@ -79,6 +83,13 @@ void ParserInit(HWND hWnd)
 	job.hDialog = hWnd;
 }
 
+void ParserOnPause(HWND hWnd)
+{
+	HWND hItem = GetDlgItem(hWnd, IDD_PAUSE);
+	job.bPause = !job.bPause;
+	SetWindowText(hItem, job.bPause ? L"RESUME" : L"PAUSE" );
+}
+
 BOOL CALLBACK FileParserProc(HWND hWnd,
 	UINT message,
 	WPARAM wParam,
@@ -86,7 +97,7 @@ BOOL CALLBACK FileParserProc(HWND hWnd,
 {
 	switch (message)
 	{
-	case WM_USER :
+	case WM_UPDATE_PROGRESS:
 		ParserUpdate(hWnd,wParam,lParam);
 		break;
 	case WM_INITDIALOG:
@@ -100,6 +111,9 @@ BOOL CALLBACK FileParserProc(HWND hWnd,
 	case WM_COMMAND:
 		switch (LOWORD(wParam))
 		{
+		case IDD_PAUSE:
+			ParserOnPause(hWnd);
+			break;
 		case IDOK:
 			// Fall through.
 		case IDCANCEL:
@@ -168,7 +182,7 @@ tStatus ParseBuffer( HWND hParent, char* pt, ULONG cbBuffer, tStatus(*cmd)(char*
 		hParent,
 		(DLGPROC)FileParserProc);
 
-	if (job.status != retSuccess)
+	if (job.status != retSuccess && job.status != retPreParseComplete )
 	{
 		MessageBox(hParent, GetCNCErrorString(job.status), L"GCode", MB_OK | MB_ICONERROR);
 	}

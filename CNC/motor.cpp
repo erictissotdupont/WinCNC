@@ -194,14 +194,16 @@ tStatus doMove( void(*posAtStep)(t3DPoint*,int,int,void*), int stepCount, double
   return status;
 }
 
-
 tStatus CheckStatus()
 {
-	tStatus ret;
-	ret = sendCommand( "S\n", 1000);
-	if (ret == retSuccess)
+	tStatus ret = retSuccess;
+	if (g_pSimulation == NULL)
 	{
-		ret = waitForStatus( );
+		ret = sendCommand("S\n", 1000);
+		if (ret == retSuccess)
+		{
+			ret = waitForStatus();
+		}
 	}
 	return ret;
 }

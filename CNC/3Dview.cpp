@@ -2,10 +2,13 @@
 #include "geometry.h"
 #include "gcode.h"
 #include <wchar.h>
+#include <mmsystem.h>
 
 DWORD pathSteps;
 DWORD maxPathSteps;
 t3DPoint *path;
+
+extern HWND hMainWindow;
 
 POINT O = { 50, 500 };
 
@@ -40,16 +43,34 @@ const t3DPoint vu3DZ = { 0, 0, 1 };
 #define STATUS_WIDTH	800
 #define STATUS_HEIGHT	200
 
-void OnPaint(HWND hWnd, HDC hdc)
+void OnPaint(HWND hWnd)
 {
 	RECT view;
 	RECT rect;
 	HFONT font;
 	WCHAR str[100];
+	HDC hdcMem;
+	HBITMAP hbmMem;
+	HANDLE hOld;
+	PAINTSTRUCT ps;
+	HDC hdc;
+	int height,width;
 
-	GetClientRect( hWnd, &view);
+	hdc = BeginPaint(hWnd, &ps);
 
-	int statusHeight = (view.bottom - view.top - (MARGIN * 2)) / 2;
+	GetClientRect(hWnd, &view);
+	width = view.right - view.left;
+	height = view.bottom - view.top;
+
+	// Create an off-screen DC for double-buffering
+	hdcMem = CreateCompatibleDC(hdc);
+	hbmMem = CreateCompatibleBitmap(hdc, width, height);
+	hOld = SelectObject(hdcMem, hbmMem);
+	// Comes black by default. Clear the memory DC with a white brush.
+	HBRUSH hBrush = CreateSolidBrush(GetBkColor(hdcMem));
+	FillRect(hdcMem, &view, hBrush);
+
+	int statusHeight = (height - (MARGIN * 2)) / 2;
 
 	rect.left = view.left + MARGIN;
 	rect.right = rect.left + STATUS_WIDTH;
@@ -57,18 +78,26 @@ void OnPaint(HWND hWnd, HDC hdc)
 	rect.bottom = rect.top + statusHeight;
 
 	font = CreateFont(statusHeight/3, 0, 0, 0, FW_REGULAR, false, false, false, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH, L"Arial");
-	SelectObject(hdc, font);
-	//getTheoricalPos(&x, &y, &z);
-	//swprintf( str, 100, L"X:%.4f\r\nY:%.4f\r\nZ:%.4f", x,y,z );
+	SelectObject(hdcMem, font);
 
 	swprintf(str, 100, L"X:%.4f\r\nY:%.4f\r\nZ:%.4f",
 		g_displayPos.x,
 		g_displayPos.y,
 		g_displayPos.z);
 
-	DrawText(hdc, str, -1, &rect, 0);
+	DrawText(hdcMem, str, -1, &rect, 0);
 
 	DeleteObject(font);
+
+	// Transfer the off-screen DC to the screen
+	BitBlt(hdc, 0, 0, width, height, hdcMem, 0, 0, SRCCOPY);
+
+	// Free-up the off-screen DC
+	SelectObject(hdcMem, hOld);
+	DeleteObject(hbmMem);
+	DeleteObject(hBrush);
+	DeleteDC(hdcMem);
+	EndPaint(hWnd, &ps);
 }
 
 typedef struct
@@ -240,9 +269,9 @@ void end3DView()
 	return;
 }
 
-inline void toolAt(int x, int y, float z)
+inline void toolAt(long x, long y, float z)
 {
-	if (x >= 0 && y >= 0 && x<countX && y<countY)
+	if (x >= 0 && y >= 0 && x<(long)countX && y<(long)countY)
 	{
 		float* point = &g_alt[x * countY + y];
 		if (*point > z)
@@ -254,6 +283,7 @@ inline void toolAt(int x, int y, float z)
 
 tStatus buildPath(t3DPoint P, long x, long y, long z, long d, long s)
 {
+	static DWORD prevTime = 0;
 	static t3DPoint p = { 0.0, 0.0, 0.0 };
 	t3DPoint v = { P.x - p.x, P.y - p.y, P.z - p.z };
 
@@ -288,6 +318,12 @@ tStatus buildPath(t3DPoint P, long x, long y, long z, long d, long s)
 				toolAt(iX - toolShape[i].dx, iY - toolShape[i].dy, (float)p.z);
 				toolAt(iX + toolShape[i].dx, iY - toolShape[i].dy, (float)p.z);
 			}
+		}
+		DWORD current = timeGetTime();
+		if (current > prevTime + 40)
+		{
+			PostMessage(hMainWindow, WM_UPDATE_POSITION, 0, 0);
+			prevTime = current;
 		}
 	}
 	p = P;

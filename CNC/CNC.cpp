@@ -292,8 +292,6 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
    ShowWindow(hMainWindow, nCmdShow);
    UpdateWindow(hMainWindow);
 
-   SetTimer(hMainWindow, 0, 30, NULL);
-
    return TRUE;
 }
 
@@ -361,6 +359,9 @@ void OnRunGCode(HWND hWnd,BOOL bSimulate)
 			g_MetaData.offsetZ = 0;
 			g_MetaData.toolRadius = 0;
 			g_MetaData.toolHeight = 0;
+			g_MetaData.gotWhatTool = 0;
+			g_MetaData.gotWhatStart = 0;
+			g_MetaData.gotWhatBlock = 0;
 
 			ParseGCodeFile(hWnd, szFile, preParse);
 
@@ -386,8 +387,6 @@ void OnRunGCode(HWND hWnd,BOOL bSimulate)
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
 	int wmId, wmEvent;
-	PAINTSTRUCT ps;
-	HDC hdc;
 
 	switch (message)
 	{
@@ -419,14 +418,14 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		}
 		break;
 	case WM_PAINT:
-		hdc = BeginPaint(hWnd, &ps);
-		OnPaint(hWnd, hdc);
-		EndPaint(hWnd, &ps);
+		OnPaint(hWnd);
 		break;
-	case WM_TIMER:
+
+	case WM_UPDATE_POSITION:
 		getCurPos(&g_displayPos);
 		InvalidateRgn(hWnd, NULL, false);
 		break;
+
 	case WM_DESTROY:
 		PostQuitMessage(0);
 		break;

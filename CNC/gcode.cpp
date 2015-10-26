@@ -31,7 +31,7 @@ double feedSpeed = 30; // Inches per minute
 double cutterRadius = 0;
 int spindle = 0;
 
-void getTheoricalPos( float* x, float* y, float* z)
+void getTheoricalPos( double* x, double* y, double* z)
 {
 	if(x) *x = theoricalPos.x;
 	if(y) *y = theoricalPos.y;
@@ -482,8 +482,8 @@ const int modal7[] = { 980, 990, -1 };                           // Return mode 
 const int modal8[] = { 540, 550, 560, 570, 580, 590, -1 };       // Coordinates system selection
 const int modal9[] = { 610, 640, -1 };                           // Path control mode
 
-typedef enum groupId { 
-	MG_MOTION = 0,  
+typedef enum {
+	MG_MOTION = 0,
 	MG_PLANE = 1,
 	MG_DISTANCE_MODE = 2,
 	MG_FEEDRATE_MODE = 3,
@@ -493,7 +493,8 @@ typedef enum groupId {
 	MG_RTN_MODE = 7,
 	MG_COORDINATES_SELECTION = 8,
 	MG_PATH_CTRL_MODE = 9,
-	MG_COUNT };
+	MG_COUNT
+} groupId;
 
 const int* modalGroup[MG_COUNT] = { modal0, modal1, modal2, modal3, modal4, modal5, modal6, modal7, modal8, modal9 };
 
@@ -591,30 +592,38 @@ tStatus preParse(char* cmd)
 {
 	char* pt;
 	tMotion M;
-	unsigned long gotWhat = 0;
 	tStatus ret = retSuccess;
+	ULONG gotWhat = 0;
 	// Look for indications in Parenthesis (comments) for Block information
 	if(( pt = strchr(cmd, '(')) != NULL)
 	{
 		if (( pt = strstr(cmd, "BLOCK")) != NULL)
 		{
 			ret = getMotion(pt + 5, M, gotWhat);
-			if( gotWhat & GOT_X ) g_MetaData.blockX = M.X;
+			if (gotWhat & GOT_X) g_MetaData.blockX = M.X;
 			if (gotWhat & GOT_Y) g_MetaData.blockY = M.Y;
 			if (gotWhat & GOT_Z) g_MetaData.blockZ = M.Z;
+			g_MetaData.gotWhatBlock |= gotWhat;
 		}
 		else if (( pt = strstr( cmd, "START" )) != NULL )
 		{
-			ret = getMotion(pt + 5, M, gotWhat);
+			ret = getMotion(pt + 5, M, gotWhat );
 			if (gotWhat & GOT_X) g_MetaData.offsetX = M.X;
 			if (gotWhat & GOT_Y) g_MetaData.offsetY = M.Y;
 			if (gotWhat & GOT_Z) g_MetaData.offsetZ = M.Z;
+			g_MetaData.gotWhatStart |= gotWhat;
 		}
 		else if ((pt = strstr(cmd, "TOOL")) != NULL )
 		{
 			ret = getMotion(pt + 4, M, gotWhat);
 			if (gotWhat & GOT_X) g_MetaData.toolRadius = M.X;
+			g_MetaData.gotWhatTool |= gotWhat;
 		}
+	}
+
+	if (g_MetaData.gotWhatTool && g_MetaData.gotWhatStart && g_MetaData.gotWhatBlock)
+	{
+		ret = retPreParseComplete;
 	}
 	return ret;
 }
