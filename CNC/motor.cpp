@@ -199,7 +199,7 @@ tStatus CheckStatus()
 	tStatus ret = retSuccess;
 	if (g_pSimulation == NULL)
 	{
-		ret = sendCommand("S\n", 1000);
+		ret = sendCommand("S\n", 10);
 		if (ret == retSuccess)
 		{
 			ret = waitForStatus();

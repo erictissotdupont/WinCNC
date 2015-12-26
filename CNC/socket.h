@@ -11,4 +11,5 @@ typedef enum
 int initSocketCom(void(*callback)(CNC_SOCKET_EVENT, PVOID));
 tStatus sendCommand( char* cmd, unsigned long d );
 tStatus waitForStatus( );
+void getStatusString(char* szBuffer, unsigned int cbBuffer);
 

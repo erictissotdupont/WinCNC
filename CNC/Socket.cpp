@@ -42,6 +42,17 @@ unsigned long totalInPipe;
 
 HANDLE mutexBuffer = NULL;
 
+void getStatusString(char* szBuffer, unsigned int cbBuffer)
+{
+	sprintf_s(szBuffer, cbBuffer, "%s - inPipe: %.3fs (%d) - Sent:%d - Ack:%d - Err:%d",
+		cncIP,
+		totalInPipe / 1000.0f,
+		cmdCount - ackCount,
+		cmdCount,
+		ackCount,
+		errCount );
+}
+
 unsigned long getDurationOfCommandsInPipe( )
 {
   /*
@@ -57,6 +68,15 @@ unsigned long getDurationOfCommandsInPipe( )
   return totalInPipe;
 }
 
+#define MAX_CMD_IN_PIPE		5000
+
+bool isPipeAvailable(int cmdLen)
+{
+	if( getDurationOfCommandsInPipe() > MAX_CMD_IN_PIPE) return false;
+	if ((strlen(outBuffer) + cmdLen + 1) >= MSGBUFSIZE) return false;
+	return true;
+}
+
 tStatus sendCommand( char* cmd, unsigned long d )
 {
   int timeout;
@@ -68,16 +88,22 @@ tStatus sendCommand( char* cmd, unsigned long d )
   if( cl > MSGBUFSIZE ) return retInvalidParam;
 
   // Don't push more than 5 seconds worth of commands in the pipe
-  timeout = (60 * 1000) / MSGPERIOD;
-  while(( getDurationOfCommandsInPipe( ) > 5000 ) && timeout-- && errCount == 0 ) Sleep( MSGPERIOD );
+  timeout = (MAX_CMD_IN_PIPE * 2) / MSGPERIOD;
+  while ((getDurationOfCommandsInPipe() > MAX_CMD_IN_PIPE) && timeout-- && errCount == 0)
+  {
+	  Sleep(MSGPERIOD);
+  }
 
   // If the command can't fit in the current buffer
   if(( strlen( outBuffer ) + cl + 1 ) >= MSGBUFSIZE )
   {
-    timeout = (60 * 1000) / MSGPERIOD;
-    // Wait for the buffer to be empty (1 min timeout)
+    timeout = (MAX_CMD_IN_PIPE * 2) / MSGPERIOD;
+    // Wait for the buffer to be empty (5 sec timeout)
     // printf( "outBuffer is full...\n" );
-    while( outBuffer[0] != 0 && timeout-- > 0 && errCount == 0 ) Sleep( MSGPERIOD );
+	while (outBuffer[0] != 0 && timeout-- > 0 && errCount == 0)
+	{
+		Sleep(MSGPERIOD);
+	}
     if( timeout <= 0 )
     {
       printf( "Timeout on TX\n" );
@@ -97,15 +123,13 @@ tStatus sendCommand( char* cmd, unsigned long d )
   if( timePipeInIdx >= TIMEPIPESIZE ) timePipeInIdx = 0;
 
   bl = strlen( outBuffer );
+
   // Add the new command to the buffer
   strcpy_s( outBuffer + bl, sizeof(outBuffer) - bl, cmd );
   cmdCount++;
   outSize += cl;
   
   ReleaseMutex(mutexBuffer);
-  // pthread_mutex_unlock(&mutexBuffer);
-  
-  //printf( "Send:%s", cmd );
 
   return retSuccess;
 }
@@ -119,7 +143,7 @@ void* receiverThread( void* arg )
 
   bConnected = true;
   rspCnt = 0;
-  if (g_pNotifCallback) g_pNotifCallback(CNC_CONNECTED, cncIP);
+  if (g_pNotifCallback) g_pNotifCallback(CNC_CONNECTED, NULL);
 
   while( bRun )
   {
@@ -133,7 +157,8 @@ void* receiverThread( void* arg )
 	{
       switch( msgbuf[i] )
       {
-      case 'O' : ackCount++;
+      case 'O' : 
+		ackCount++;
 		tmp += timePipe[ timePipeOutIdx++ ];  
 		if( timePipeOutIdx >= TIMEPIPESIZE ) timePipeOutIdx = 0;
 		rspCnt = 0;
@@ -148,6 +173,9 @@ void* receiverThread( void* arg )
 			  response[rspCnt++] = msgbuf[i];
 			  if (msgbuf[i] == '\n')
 			  {
+				  ackCount++;
+				  tmp += timePipe[timePipeOutIdx++];
+				  if (timePipeOutIdx >= TIMEPIPESIZE) timePipeOutIdx = 0;
 				  response[rspCnt++] = 0;
 				  SetEvent(hResponseReceived);
 				  if (g_pNotifCallback) g_pNotifCallback(CNC_RESPONSE, response );				  
@@ -203,6 +231,7 @@ DWORD senderThread(PVOID pParam)
 	char msg[80];
 	WSADATA wsaData;
 	int idleCount = 0;
+	int checkStatusTimeout = 0;
 
 	if (WSAStartup(0x0202, &wsaData) != NO_ERROR) {
 		iResult = WSAGetLastError();
@@ -269,7 +298,6 @@ DWORD senderThread(PVOID pParam)
 		return 1;
 	}
 
-	
 	outSize = 0;
 	memset(outBuffer, 0, sizeof(outBuffer));
 
@@ -335,6 +363,12 @@ DWORD senderThread(PVOID pParam)
 		ReleaseMutex(mutexBuffer);
 		// if (pthread_mutex_unlock(&mutexBuffer) < 0) { perror("pthread_mutex_unlock"); }
 		Sleep(MSGPERIOD);
+
+		if(( checkStatusTimeout++ > (125 / MSGPERIOD )) && isPipeAvailable( 3 ))
+		{
+			sendCommand("S\n", 10 );
+			checkStatusTimeout = 0;
+		}
 	}
 
 	iResult = closesocket(cnc);
@@ -365,6 +399,10 @@ int initSocketCom(void(*callback)(CNC_SOCKET_EVENT, PVOID))
   hResponseReceived = CreateEvent(NULL, FALSE, FALSE, NULL);
 
   g_pNotifCallback = callback;
+
+  strcpy_s(cncIP, sizeof(cncIP), "Disconnected");
+
+  if (g_pNotifCallback) g_pNotifCallback(CNC_CONNECTED, cncIP);
 
   CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)senderThread, NULL, 0, &threadId);
 

@@ -44,11 +44,17 @@ DWORD ParserThread(PVOID pParam)
 		{
 			if ((pJob->status = pJob->cmd(pt)) != retSuccess) break;
 
-			if (pJob->hDialog) PostMessage(pJob->hDialog, WM_UPDATE_PROGRESS, progress, (LPARAM)pt);
+			if (pJob->hDialog)
+			{
+				PostMessage(pJob->hDialog, WM_UPDATE_PROGRESS, progress, (LPARAM)pt);
+			}
 		}
 		pt = eol;
 
-		while (pJob->bPause && !pJob->bStop) Sleep(500);
+		while (pJob->bPause && !pJob->bStop)
+		{
+			Sleep(500);
+		}
 	}
 
 	if (pJob->status == retSuccess )

@@ -127,9 +127,17 @@ long Motor::TimeToNextMove( long t )
 long Motor::Move( long t )
 {
   // Test the end or rail sensor
-  if( digitalRead( endPin ) == HIGH )
+  while( digitalRead( endPin ) == HIGH )
   {
     int maxBackSteps = 2000;
+     
+    delay( 1 );
+    if( digitalRead( endPin ) == LOW ) break;
+    delay( 5 );
+    if( digitalRead( endPin ) == LOW ) break;
+    delay( 10 );
+    if( digitalRead( endPin ) == LOW ) break;
+ 
     // Wait for 200ms
     delay( 200 );
     // Reverse the direction    
@@ -152,6 +160,7 @@ long Motor::Move( long t )
     error |= ERROR_LIMIT;
     return -1;
   }
+  
   
   curPos = curPos + curDir;
   if( toggle )

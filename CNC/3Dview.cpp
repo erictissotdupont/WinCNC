@@ -1,6 +1,8 @@
 #include "CNC.h"
 #include "geometry.h"
 #include "gcode.h"
+#include "socket.h"
+
 #include <wchar.h>
 #include <mmsystem.h>
 
@@ -39,16 +41,16 @@ const t3DPoint vu3DX = { 1, 0, 0 };
 const t3DPoint vu3DY = { 0, 1, 0 };
 const t3DPoint vu3DZ = { 0, 0, 1 };
 
-#define MARGIN 10
-#define STATUS_WIDTH	800
-#define STATUS_HEIGHT	200
+#define VIEW_MARGIN			10
+#define VIEW_STATUS_FONT	L"Arial"
+#define VIEW_POSITION_FONT	L"Courier New"
 
 void OnPaint(HWND hWnd)
 {
 	RECT view;
 	RECT rect;
 	HFONT font;
-	WCHAR str[100];
+	CHAR str[100];
 	HDC hdcMem;
 	HBITMAP hbmMem;
 	HANDLE hOld;
@@ -58,6 +60,7 @@ void OnPaint(HWND hWnd)
 
 	hdc = BeginPaint(hWnd, &ps);
 
+	// Get the size of our client view for later
 	GetClientRect(hWnd, &view);
 	width = view.right - view.left;
 	height = view.bottom - view.top;
@@ -66,27 +69,53 @@ void OnPaint(HWND hWnd)
 	hdcMem = CreateCompatibleDC(hdc);
 	hbmMem = CreateCompatibleBitmap(hdc, width, height);
 	hOld = SelectObject(hdcMem, hbmMem);
-	// Comes black by default. Clear the memory DC with a white brush.
+	
+	// This comes black by default. Clear the memory DC with a white brush.
 	HBRUSH hBrush = CreateSolidBrush(GetBkColor(hdcMem));
 	FillRect(hdcMem, &view, hBrush);
 
-	int statusHeight = (height - (MARGIN * 2)) / 2;
-
-	rect.left = view.left + MARGIN;
-	rect.right = rect.left + STATUS_WIDTH;
-	rect.top = view.top + MARGIN;
+	// TOP banner : Show status of the CNC communication pipe
+	int statusHeight = (height - (VIEW_MARGIN * 2)) / 16;
+	rect.left = view.left + VIEW_MARGIN;
+	rect.right = rect.left + width - VIEW_MARGIN * 2;
+	rect.top = view.top + VIEW_MARGIN;
 	rect.bottom = rect.top + statusHeight;
-
-	font = CreateFont(statusHeight/3, 0, 0, 0, FW_REGULAR, false, false, false, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH, L"Arial");
+	font = CreateFont(
+		statusHeight, 0, 0, 0, 
+		FW_REGULAR, false, false, false, 
+		DEFAULT_CHARSET, 
+		OUT_DEFAULT_PRECIS, 
+		CLIP_DEFAULT_PRECIS, 
+		DEFAULT_QUALITY, 
+		DEFAULT_PITCH, 
+		VIEW_STATUS_FONT);
 	SelectObject(hdcMem, font);
+	getStatusString(str, sizeof(str));
+	DrawTextA(hdcMem, str, -1, &rect, 0);
+	DeleteObject(font);
 
-	swprintf(str, 100, L"X:%.4f\r\nY:%.4f\r\nZ:%.4f",
+	// Upper Right corner : Real position of CNC 
+	int positionHeight = (height - (VIEW_MARGIN * 3) - statusHeight ) / 2;
+	rect.left = view.left + VIEW_MARGIN;
+	rect.right = rect.left + ( width - ( VIEW_MARGIN * 3 )) / 2 ;
+	rect.top = view.top + VIEW_MARGIN * 2 + statusHeight;
+	rect.bottom = rect.top + positionHeight;
+	font = CreateFont(
+		positionHeight/3, 0, 0, 0, 
+		FW_REGULAR, false, false, false, 
+		DEFAULT_CHARSET, 
+		OUT_DEFAULT_PRECIS, 
+		CLIP_DEFAULT_PRECIS, 
+		DEFAULT_QUALITY, 
+		DEFAULT_PITCH, 
+		VIEW_POSITION_FONT );
+	SelectObject(hdcMem, font);
+	//swprintf(str, 100, L"X:%.4f\r\nY:%.4f\r\nZ:%.4f",
+	sprintf_s(str, sizeof(str), "X:%.4f\r\nY:%.4f\r\nZ:%.4f",
 		g_displayPos.x,
 		g_displayPos.y,
 		g_displayPos.z);
-
-	DrawText(hdcMem, str, -1, &rect, 0);
-
+	DrawTextA(hdcMem, str, -1, &rect, 0);
 	DeleteObject(font);
 
 	// Transfer the off-screen DC to the screen

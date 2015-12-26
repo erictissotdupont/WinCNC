@@ -171,10 +171,8 @@ void UpdatePosition( HWND hWnd, char* str )
 	pt = strchr(str, 'Z');
 	if (pt) sscanf_s(pt + 1, "%d", &z);
 
-//	stepToPos(x, y, z, &g_displayPos );
-
-//	InvalidateRgn(hWnd, NULL, false);
-
+	stepToPos(x, y, z, &g_displayPos );
+	InvalidateRgn(hWnd, NULL, false);
 }
 
 void OnSocketEvent(CNC_SOCKET_EVENT event, PVOID param)
@@ -182,7 +180,7 @@ void OnSocketEvent(CNC_SOCKET_EVENT event, PVOID param)
 	switch (event)
 	{
 	case CNC_CONNECTED:
-		SetWindowTextA(hMainWindow, (char*)param);
+		InvalidateRgn(hMainWindow, NULL, false);
 		break;
 	case CNC_RESPONSE:
 		UpdatePosition(hMainWindow, (char*)param);
