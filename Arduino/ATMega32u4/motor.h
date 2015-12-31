@@ -5,7 +5,7 @@ public :
   void SetDirection( int d );
   long InitMove( long s, long t );
   long TimeToNextMove( long t );
-  long Move( long t );
+  void Move( );
   long Remain( );
   long Done( );
   long GetPos( );

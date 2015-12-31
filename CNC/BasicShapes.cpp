@@ -390,6 +390,7 @@ BOOL CarveRect(HWND hWnd)
 	{
 		// Start at zero depth.
 		float Z = 0.0f;
+		float w = d - SMALL_OVELAP;
 
 		// Dive while depth has not reached target rect depth
 		while (Z < g_Params.rectDepth - NEAR_ZERO )
@@ -408,35 +409,34 @@ BOOL CarveRect(HWND hWnd)
 
 			// Dive by 'D' on the long side of the rect
 			MakeRectMove(bXisLong, cmd, L, 0.0f, -D);
-
 			if (bInside)
 			{
-				MakeRectMove(bXisLong, cmd, d, 0.0f, 0.0f );
-				MakeRectMove(bXisLong, cmd, -d, 0.0f, 0.0f);
+				MakeRectMove(bXisLong, cmd, w, 0.0f, 0.0f );
+				MakeRectMove(bXisLong, cmd, -w, 0.0f, 0.0f);
 			}
 
 			// Go along the short side
 			MakeRectMove(bXisLong, cmd, 0.0f, S, 0.0f);
 			if (bInside)
 			{
-				MakeRectMove(bXisLong, cmd, 0.0f, d, 0.0f);
-				MakeRectMove(bXisLong, cmd, 0.0f, -d, 0.0f);
+				MakeRectMove(bXisLong, cmd, 0.0f, w, 0.0f);
+				MakeRectMove(bXisLong, cmd, 0.0f, -w, 0.0f);
 			}
 
 			// Come back the long side
 			MakeRectMove(bXisLong, cmd, -L, 0.0f, 0.0f);
 			if (bInside)
 			{
-				MakeRectMove(bXisLong, cmd, -d, 0.0f, 0.0f);
-				MakeRectMove(bXisLong, cmd, d, 0.0f, 0.0f);
+				MakeRectMove(bXisLong, cmd, -w, 0.0f, 0.0f);
+				MakeRectMove(bXisLong, cmd, w, 0.0f, 0.0f);
 			}
 
 			// Come back the short side
 			MakeRectMove(bXisLong, cmd, 0.0f, -S, 0.0f);
 			if (bInside)
 			{
-				MakeRectMove(bXisLong, cmd, 0.0f, -d, 0.0f);
-				MakeRectMove(bXisLong, cmd, 0.0f, d, 0.0f);
+				MakeRectMove(bXisLong, cmd, 0.0f, -w, 0.0f);
+				MakeRectMove(bXisLong, cmd, 0.0f, w, 0.0f);
 			}
 		}
 
@@ -514,15 +514,6 @@ void BasicShapeOneCommand(HWND hWnd)
 	}
 }
 
-void BasicShapeSelectAll(HWND hWnd)
-{
-	HWND hFocus = GetFocus();
-	if (hFocus)
-	{
-		PostMessage(hFocus, EM_SETSEL, 0, -1);
-	}
-}
-
 WNDPROC g_oldDlgdProc = NULL;
 BOOL CALLBACK InterceptWndProc(HWND hWnd,
 	UINT message,
@@ -568,9 +559,6 @@ BOOL CALLBACK BasicShapesProc(HWND hWnd,
 	case WM_COMMAND:
 		switch (LOWORD(wParam))
 		{
-		case IDM_SELECT_ALL:
-			BasicShapeSelectAll(hWnd);
-			break;
 		case IDC_EXECUTE :
 			BasicShapeOneCommand(hWnd);
 			break;

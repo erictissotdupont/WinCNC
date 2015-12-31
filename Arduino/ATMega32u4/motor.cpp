@@ -93,7 +93,11 @@ long Motor::TimeToNextMove( long t )
   if( moveDuration > 0 )
   {
     long w = ( moveStep + 1 ) * stepDuration;
-    if( t >= w ) DebugPulse( 6 );
+    if( t >= w )
+    {
+      DebugPulse( 6 );
+      error |= ERROR_MATH;
+    }
     return w - t;
   }
   else
@@ -124,13 +128,17 @@ long Motor::TimeToNextMove( long t )
   }
 }
 
-long Motor::Move( long t )
+#define MAX_BACKSTEPS 2000
+
+void Motor::Move( )
 {
-  // Test the end or rail sensor
+  // Test the end of rail sensor
   while( digitalRead( endPin ) == HIGH )
   {
-    int maxBackSteps = 2000;
-     
+    long bs = MAX_BACKSTEPS;
+
+    // Check if this is not a glitch on the switch caused by
+    // vibrations
     delay( 1 );
     if( digitalRead( endPin ) == LOW ) break;
     delay( 5 );
@@ -143,24 +151,28 @@ long Motor::Move( long t )
     // Reverse the direction    
     SetDirection( -curDir );
     // And backout slowly
-    while( maxBackSteps > 0 && digitalRead( endPin ) == HIGH )
+    while( bs > 0 && digitalRead( endPin ) == HIGH )
     {
       delay( 2 );
-      digitalWrite( stepPin, maxBackSteps & 1 ? LOW : HIGH );
-      maxBackSteps--;
+      digitalWrite( stepPin, bs & 1 ? LOW : HIGH );
+      bs--;
     }
-    if( maxBackSteps > 200 ) maxBackSteps = 200;
-    while( maxBackSteps > 0 )
+    if( bs > 200 ) bs = 200;
+    while( bs > 0 )
     {
       delay( 2 );
-      digitalWrite( stepPin, maxBackSteps & 1 ? LOW : HIGH );
-      maxBackSteps--;
+      digitalWrite( stepPin, bs & 1 ? LOW : HIGH );
+      bs--;
     }
     
+    // Turn OFF the tool
+    digitalWrite(TOOL_ON_REPLAY, LOW);
+    
     error |= ERROR_LIMIT;
-    return -1;
+    // Reset the move distance to force the stopping
+    moveLength = 0;
+    return;
   }
-  
   
   curPos = curPos + curDir;
   if( toggle )
@@ -173,9 +185,8 @@ long Motor::Move( long t )
     toggle = 1;
     digitalWrite( stepPin, HIGH );
   }
-
+  
   moveStep++;
-  return TimeToNextMove( t );
 }
 
 long Motor::Remain( )

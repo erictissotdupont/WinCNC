@@ -37,6 +37,8 @@ tMetaData g_MetaData;
 
 t3DPoint g_displayPos;
 
+int g_debug[4];
+
 tStatus parseLine(char* cmd)
 {
 	tStatus ret = retSuccess;
@@ -161,15 +163,24 @@ tStatus parseLine(char* cmd)
 
 void UpdatePosition( HWND hWnd, char* str )
 {
-	int x, y, z;
-	
+	int x, y, z;	
 	char* pt;
+
 	pt = strchr(str, 'X');
 	if (pt) sscanf_s(pt + 1, "%d", &x);
 	pt = strchr(str, 'Y');
 	if (pt) sscanf_s(pt + 1, "%d", &y);
 	pt = strchr(str, 'Z');
 	if (pt) sscanf_s(pt + 1, "%d", &z);
+
+	pt = strchr(str, 'A');
+	if (pt) sscanf_s(pt + 1, "%d", &g_debug[0]);
+	pt = strchr(str, 'B');
+	if (pt) sscanf_s(pt + 1, "%d", &g_debug[1]);
+	pt = strchr(str, 'C');
+	if (pt) sscanf_s(pt + 1, "%d", &g_debug[2]);
+	pt = strchr(str, 'D');
+	if (pt) sscanf_s(pt + 1, "%d", &g_debug[3]);
 
 	stepToPos(x, y, z, &g_displayPos );
 	InvalidateRgn(hWnd, NULL, false);

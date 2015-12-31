@@ -13,6 +13,7 @@ extern Motor Z;
 extern void Move(long,long,long,long);
 extern unsigned int commandCount;
 extern unsigned int error;
+extern unsigned int g_duration;
 
 #define LCD_D0  4
 #define LCD_D1  5
@@ -206,7 +207,7 @@ typedef enum {
   LCD_StateMax
 } LCD_State;
 
-unsigned long LCD_UpdateTask( unsigned long timeWeHave )
+void LCD_UpdateTask( unsigned long timeWeHave )
 {
   static LCD_State state = LCD_StateInit;
   static char line1[17];
@@ -331,13 +332,7 @@ unsigned long LCD_UpdateTask( unsigned long timeWeHave )
         
     timeItTook = micros() - timeItTook;
     if( timeItTook > maxTimeForState[ curState ] ) maxTimeForState[ curState ] = timeItTook;
-    
-    if( timeWeHave > timeItTook )
-      return timeWeHave - timeItTook;
-    else
-      return 0;
   }
-  return timeWeHave;
 }
 
 void LCD_SetStatus( const char *str, int offset )
@@ -420,7 +415,7 @@ typedef enum {
  ButtonMode_XY = 0,
  ButtonMode_Z,
  ButtonMode_Reset,
- ButtonMode_Locked,
+ ButtonMode_Debug,
  ButtonMode_Max
 } ButtonMode;
 
@@ -433,16 +428,11 @@ void DoButtonAction( LCD_Button button, int longPress )
   long y = 0;
   long z = 0;
   unsigned long d = 0;
-  char str[9];
-  
-  memset( str, ' ', sizeof( str )-1 );
-  str[8] = 0;
   
   if( button == BUTTON_SELECT )
   {
     mode = (ButtonMode)(mode + 1); 
     if( mode >= ButtonMode_Max ) mode = ButtonMode_XY;
-    str[8] = 'S';
   }
   else
   {
@@ -465,7 +455,7 @@ void DoButtonAction( LCD_Button button, int longPress )
       }
     }
   }
-  
+
   LCD_SetStatus( ModeString[ mode ], 5 );
  
   if( longPress )

@@ -19,6 +19,7 @@ t2DPoint vuY = { 60, -40 };
 t2DPoint vuZ = { 0, -100 };
 
 extern t3DPoint g_displayPos;
+extern int g_debug[4];
 
 void MoveTo3D(HDC hdc, t3DPoint p)
 {
@@ -115,6 +116,30 @@ void OnPaint(HWND hWnd)
 		g_displayPos.x,
 		g_displayPos.y,
 		g_displayPos.z);
+	DrawTextA(hdcMem, str, -1, &rect, 0);
+	DeleteObject(font);
+
+	// Lower right corner : Debug information
+	int debugHeight = (height - (VIEW_MARGIN * 3) - statusHeight) / 2;
+	rect.left = view.left + VIEW_MARGIN;
+	rect.right = rect.left + (width - (VIEW_MARGIN * 3)) / 2;
+	rect.top = view.top + VIEW_MARGIN * 2 + statusHeight + positionHeight;
+	rect.bottom = rect.top + debugHeight;
+	font = CreateFont(
+		positionHeight / 10, 0, 0, 0,
+		FW_REGULAR, false, false, false,
+		DEFAULT_CHARSET,
+		OUT_DEFAULT_PRECIS,
+		CLIP_DEFAULT_PRECIS,
+		DEFAULT_QUALITY,
+		DEFAULT_PITCH,
+		VIEW_POSITION_FONT);
+	SelectObject(hdcMem, font);
+	sprintf_s(str, sizeof(str), "A:%d\r\nB:%d\r\nC:%d\r\nD:%d",
+		g_debug[0],
+		g_debug[1],
+		g_debug[2],
+		g_debug[3]);
 	DrawTextA(hdcMem, str, -1, &rect, 0);
 	DeleteObject(font);
 

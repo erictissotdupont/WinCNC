@@ -13,14 +13,22 @@ Motor Z(  3,  2, A3,  1 );  //  3,  2, A3, 1
 unsigned int commandCount = 0;
 unsigned int error = 0;
 
+#define MAX_DEBUG 4
+int g_debug[MAX_DEBUG];
+
+// This calculates time spent in the execution of motor step move routine
+// and places the average loop time in uS in debug A and number of loops of 
+// the last move in debug B status.
+//#define TEST_TIME
+
 // ------------------------------------------------------------------------
 // Move the tool position by the specified # of steps by x,y,z
 // Duration of the motion determines the speed. d is in microseconds
 //
 void Move( long x, long y, long z, long d )
 {
-  long s;
-  long t = 0;
+  unsigned long s,tSpent;
+  unsigned long t = 0;
   long tX,tY,tZ;
   
   // If in error state, no move
@@ -38,16 +46,23 @@ void Move( long x, long y, long z, long d )
   
   // This calculates the interval between steps for each axis and returns the time
   // to wait until the first move needs to occur (-1 if no move necessary).
+  tSpent = micros();
   tX = X.InitMove( x, d );
   tY = Y.InitMove( y, d );
   tZ = Z.InitMove( z, d ); 
 
+#ifdef TEST_TIME  
+  long count = 0;
+  long start = micros();
+#endif
+  
   do
   {
     // Finds which of the non negative wait time is the shortest
+    // 4.2 uS
     s = minOf3( tX, tY, tZ );
-    
-    // Accumulate the sleep time (ignores processing time)
+              
+    // Accumulate the sleep time to out global time variable
     t = t + s;
 
     // Remove the sleep time from each axis
@@ -55,16 +70,25 @@ void Move( long x, long y, long z, long d )
     tY = tY - s;
     tZ = tZ - s;
     
-    // 50uS is the estimated processing time if the step is short, just skip over the wait
-    // since we're already late
-    if( s > 50 )
+#ifdef TEST_TIME 
+    s = 0;
+    count++;
+#endif
+ 
+    // If we have at least 150uS to wait   
+    if( s > 150 )
     {
-      // Remove it from our sleep time
-      s = s - 50;
-      
-      // Refresh the screen (if enough time) and return the time we have left
-      s = LCD_UpdateTask( s );
-
+      // Refresh the screen (if enough time)
+      LCD_UpdateTask( s - 150 );
+    }
+    
+    // Calculate how much time we spent for processing
+    tSpent = micros() - tSpent;
+    
+    // If we still have time to wait
+    if( s > tSpent )
+    {
+      s = s - tSpent;      
       // When sleeping more than 16388 uS, documentation says don't use delayMicroseconds.
       if( s < 16000 )
       {
@@ -78,13 +102,24 @@ void Move( long x, long y, long z, long d )
     }
 
     // For each axis where the time to move has been reached, move.
-    // The Move function returns the time to the next move (based on t) or
+     tSpent = micros();
+    if( tX == 0 ) X.Move( );
+    if( tY == 0 ) Y.Move( );    
+    if( tZ == 0 ) Z.Move( );
+    
+    // Get the duration to the next move (based on t) or
     // a negative value if the axis has eached the end position.
-    if( tX == 0 ) tX = X.Move( t );
-    if( tY == 0 ) tY = Y.Move( t );    
-    if( tZ == 0 ) tZ = Z.Move( t );
+    if( tX == 0 ) tX = X.TimeToNextMove( t );
+    if( tY == 0 ) tY = Y.TimeToNextMove( t );
+    if( tZ == 0 ) tZ = Z.TimeToNextMove( t );
     
   } while(( tX > 0 ) || ( tY > 0 ) || ( tZ > 0 ));
+  
+#ifdef TEST_TIME
+  long finish = micros();
+  g_debug[0] = (finish-start)/count;
+  g_debug[1] = count;
+#endif
 
   // Check proper distance was achieved for debug purpose.
   /*
@@ -177,6 +212,16 @@ void Decode( char c )
       Serial1.print( Z.GetPos( ));
       Serial1.print( "S" );
       Serial1.print( error );
+      
+      Serial1.print( "A" );
+      Serial1.print( g_debug[0] );
+      Serial1.print( "B" );
+      Serial1.print( g_debug[1] );
+      Serial1.print( "C" );
+      Serial1.print( g_debug[2] );
+      Serial1.print( "D" );
+      Serial1.print( g_debug[3] );
+      
       Serial1.print( "\n" );
     }
     else if( c != 0 && c != '\n' )
@@ -215,8 +260,10 @@ void Decode( char c )
 // ------------------------------------------------------------------------
 
 void setup() {
- 
+  int i;
+  
   error = 0;
+  for( i=0; i<MAX_DEBUG; i++ ) g_debug[i] = 0;
   
   delay( 250 );
   
