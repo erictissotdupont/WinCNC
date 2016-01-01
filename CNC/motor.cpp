@@ -129,6 +129,8 @@ long getSpindleState( )
   return( Spindle.nextState == 3 );
 }
 
+bool g_bInMotion = false;
+
 tStatus doMove( void(*posAtStep)(t3DPoint*,int,int,void*), int stepCount, double duration, void* pArg )
 {
   int i;
@@ -145,6 +147,8 @@ tStatus doMove( void(*posAtStep)(t3DPoint*,int,int,void*), int stepCount, double
 
   duration = duration / stepCount;
   d = (long)(duration * 1000);
+
+  g_bInMotion = true;
  
   for( i=1; i<=stepCount; i++ )
   {
@@ -191,19 +195,29 @@ tStatus doMove( void(*posAtStep)(t3DPoint*,int,int,void*), int stepCount, double
     }
   }
 
+  g_bInMotion = false;
+  CheckStatus(false);
+
   return status;
 }
 
-tStatus CheckStatus()
+tStatus CheckStatus( BOOL bWait )
 {
+	static DWORD lastCheck = 0;
 	tStatus ret = retSuccess;
 	if (g_pSimulation == NULL)
 	{
-		ret = sendCommand("S\n", 10);
-		if (ret == retSuccess)
+		DWORD now = GetTickCount();
+		if( bWait || ( g_bInMotion == false ) && ( now - lastCheck > 200 ))
 		{
-			ret = waitForStatus();
+			lastCheck = now;
+			ret = sendCommand("S\n", 10);
+			if (ret == retSuccess && bWait)
+			{
+				ret = waitForStatus();
+			}
 		}
+		else ret = retBusy;
 	}
 	return ret;
 }

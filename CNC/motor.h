@@ -37,4 +37,4 @@ tStatus doMove( void(*posAtStep)(t3DPoint*,int,int,void*), int stepCount, double
 
 int setSpindleState( int state );
 
-tStatus CheckStatus( );
+tStatus CheckStatus( BOOL bWait );

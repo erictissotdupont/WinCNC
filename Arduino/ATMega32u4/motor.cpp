@@ -83,7 +83,7 @@ long Motor::InitMove( long s, long t )
 
 #define RAMP_TIME    200000
 #define MIN_SPEED    20
-#define MAX_SPEED    600
+#define MAX_SPEED    220
 #define IMP_TO_NS    24000
 
 long Motor::TimeToNextMove( long t )

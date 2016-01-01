@@ -231,7 +231,6 @@ DWORD senderThread(PVOID pParam)
 	char msg[80];
 	WSADATA wsaData;
 	int idleCount = 0;
-	int checkStatusTimeout = 0;
 
 	if (WSAStartup(0x0202, &wsaData) != NO_ERROR) {
 		iResult = WSAGetLastError();
@@ -363,12 +362,6 @@ DWORD senderThread(PVOID pParam)
 		ReleaseMutex(mutexBuffer);
 		// if (pthread_mutex_unlock(&mutexBuffer) < 0) { perror("pthread_mutex_unlock"); }
 		Sleep(MSGPERIOD);
-
-		if(( checkStatusTimeout++ > (125 / MSGPERIOD )) && isPipeAvailable( 3 ))
-		{
-			sendCommand("S\n", 10 );
-			checkStatusTimeout = 0;
-		}
 	}
 
 	iResult = closesocket(cnc);

@@ -21,13 +21,15 @@ int g_debug[MAX_DEBUG];
 // the last move in debug B status.
 //#define TEST_TIME
 
+unsigned long g_tSpent;
+
 // ------------------------------------------------------------------------
 // Move the tool position by the specified # of steps by x,y,z
 // Duration of the motion determines the speed. d is in microseconds
 //
 void Move( long x, long y, long z, long d )
 {
-  unsigned long s,tSpent;
+  long s,now;
   unsigned long t = 0;
   long tX,tY,tZ;
   
@@ -46,25 +48,21 @@ void Move( long x, long y, long z, long d )
   
   // This calculates the interval between steps for each axis and returns the time
   // to wait until the first move needs to occur (-1 if no move necessary).
-  tSpent = micros();
   tX = X.InitMove( x, d );
   tY = Y.InitMove( y, d );
   tZ = Z.InitMove( z, d ); 
-
+  
 #ifdef TEST_TIME  
   long count = 0;
   long start = micros();
+  g_debug[2] = start-g_tSpent;
 #endif
   
   do
   {
     // Finds which of the non negative wait time is the shortest
-    // 4.2 uS
     s = minOf3( tX, tY, tZ );
               
-    // Accumulate the sleep time to out global time variable
-    t = t + s;
-
     // Remove the sleep time from each axis
     tX = tX - s;
     tY = tY - s;
@@ -75,20 +73,20 @@ void Move( long x, long y, long z, long d )
     count++;
 #endif
  
-    // If we have at least 150uS to wait   
-    if( s > 150 )
+    // If we have at least 150uS to wait and it's not the first loop
+    if( s > 150 && t )
     {
       // Refresh the screen (if enough time)
       LCD_UpdateTask( s - 150 );
     }
     
-    // Calculate how much time we spent for processing
-    tSpent = micros() - tSpent;
+    // Calculate how much time we spent processing
+    g_tSpent = micros() - g_tSpent;
     
     // If we still have time to wait
-    if( s > tSpent )
+    if( s > g_tSpent )
     {
-      s = s - tSpent;      
+      s = s - g_tSpent;      
       // When sleeping more than 16388 uS, documentation says don't use delayMicroseconds.
       if( s < 16000 )
       {
@@ -100,9 +98,16 @@ void Move( long x, long y, long z, long d )
         delayMicroseconds( s % 1000 );
       }
     }
+#ifdef TEST_TIME
+    // Counts how many times this move was late for making a motot pulse
+    else g_debug[3]++;
+#endif
+
+    // Accumulate the sleep time to out global time variable
+    t = t + s;
 
     // For each axis where the time to move has been reached, move.
-     tSpent = micros();
+    g_tSpent = micros();
     if( tX == 0 ) X.Move( );
     if( tY == 0 ) Y.Move( );    
     if( tZ == 0 ) Z.Move( );
@@ -148,7 +153,14 @@ void Decode( char c )
   {   
     if( c == '@' )
     {
-      if( SOF == 0 ) SOF = 1;
+      if( SOF == 0 )
+      {
+        // Save the time we received the first character of a frame so that we can take the time to 
+        // receive it into account in the delay until the first move pulse. Between 250yuS to 450uS
+        // depending on the # of arguments passed to the move function.
+        g_tSpent = micros( );
+        SOF = 1;
+      }
       else
       {
         error |= ERROR_SYNTAX;
@@ -204,25 +216,25 @@ void Decode( char c )
     }
     else if( c == 'S' )
     {
-      Serial1.print( "X" );
+      Serial1.write( 'X' ); 
       Serial1.print( X.GetPos( ));
-      Serial1.print( "Y" );
+      Serial1.write( 'Y' );
       Serial1.print( Y.GetPos( ));
-      Serial1.print( "Z" );
+      Serial1.write( 'Z' );
       Serial1.print( Z.GetPos( ));
-      Serial1.print( "S" );
+      Serial1.write( 'S' );
       Serial1.print( error );
       
-      Serial1.print( "A" );
+      Serial1.write( 'A' );
       Serial1.print( g_debug[0] );
-      Serial1.print( "B" );
+      Serial1.write( 'B' );
       Serial1.print( g_debug[1] );
-      Serial1.print( "C" );
+      Serial1.write( 'C' );
       Serial1.print( g_debug[2] );
-      Serial1.print( "D" );
+      Serial1.write( 'D' );
       Serial1.print( g_debug[3] );
       
-      Serial1.print( "\n" );
+      Serial1.write( '\n' );
     }
     else if( c != 0 && c != '\n' )
     {

@@ -11,6 +11,7 @@ typedef enum {
 	retCncCommError = -7,
 	retCncError = -8,
 	retOutOfMemory = -9,
+	retBusy = -10,
 
 	retPreParseComplete = -98,
 	retQuit = -99,

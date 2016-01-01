@@ -192,6 +192,7 @@ void OnSocketEvent(CNC_SOCKET_EVENT event, PVOID param)
 	{
 	case CNC_CONNECTED:
 		InvalidateRgn(hMainWindow, NULL, false);
+		SetTimer(hMainWindow, 1, 220, NULL);
 		break;
 	case CNC_RESPONSE:
 		UpdatePosition(hMainWindow, (char*)param);
@@ -426,6 +427,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			return DefWindowProc(hWnd, message, wParam, lParam);
 		}
 		break;
+
 	case WM_PAINT:
 		OnPaint(hWnd);
 		break;
@@ -438,8 +440,18 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 	case WM_DESTROY:
 		PostQuitMessage(0);
 		break;
+
 	case WM_KEYDOWN : 
 		OnKey(wParam);
+		break;
+
+	case WM_TIMER :
+		if (CheckStatus(false) != retSuccess)
+		{
+			InvalidateRgn(hWnd, NULL, false);
+		}
+		break;
+
 	default:
 		return DefWindowProc(hWnd, message, wParam, lParam);
 	}
