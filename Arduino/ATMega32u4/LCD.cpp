@@ -14,6 +14,7 @@ extern void Move(long,long,long,long);
 extern unsigned int commandCount;
 extern unsigned int error;
 extern unsigned int g_duration;
+extern long g_tSpent;
 
 #define LCD_D0  4
 #define LCD_D1  5
@@ -427,7 +428,7 @@ void DoButtonAction( LCD_Button button, int longPress )
   long x = 0;
   long y = 0;
   long z = 0;
-  unsigned long d = 0;
+  static unsigned int acc = 0;
   
   if( button == BUTTON_SELECT )
   {
@@ -450,8 +451,10 @@ void DoButtonAction( LCD_Button button, int longPress )
     case ButtonMode_Z :
       switch(button)
       {
+      case BUTTON_RIGHT: x = 1; mode = ButtonMode_XY; break;
       case BUTTON_UP:    z = 1; break;
       case BUTTON_DOWN:  z = -1; break;
+      case BUTTON_LEFT:  x = -1; mode = ButtonMode_XY; break;
       }
     }
   }
@@ -460,19 +463,24 @@ void DoButtonAction( LCD_Button button, int longPress )
  
   if( longPress )
   {
-    d = (long)CONT_DELAY * 1100;
-    x = x * STEP_X;
-    y = y * STEP_Y;
-    z = z * STEP_Z;
+    if( acc < 0x300 ) acc = acc + 32;
+    x = ( x * STEP_X * acc ) >> 8;
+    y = ( y * STEP_Y * acc ) >> 8;
+    z = ( z * STEP_Z * acc ) >> 8;
   }
   else
   {
+    acc = 0x100;
     x = x * MICRO_STEP_X;
     y = y * MICRO_STEP_Y;
     z = z * MICRO_STEP_Z;
   }
   
-  if( x || y || z ) Move( x, y, z, d );
+  if( x || y || z )
+  {
+    g_tSpent = micros();
+    Move( x, y, z, CONT_DELAY * 1100L );
+  }
 }
 
 

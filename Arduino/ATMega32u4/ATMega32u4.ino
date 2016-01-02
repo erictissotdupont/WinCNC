@@ -29,8 +29,8 @@ unsigned long g_tSpent;
 //
 void Move( long x, long y, long z, long d )
 {
-  long s,now;
-  unsigned long t = 0;
+  long s;
+  unsigned int count = 0;
   long tX,tY,tZ;
   
   // If in error state, no move
@@ -52,8 +52,7 @@ void Move( long x, long y, long z, long d )
   tY = Y.InitMove( y, d );
   tZ = Z.InitMove( z, d ); 
   
-#ifdef TEST_TIME  
-  long count = 0;
+#ifdef TEST_TIME
   long start = micros();
   g_debug[2] = start-g_tSpent;
 #endif
@@ -69,16 +68,18 @@ void Move( long x, long y, long z, long d )
     tZ = tZ - s;
     
 #ifdef TEST_TIME 
+    // This skip the delay and allow to mesure the processing time of the move
+    // routine (calculated at the end)
     s = 0;
-    count++;
 #endif
  
-    // If we have at least 150uS to wait and it's not the first loop
-    if( s > 150 && t )
+    // If we have at least 150uS to wait AND it's not the first loop
+    if( s > 150 && count )
     {
       // Refresh the screen (if enough time)
       LCD_UpdateTask( s - 150 );
     }
+    ++count;
     
     // Calculate how much time we spent processing
     g_tSpent = micros() - g_tSpent;
@@ -98,25 +99,18 @@ void Move( long x, long y, long z, long d )
         delayMicroseconds( s % 1000 );
       }
     }
-#ifdef TEST_TIME
+#ifndef TEST_TIME
     // Counts how many times this move was late for making a motot pulse
     else g_debug[3]++;
 #endif
 
-    // Accumulate the sleep time to out global time variable
-    t = t + s;
-
     // For each axis where the time to move has been reached, move.
-    g_tSpent = micros();
-    if( tX == 0 ) X.Move( );
-    if( tY == 0 ) Y.Move( );    
-    if( tZ == 0 ) Z.Move( );
-    
     // Get the duration to the next move (based on t) or
     // a negative value if the axis has eached the end position.
-    if( tX == 0 ) tX = X.TimeToNextMove( t );
-    if( tY == 0 ) tY = Y.TimeToNextMove( t );
-    if( tZ == 0 ) tZ = Z.TimeToNextMove( t );
+    g_tSpent = micros();
+    if( tX == 0 ) tX = X.Move( );
+    if( tY == 0 ) tY = Y.Move( );    
+    if( tZ == 0 ) tZ = Z.Move( );
     
   } while(( tX > 0 ) || ( tY > 0 ) || ( tZ > 0 ));
   
@@ -126,13 +120,6 @@ void Move( long x, long y, long z, long d )
   g_debug[1] = count;
 #endif
 
-  // Check proper distance was achieved for debug purpose.
-  /*
-  if( X.Remain( ) != 0 || Y.Remain( ) != 0 || Z.Remain( ) != 0 )
-  {
-    DebugPulse( 5 );
-  }
-  */
 }
 
 void Decode( char c )
@@ -142,7 +129,6 @@ void Decode( char c )
   static long z = 0;
   static long d = 0;   /* Duration in micro seconds. 0 means max speed (G0) */
   static long s = -1;  /* Spindle state : -1 = No change, 0-1 = OFF-ON */
-  static long i = 0;   /* Packet index */
   static int sign = 0;
   static int SOF = 0;
   static long *pt = NULL;
@@ -150,7 +136,9 @@ void Decode( char c )
   static int reset = 3;
   
   if( reset == 0 )
-  {   
+  {
+    // START OF FRAME
+    // -------------- 
     if( c == '@' )
     {
       if( SOF == 0 )
@@ -166,6 +154,8 @@ void Decode( char c )
         error |= ERROR_SYNTAX;
       }
     }
+    // COMMAND FRAME
+    // -------------
     else if( SOF )
     {
       if( c == 'X' ) { pt = &x; sign = 1; }
@@ -198,7 +188,6 @@ void Decode( char c )
         y=0;
         z=0;
         d=0;
-        i=0;
         s = -1;
         pt = NULL;
         SOF = 0;
@@ -209,11 +198,15 @@ void Decode( char c )
         error |= ERROR_SYNTAX;
       }
     }
+    // RESET
+    // -----
     else if( c == 'R' )
     {
        reset = 2;
        Serial.write( 'O' ); 
     }
+    // STATUS
+    // ------
     else if( c == 'S' )
     {
       Serial1.write( 'X' ); 
@@ -224,17 +217,20 @@ void Decode( char c )
       Serial1.print( Z.GetPos( ));
       Serial1.write( 'S' );
       Serial1.print( error );
-      
-      Serial1.write( 'A' );
-      Serial1.print( g_debug[0] );
-      Serial1.write( 'B' );
-      Serial1.print( g_debug[1] );
-      Serial1.write( 'C' );
-      Serial1.print( g_debug[2] );
-      Serial1.write( 'D' );
-      Serial1.print( g_debug[3] );
-      
       Serial1.write( '\n' );
+    }
+    // DEBUG
+    // -----
+    else if( c == 'D' )
+    {
+      int i;      
+      for( i=0; i<MAX_DEBUG; i++ )
+      {      
+        Serial1.write( 'a' + i );
+        Serial1.print( g_debug[i] );
+      }     
+      Serial1.write( '\n' );
+
     }
     else if( c != 0 && c != '\n' )
     {

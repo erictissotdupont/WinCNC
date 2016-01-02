@@ -165,24 +165,29 @@ void UpdatePosition( HWND hWnd, char* str )
 {
 	int x, y, z;	
 	char* pt;
+	unsigned long gotWhat = 0;
 
 	pt = strchr(str, 'X');
-	if (pt) sscanf_s(pt + 1, "%d", &x);
+	if (pt) if (sscanf_s(pt + 1, "%d", &x) == 1) gotWhat |= 0x01;
 	pt = strchr(str, 'Y');
-	if (pt) sscanf_s(pt + 1, "%d", &y);
+	if (pt) if (sscanf_s(pt + 1, "%d", &y) == 1) gotWhat |= 0x02;
 	pt = strchr(str, 'Z');
-	if (pt) sscanf_s(pt + 1, "%d", &z);
+	if (pt) if (sscanf_s(pt + 1, "%d", &z) == 1) gotWhat |= 0x04;
 
-	pt = strchr(str, 'A');
+	pt = strchr(str, 'a');
 	if (pt) sscanf_s(pt + 1, "%d", &g_debug[0]);
-	pt = strchr(str, 'B');
+	pt = strchr(str, 'b');
 	if (pt) sscanf_s(pt + 1, "%d", &g_debug[1]);
-	pt = strchr(str, 'C');
+	pt = strchr(str, 'c');
 	if (pt) sscanf_s(pt + 1, "%d", &g_debug[2]);
-	pt = strchr(str, 'D');
+	pt = strchr(str, 'd');
 	if (pt) sscanf_s(pt + 1, "%d", &g_debug[3]);
+	
+	if (gotWhat & 0x07)
+	{
+		stepToPos(x, y, z, &g_displayPos);
+	}
 
-	stepToPos(x, y, z, &g_displayPos );
 	InvalidateRgn(hWnd, NULL, false);
 }
 

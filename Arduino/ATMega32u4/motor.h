@@ -4,29 +4,30 @@ public :
   void Reset( );
   void SetDirection( int d );
   long InitMove( long s, long t );
-  long TimeToNextMove( long t );
-  void Move( );
-  long Remain( );
-  long Done( );
+//  long TimeToNextMove( long t );
+  long Move( );
   long GetPos( );
   long FakeMove( long s );
-  bool IsAtTheEnd( );
+  bool IsAtTheEnd( );  
+  
 private :
   long curPos;
-  int curDir;
-  int toggle;
-  int swap;
+  char curDir;
+  char toggle;
+  char swap;
   
-  int stepPin;
-  int dirPin;
-  int endPin;
+  char stepPin;
+  char dirPin;
+  char endPin;
   
-  long moveLength;
-  long moveStep;
-  long moveDuration;
+  unsigned int moveLength;
+  unsigned int moveStep;
+  unsigned long moveDuration;
   long stepDuration;
   
-  long decelTime;
   long decelDist;
+  unsigned int stepDecrement;
 };
+
+long NonObjectTest( long i );
 

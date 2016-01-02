@@ -13,9 +13,9 @@
 #define DATA_PORT         50043
 
 #define MSGPERIOD         30 // 30ms
-#define MSGBUFSIZE        300
-#define MAXINPIPE         (3*MSGBUFSIZE/10)
-#define TIMEPIPESIZE	  MAXINPIPE + 10
+#define MSGBUFSIZE        255
+#define MAXINPIPE         (3 * MSGBUFSIZE / 8)
+#define TIMEPIPESIZE	  (MAXINPIPE * 2)
 
 #define IPSTRSIZE         80
 #define MAX_RESPONSE	  80
@@ -44,7 +44,7 @@ HANDLE mutexBuffer = NULL;
 
 void getStatusString(char* szBuffer, unsigned int cbBuffer)
 {
-	sprintf_s(szBuffer, cbBuffer, "%s - inPipe: %.3fs (%d) - Sent:%d - Ack:%d - Err:%d",
+	sprintf_s(szBuffer, cbBuffer, "%s - %5.2fs (%3d) - Tx:%d - Ack:%d - Err:%d",
 		cncIP,
 		totalInPipe / 1000.0f,
 		cmdCount - ackCount,
@@ -55,16 +55,6 @@ void getStatusString(char* szBuffer, unsigned int cbBuffer)
 
 unsigned long getDurationOfCommandsInPipe( )
 {
-  /*
-  unsigned long t = 0;
-  int i = timePipeOutIdx;
-  while( i != timePipeInIdx )
-  {
-    t += timePipe[i++];
-    if( i>=TIMEPIPESIZE ) i=0;
-  }
-  return t;
-  */
   return totalInPipe;
 }
 
@@ -116,7 +106,6 @@ tStatus sendCommand( char* cmd, unsigned long d )
   }
 
   WaitForSingleObject(mutexBuffer, INFINITE);
-  //pthread_mutex_lock(&mutexBuffer);
 
   timePipe[ timePipeInIdx++ ] = d;
   totalInPipe += d;
@@ -147,6 +136,7 @@ void* receiverThread( void* arg )
 
   while( bRun )
   {
+	memset(msgbuf, 0, sizeof(msgbuf));
 	if ((nbytes = recv(cnc, msgbuf, sizeof(msgbuf),0)) < 0) 
 	{
       perror("read");
@@ -185,6 +175,10 @@ void* receiverThread( void* arg )
       }
     }
 	WaitForSingleObject(mutexBuffer,INFINITE);
+	if (tmp > totalInPipe)
+	{
+		return NULL;
+	}
     totalInPipe -= tmp;
 	ReleaseMutex(mutexBuffer);
   }

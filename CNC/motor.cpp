@@ -145,7 +145,9 @@ tStatus doMove( void(*posAtStep)(t3DPoint*,int,int,void*), int stepCount, double
 	  return retUnknownErr;
   }
 
+  // Split the duration of the whole move for each step
   duration = duration / stepCount;
+  // Convert that in uS for the CNC
   d = (long)(duration * 1000);
 
   g_bInMotion = true;
@@ -176,6 +178,12 @@ tStatus doMove( void(*posAtStep)(t3DPoint*,int,int,void*), int stepCount, double
 		if (strcmp(str, "@") != 0)
 		{
 			strcat_s(str, sizeof(str), "\n");
+
+			// If the duration is more than 10sec there is a problem
+			if (duration > 10000000)
+			{
+				return retUnknownErr;
+			}
 			status = sendCommand(str, (long)duration);
 		}
 		else
@@ -203,6 +211,7 @@ tStatus doMove( void(*posAtStep)(t3DPoint*,int,int,void*), int stepCount, double
 
 tStatus CheckStatus( BOOL bWait )
 {
+	static DWORD count = 0;
 	static DWORD lastCheck = 0;
 	tStatus ret = retSuccess;
 	if (g_pSimulation == NULL)
@@ -211,11 +220,15 @@ tStatus CheckStatus( BOOL bWait )
 		if( bWait || ( g_bInMotion == false ) && ( now - lastCheck > 200 ))
 		{
 			lastCheck = now;
-			ret = sendCommand("S\n", 10);
-			if (ret == retSuccess && bWait)
+			if (bWait || count & 0x01)
 			{
-				ret = waitForStatus();
+				ret = sendCommand("S\n", 10);
+				if (ret == retSuccess && bWait)
+				{
+					ret = waitForStatus();
+				}
 			}
+			ret = sendCommand("D\n", 10);
 		}
 		else ret = retBusy;
 	}
