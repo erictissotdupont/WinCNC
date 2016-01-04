@@ -108,11 +108,11 @@ void OnPaint(HWND hWnd)
 		OUT_DEFAULT_PRECIS, 
 		CLIP_DEFAULT_PRECIS, 
 		DEFAULT_QUALITY, 
-		DEFAULT_PITCH, 
+		DEFAULT_PITCH,
 		VIEW_POSITION_FONT );
 	SelectObject(hdcMem, font);
 	//swprintf(str, 100, L"X:%.4f\r\nY:%.4f\r\nZ:%.4f",
-	sprintf_s(str, sizeof(str), "X:%.4f\r\nY:%.4f\r\nZ:%.4f",
+	sprintf_s(str, sizeof(str), "X:%.3f\r\nY:%.3f\r\nZ:%.3f",
 		g_displayPos.x,
 		g_displayPos.y,
 		g_displayPos.z);

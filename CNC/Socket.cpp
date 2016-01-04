@@ -16,6 +16,7 @@
 #define MSGBUFSIZE        255
 #define MAXINPIPE         (3 * MSGBUFSIZE / 8)
 #define TIMEPIPESIZE	  (MAXINPIPE * 2)
+#define MAX_CMD_IN_PIPE	  5000 // 5 seconds
 
 #define IPSTRSIZE         80
 #define MAX_RESPONSE	  80
@@ -57,8 +58,6 @@ unsigned long getDurationOfCommandsInPipe( )
 {
   return totalInPipe;
 }
-
-#define MAX_CMD_IN_PIPE		5000
 
 bool isPipeAvailable(int cmdLen)
 {
@@ -132,7 +131,7 @@ void* receiverThread( void* arg )
 
   bConnected = true;
   rspCnt = 0;
-  if (g_pNotifCallback) g_pNotifCallback(CNC_CONNECTED, NULL);
+  if (g_pNotifCallback) g_pNotifCallback(CNC_CONNECTED, cncIP);
 
   while( bRun )
   {
@@ -155,6 +154,8 @@ void* receiverThread( void* arg )
         break;
       case 'E' : 
 		errCount++;
+		tmp += timePipe[timePipeOutIdx++];
+		if (timePipeOutIdx >= TIMEPIPESIZE) timePipeOutIdx = 0;
 		rspCnt = 0;
 		break;
 	  default:
@@ -167,8 +168,8 @@ void* receiverThread( void* arg )
 				  tmp += timePipe[timePipeOutIdx++];
 				  if (timePipeOutIdx >= TIMEPIPESIZE) timePipeOutIdx = 0;
 				  response[rspCnt++] = 0;
+				  if (g_pNotifCallback) g_pNotifCallback(CNC_RESPONSE, response );
 				  SetEvent(hResponseReceived);
-				  if (g_pNotifCallback) g_pNotifCallback(CNC_RESPONSE, response );				  
 				  rspCnt = 0;
 			  }
 		  }
@@ -193,7 +194,9 @@ tStatus waitForStatus( )
 	tStatus ret = retCncError;
 	char* pt;
 
-	switch (WaitForSingleObject( hResponseReceived, 10000 ))
+	// Allow for one more second than the max duration of commands pending for
+	// the answer to come back.
+	switch (WaitForSingleObject( hResponseReceived, MAX_CMD_IN_PIPE + 1000 ))
 	{
 	case WAIT_OBJECT_0 :
 		pt = strchr( response, 'S');
@@ -273,6 +276,7 @@ DWORD senderThread(PVOID pParam)
 	}
 
 	RtlIpv4AddressToStringA(&CncAddr.sin_addr, cncIP);
+	if (g_pNotifCallback) g_pNotifCallback(CNC_DISCONNECTED, 0);
 
 	strcpy_s(msg, sizeof(msg), "RST");
 
@@ -388,8 +392,7 @@ int initSocketCom(void(*callback)(CNC_SOCKET_EVENT, PVOID))
   g_pNotifCallback = callback;
 
   strcpy_s(cncIP, sizeof(cncIP), "Disconnected");
-
-  if (g_pNotifCallback) g_pNotifCallback(CNC_CONNECTED, cncIP);
+  if (g_pNotifCallback) g_pNotifCallback(CNC_DISCONNECTED, 0);
 
   CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)senderThread, NULL, 0, &threadId);
 

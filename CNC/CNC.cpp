@@ -36,6 +36,11 @@ INT_PTR CALLBACK	About(HWND, UINT, WPARAM, LPARAM);
 tMetaData g_MetaData;
 
 t3DPoint g_displayPos;
+long g_actualX;
+long g_actualY;
+long g_actualZ;
+DWORD g_LastActualPos = 0;
+unsigned short g_errorState = 0;
 
 int g_debug[4];
 
@@ -163,7 +168,7 @@ tStatus parseLine(char* cmd)
 
 void UpdatePosition( HWND hWnd, char* str )
 {
-	int x, y, z;	
+	int x, y, z, s;	
 	char* pt;
 	unsigned long gotWhat = 0;
 
@@ -173,6 +178,8 @@ void UpdatePosition( HWND hWnd, char* str )
 	if (pt) if (sscanf_s(pt + 1, "%d", &y) == 1) gotWhat |= 0x02;
 	pt = strchr(str, 'Z');
 	if (pt) if (sscanf_s(pt + 1, "%d", &z) == 1) gotWhat |= 0x04;
+	pt = strchr(str, 'S');
+	if (pt) if (sscanf_s(pt + 1, "%d", &s) == 1) gotWhat |= 0x08;
 
 	pt = strchr(str, 'a');
 	if (pt) sscanf_s(pt + 1, "%d", &g_debug[0]);
@@ -182,9 +189,19 @@ void UpdatePosition( HWND hWnd, char* str )
 	if (pt) sscanf_s(pt + 1, "%d", &g_debug[2]);
 	pt = strchr(str, 'd');
 	if (pt) sscanf_s(pt + 1, "%d", &g_debug[3]);
+
+	if (gotWhat & 0x08)
+	{
+		g_errorState = s;
+	}
 	
 	if (gotWhat & 0x07)
 	{
+		g_actualX = x;
+		g_actualX = y;
+		g_actualX = z;
+		g_LastActualPos = GetTickCount();
+
 		stepToPos(x, y, z, &g_displayPos);
 	}
 
@@ -195,9 +212,14 @@ void OnSocketEvent(CNC_SOCKET_EVENT event, PVOID param)
 {
 	switch (event)
 	{
+	case CNC_DISCONNECTED:
+		InvalidateRgn(hMainWindow, NULL, false);
+		break;
+
 	case CNC_CONNECTED:
 		InvalidateRgn(hMainWindow, NULL, false);
 		SetTimer(hMainWindow, 1, 220, NULL);
+		PostMessage(hMainWindow, WM_CHECK_INITIAL_STATUS, 0, 0);
 		break;
 	case CNC_RESPONSE:
 		UpdatePosition(hMainWindow, (char*)param);
@@ -406,13 +428,13 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 	switch (message)
 	{
 	case WM_COMMAND:
-		wmId    = LOWORD(wParam);
+		wmId = LOWORD(wParam);
 		wmEvent = HIWORD(wParam);
 		// Parse the menu selections:
 		switch (wmId)
 		{
 		case IDM_RUN_GCODE:
-			OnRunGCode(hWnd,false);
+			OnRunGCode(hWnd, false);
 			break;
 		case IDM_SIMULATE_GCODE:
 			OnRunGCode(hWnd, true);
@@ -435,6 +457,38 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
 	case WM_PAINT:
 		OnPaint(hWnd);
+		break;
+
+	case WM_CHECK_INITIAL_STATUS:
+		if (CheckStatus(true) == retSuccess)
+		{
+			if (g_errorState)
+			{
+				if (MessageBox(hMainWindow,
+					L"CNC in error state. Clear?",
+					L"Error", MB_YESNO | MB_ICONERROR) == IDYES)
+				{
+					ClearCNCError();
+				}
+			}
+			else if (g_displayPos.x != 0 || g_displayPos.y != 0 || g_displayPos.z != 0)
+			{
+				if (MessageBox( hMainWindow, 
+					            L"CNC is not at origin position.\r\n\r\nDo you want to reset the CNC? If you select 'No' the remote location will be used.", 
+					            L"Warning", MB_YESNO | MB_ICONWARNING ) == IDYES)
+				{
+					ResetCNCPosition( );
+				}
+				else
+				{
+					resetMotorPosition(g_actualX, g_actualY, g_actualZ);
+				}
+			}
+		}
+		else
+		{
+			MessageBox(hMainWindow, L"Unable to fetch CNC status.", L"Error", MB_ICONERROR);
+		}
 		break;
 
 	case WM_UPDATE_POSITION:

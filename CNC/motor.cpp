@@ -78,11 +78,11 @@ void initSpindle( )
   Spindle.nextState = 0;
 }
 
-void resetMotorPosition( )
+void resetMotorPosition( long x, long y, long z )
 {
-  XMotor.step = 0;
-  YMotor.step = 0;
-  ZMotor.step = 0;
+  XMotor.step = x;
+  YMotor.step = y;
+  ZMotor.step = z;
 }
 
 double getLargestStep( )
@@ -209,6 +209,26 @@ tStatus doMove( void(*posAtStep)(t3DPoint*,int,int,void*), int stepCount, double
   return status;
 }
 
+tStatus ResetCNCPosition( )
+{
+	tStatus ret = retSuccess;
+	if (g_pSimulation == NULL)
+	{
+		ret = sendCommand("O\n", 10);
+	}
+	return ret;
+}
+
+tStatus ClearCNCError()
+{
+	tStatus ret = retSuccess;
+	if (g_pSimulation == NULL)
+	{
+		ret = sendCommand("C\n", 10);
+	}
+	return ret;
+}
+
 tStatus CheckStatus( BOOL bWait )
 {
 	static DWORD count = 0;
@@ -229,6 +249,7 @@ tStatus CheckStatus( BOOL bWait )
 				}
 			}
 			ret = sendCommand("D\n", 10);
+			count++;
 		}
 		else ret = retBusy;
 	}

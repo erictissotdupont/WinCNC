@@ -730,8 +730,9 @@ tStatus doGcode(char* cmd)
       theoricalPos.x -= compPos.x;
       theoricalPos.y -= compPos.y;
       theoricalPos.z -= compPos.z;
-
-      resetMotorPosition( );
+	  
+	  ResetCNCPosition( );
+      resetMotorPosition( 0,0,0 );
       break;
 
     case CMD_G30 : // G30 : Go back home

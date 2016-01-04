@@ -3,8 +3,8 @@
 #include "helper.h"
 #include "motor.h"
 
-extern unsigned int error;
-extern int g_debug[4];
+extern unsigned int g_error;
+extern int g_debug[MAX_DEBUG];
 
 #define RAMP_TIME     400000L
 #define MIN_SPEED     60L
@@ -150,7 +150,7 @@ long Motor::Move( )
     // Turn OFF the tool
     digitalWrite(TOOL_ON_REPLAY, LOW);
     
-    error |= ERROR_LIMIT;
+    g_error |= ERROR_LIMIT;
     // Reset the move distance to force the stopping
     moveLength = 0;
     return -1;

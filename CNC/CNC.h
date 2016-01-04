@@ -33,6 +33,7 @@ typedef struct
 	ULONG gotWhatStart;
 } tMetaData;
 
-#define WM_UPDATE_POSITION	WM_USER
-#define WM_UPDATE_PROGRESS	(WM_USER + 1)
+#define WM_UPDATE_POSITION	     WM_USER
+#define WM_UPDATE_PROGRESS	     (WM_USER + 1)
+#define WM_CHECK_INITIAL_STATUS  (WM_USER + 2)
 

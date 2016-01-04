@@ -22,7 +22,7 @@ void stepToPos(long x, long y, long z, t3DPoint* P);
 void getCurPos( t3DPoint* P );
 void getRawStepPos( int* x, int* y, int* z );
 
-void resetMotorPosition( );
+void resetMotorPosition( long x, long y, long z );
 void resetCompensation( );
 void getCompensation( double* x, double* y, double* z );
 void addCompensation( double x, double y, double z );
@@ -38,3 +38,5 @@ tStatus doMove( void(*posAtStep)(t3DPoint*,int,int,void*), int stepCount, double
 int setSpindleState( int state );
 
 tStatus CheckStatus( BOOL bWait );
+tStatus ResetCNCPosition( );
+tStatus ClearCNCError( );

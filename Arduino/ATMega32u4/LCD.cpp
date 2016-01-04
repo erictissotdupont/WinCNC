@@ -11,8 +11,7 @@ extern Motor X;
 extern Motor Y;
 extern Motor Z;
 extern void Move(long,long,long,long);
-extern unsigned int commandCount;
-extern unsigned int error;
+extern unsigned int g_error;
 extern unsigned int g_duration;
 extern long g_tSpent;
 

@@ -4,27 +4,28 @@
 #include "CNC.h"
 
 // ------------------------------------------------------------------------
-
-// StepPin, DirPin, EndPin, Direction
+// GLOBALS
+// -------
+// Instantiation and configuration of the stepper motor controlers.
+// (StepPin, DirPin, EndPin, Direction)
+//
 Motor X( 13, 12, A5,  1 );  // 13, 12, A5, 1
 Motor Y( 11, 10, A4,  1 );  // 11, 10, A4, 1
 Motor Z(  3,  2, A3,  1 );  //  3,  2, A3, 1
 
-unsigned int commandCount = 0;
-unsigned int error = 0;
-
-#define MAX_DEBUG 4
+unsigned int g_error = 0;
 int g_debug[MAX_DEBUG];
+unsigned long g_tSpent;
 
 // This calculates time spent in the execution of motor step move routine
 // and places the average loop time in uS in debug A and number of loops of 
 // the last move in debug B status.
 //#define TEST_TIME
 
-unsigned long g_tSpent;
-
 // ------------------------------------------------------------------------
-// Move the tool position by the specified # of steps by x,y,z
+// PROGRAM
+// -------
+// Move the tool position by the specified # of steps for x,y,z directions.
 // Duration of the motion determines the speed. d is in microseconds
 //
 void Move( long x, long y, long z, long d )
@@ -33,15 +34,16 @@ void Move( long x, long y, long z, long d )
   unsigned int count = 0;
   long tX,tY,tZ;
   
-  // If in error state, no move
-  if( error )
+  // If in error state, dot not move
+  if( g_error != 0 )
   {
     return;
   }
   
-  // No movement means dwell
+  // No movement means dwell (GCode "P")
   if( x==0 && y==0 && z==0 )
   {
+    // d is in microseconds
     delay( d / 1000 );
     return;
   }
@@ -59,10 +61,10 @@ void Move( long x, long y, long z, long d )
   
   do
   {
-    // Finds which of the non negative wait time is the shortest
+    // Finds which of the non negative wait times is the shortest.
     s = minOf3( tX, tY, tZ );
               
-    // Remove the sleep time from each axis
+    // Remove the wait time from each axis. At least one should become zero.
     tX = tX - s;
     tY = tY - s;
     tZ = tZ - s;
@@ -74,6 +76,10 @@ void Move( long x, long y, long z, long d )
 #endif
  
     // If we have at least 150uS to wait AND it's not the first loop
+    // This value is estamated to be the longest processing time for any move to
+    // ensure that the time spent updating the screen won't be longer than the
+    // wait time until the next pulse. Skipping the first step is because the
+    // time spent decoding the command may exceed the wait time
     if( s > 150 && count )
     {
       // Refresh the screen (if enough time)
@@ -81,13 +87,14 @@ void Move( long x, long y, long z, long d )
     }
     ++count;
     
-    // Calculate how much time we spent processing
+    // Calculate how much time we spent processing since the last move pulse or
+    // since we received the command (in the case of the first move).
     g_tSpent = micros() - g_tSpent;
     
     // If we still have time to wait
     if( s > g_tSpent )
     {
-      s = s - g_tSpent;      
+      s = s - g_tSpent;
       // When sleeping more than 16388 uS, documentation says don't use delayMicroseconds.
       if( s < 16000 )
       {
@@ -100,13 +107,13 @@ void Move( long x, long y, long z, long d )
       }
     }
 #ifndef TEST_TIME
-    // Counts how many times this move was late for making a motot pulse
+    // Counts how many times move was late for making a motot pulse
     else g_debug[3]++;
 #endif
 
     // For each axis where the time to move has been reached, move.
-    // Get the duration to the next move (based on t) or
-    // a negative value if the axis has eached the end position.
+    // Save the duration to the next move or a negative value if the
+    // axis has eached the end position.
     g_tSpent = micros();
     if( tX == 0 ) tX = X.Move( );
     if( tY == 0 ) tY = Y.Move( );    
@@ -122,6 +129,27 @@ void Move( long x, long y, long z, long d )
 
 }
 
+typedef enum {
+  COMM_IDLE,
+  COMM_RESET_1,
+  COMM_RESET_2,
+  COMM_CONNECTED,
+  COMM_IN_FRAME 
+} tCommState;
+
+inline void SendStatus( )
+{
+  Serial1.write( 'X' ); 
+  Serial1.print( X.GetPos( ));
+  Serial1.write( 'Y' );
+  Serial1.print( Y.GetPos( ));
+  Serial1.write( 'Z' );
+  Serial1.print( Z.GetPos( ));
+  Serial1.write( 'S' );
+  Serial1.print( g_error );
+  Serial1.write( '\n' );
+}
+
 void Decode( char c )
 {
   static long x = 0;
@@ -130,94 +158,100 @@ void Decode( char c )
   static long d = 0;   /* Duration in micro seconds. 0 means max speed (G0) */
   static long s = -1;  /* Spindle state : -1 = No change, 0-1 = OFF-ON */
   static int sign = 0;
-  static int SOF = 0;
   static long *pt = NULL;
-  static long nextIndex = 0;
-  static int reset = 3;
+  static tCommState state = COMM_IDLE;
   
-  if( reset == 0 )
+  if( state == COMM_IN_FRAME )
+  {
+    if( c == 'X' ) { pt = &x; sign = 1; }
+    else if( c == 'Y' ) { pt = &y; sign = 1; }
+    else if( c == 'Z' ) { pt = &z; sign = 1; }
+    else if( c == 'D' ) { pt = &d; sign = 1; }
+    else if( c == 'S' ) { pt = &s; sign = 1; s = 0; }
+    else if( c == '-' ) { sign = -1; }
+    else if( c >= '0' && c <= '9' )
+    {
+      if( pt )
+      { 
+        *pt = *pt * 10 + ( c - '0' ) * sign;
+      }
+      else
+      { 
+        g_error |= ERROR_NUMBER;
+      }
+    }    
+    else if( c == '\n' )
+    {        
+      Serial1.write( g_error ? 'E' : 'O' );
+      
+      if( s >= 0 )
+      {
+        digitalWrite(TOOL_ON_REPLAY, s ? HIGH : LOW);
+      }
+ 
+      if( x != 0 || y != 0 || z != 0 || d != 0 )
+      {     
+        Move( x,y,z,d );
+      }
+      else
+      {
+        g_error |= ERROR_SYNTAX;
+      }
+            
+      x=0;
+      y=0;
+      z=0;
+      d=0;
+      s = -1;
+      pt = NULL;
+      state = COMM_CONNECTED;
+    }
+    else
+    {
+      // This is a bit strict but if we receive any other symbol than
+      // what should be in frame then we enter an error state.
+      g_error |= ERROR_SYNTAX;
+    }  
+  }
+  else if( state == COMM_CONNECTED )
   {
     // START OF FRAME
     // -------------- 
     if( c == '@' )
     {
-      if( SOF == 0 )
-      {
-        // Save the time we received the first character of a frame so that we can take the time to 
-        // receive it into account in the delay until the first move pulse. Between 250yuS to 450uS
-        // depending on the # of arguments passed to the move function.
-        g_tSpent = micros( );
-        SOF = 1;
-      }
-      else
-      {
-        error |= ERROR_SYNTAX;
-      }
+      // Save the time we received the first character of a frame so that we can take the time to 
+      // receive it into account in the delay until the first move pulse. Between 250yuS to 450uS
+      // depending on the # of arguments passed to the move function.
+      g_tSpent = micros( );
+      state = COMM_IN_FRAME;
     }
-    // COMMAND FRAME
-    // -------------
-    else if( SOF )
+    // ORIGIN
+    // ------
+    else if( c == 'O' )
     {
-      if( c == 'X' ) { pt = &x; sign = 1; }
-      else if( c == 'Y' ) { pt = &y; sign = 1; }
-      else if( c == 'Z' ) { pt = &z; sign = 1; }
-      else if( c == 'D' ) { pt = &d; sign = 1; }
-      else if( c == 'S' ) { pt = &s; sign = 1; s = 0; }
-      else if( c == '-' ) { sign = -1; }
-      else if( c >= '0' && c <= '9' )
-      {
-        if( pt ) *pt = *pt * 10 + ( c - '0' ) * sign;
-        else error |= ERROR_NUMBER;
-      }    
-      else if( c == '\n' )
-      {        
-        Serial1.write( error ? 'E' : 'O' );
-        
-        if( s >= 0 )
-        {
-          digitalWrite(TOOL_ON_REPLAY, s ? HIGH : LOW);
-        }
- 
-        if( x != 0 || y != 0 || z != 0 || d != 0 )
-        {
-          commandCount += 1;
-          Move( x,y,z,d );
-        }
-            
-        x=0;
-        y=0;
-        z=0;
-        d=0;
-        s = -1;
-        pt = NULL;
-        SOF = 0;
-        nextIndex++;
-      }
-      else
-      {
-        error |= ERROR_SYNTAX;
-      }
+      X.Reset( );
+      Y.Reset( );
+      Z.Reset( );
+      SendStatus( );
     }
+    // CLEAR
+    // -----
+    else if( c == 'C' )
+    {
+      g_error = 0;
+      SendStatus( );
+    }    
     // RESET
     // -----
     else if( c == 'R' )
     {
-       reset = 2;
-       Serial.write( 'O' ); 
+      state = COMM_RESET_1;
     }
     // STATUS
     // ------
     else if( c == 'S' )
     {
-      Serial1.write( 'X' ); 
-      Serial1.print( X.GetPos( ));
-      Serial1.write( 'Y' );
-      Serial1.print( Y.GetPos( ));
-      Serial1.write( 'Z' );
-      Serial1.print( Z.GetPos( ));
-      Serial1.write( 'S' );
-      Serial1.print( error );
-      Serial1.write( '\n' );
+      SendStatus( );
     }
     // DEBUG
     // -----
@@ -230,38 +264,43 @@ void Decode( char c )
         Serial1.print( g_debug[i] );
       }     
       Serial1.write( '\n' );
-
     }
-    else if( c != 0 && c != '\n' )
+    else if ( c == '\n' )
     {
-       Serial.write( 'E' ); 
+      // Ignore new lines symbols
     }
+    else
+    {
+      // This symbol is not valid in this state
+      g_error |= ERROR_COMM;
+    }    
   }
-  else
-  {    
-    if( c == 'R' && reset == 3 ) reset = 2;
-    else if( c == 'S' && reset == 2 ) reset = 1;
-    else if( c == 'T' && reset == 1 )
+  else if( state == COMM_IDLE )
+  {
+    if( c == 'R' ) state = COMM_RESET_1;
+  }
+  else if( state == COMM_RESET_1 )
+  {
+    if( c == 'S' ) 
+      state = COMM_RESET_2;
+    else
+      state = COMM_IDLE;
+  }
+  else if( state == COMM_RESET_2 )
+  {
+    if( c == 'T' )
     {
       Serial1.print( "HLO\n" );
-      reset = 0;
-      error = 0;
       x=0;
       y=0;
       z=0;
       d=0;
       s=-1;
       pt = NULL;
-      X.Reset( );
-      Y.Reset( );
-      Z.Reset( );
-      SOF = 0;
-      nextIndex = 0;
+      state = COMM_CONNECTED;
     }
     else
-    {     
-      reset = 3;
-    }
+      state = COMM_IDLE;
   }
 }
 
@@ -270,7 +309,7 @@ void Decode( char c )
 void setup() {
   int i;
   
-  error = 0;
+  g_error = 0;
   for( i=0; i<MAX_DEBUG; i++ ) g_debug[i] = 0;
   
   delay( 250 );
@@ -301,7 +340,7 @@ void loop()
   LCD_UpdateTask( 1000 );
   // Scan the keyboard
   LCD_ButtonTask( );
-  if( error )
+  if( g_error )
   {
     LCD_SetStatus( "ERR", 0 );
   }
