@@ -198,8 +198,8 @@ void UpdatePosition( HWND hWnd, char* str )
 	if (gotWhat & 0x07)
 	{
 		g_actualX = x;
-		g_actualX = y;
-		g_actualX = z;
+		g_actualY = y;
+		g_actualZ = z;
 		g_LastActualPos = GetTickCount();
 
 		stepToPos(x, y, z, &g_displayPos);
@@ -469,9 +469,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 					L"Error", MB_YESNO | MB_ICONERROR) == IDYES)
 				{
 					ClearCNCError();
+					ResetCNCPosition();
 				}
 			}
-			else if (g_displayPos.x != 0 || g_displayPos.y != 0 || g_displayPos.z != 0)
+			else if (g_actualX != 0 || g_actualY != 0 || g_actualZ != 0)
 			{
 				if (MessageBox( hMainWindow, 
 					            L"CNC is not at origin position.\r\n\r\nDo you want to reset the CNC? If you select 'No' the remote location will be used.", 
