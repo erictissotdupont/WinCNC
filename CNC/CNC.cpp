@@ -116,49 +116,8 @@ tStatus parseLine(char* cmd)
 		case retSuccess:
 			// Success.
 			break;
-
-		case retInvalidParam:
-			printf("Invalid command.\n");
-			break;
-
-		case retSyntaxError:
-			printf("GCode syntax error.\n");
-			break;
-
-		case retFileNotFound:
-			printf("File not found.\n");
-			break;
-
-		case retUserAborted:
-			printf("User interruption.\n");
-			break;
-
-		case retNoOutputFound:
-			printf("No output.\n");
-			break;
-
-		case retCncNotConnected:
-			printf("CNC not connected.\n");
-			break;
-
-		case retCncCommError:
-			printf("CNC communication error.\n");
-			break;
-
-		case retCncError:
-			printf("CNC in error state.\n");
-			break;
-
-		case retQuit:
-			printf("Quit.\n");
-			break;
-
-		case retUnknownErr:
-			printf("Unexpected error.\n");
-			break;
-
-		default:
-			printf("Unknown error.\n");
+		default :
+			printf("%S", GetCNCErrorString(ret));
 			break;
 		}
 	}
@@ -464,9 +423,17 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		{
 			if (g_errorState)
 			{
+				WCHAR msg[MAX_PATH];
+				wsprintf(msg, L"CNC in error state 0x%02X (", g_errorState);
+				if (g_errorState & ERROR_LIMIT) wcscat_s(msg, MAX_PATH, L" Limit");
+				if( g_errorState & ERROR_NUMBER ) wcscat_s(msg, MAX_PATH, L" Number");
+				if( g_errorState & ERROR_SYNTAX ) wcscat_s(msg, MAX_PATH, L" Syntax");
+				if( g_errorState & ERROR_MATH   ) wcscat_s(msg, MAX_PATH, L" Math");
+				if( g_errorState & ERROR_COMM   ) wcscat_s(msg, MAX_PATH, L" Comm");
+				wcscat_s(msg, MAX_PATH, L" ) \r\nClear error state?");
+
 				if (MessageBox(hMainWindow,
-					L"CNC in error state. Clear?",
-					L"Error", MB_YESNO | MB_ICONERROR) == IDYES)
+					msg, L"Error", MB_YESNO | MB_ICONERROR) == IDYES)
 				{
 					ClearCNCError();
 					ResetCNCPosition();

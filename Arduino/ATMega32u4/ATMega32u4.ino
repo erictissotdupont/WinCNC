@@ -211,6 +211,7 @@ void Decode( char c )
       // This is a bit strict but if we receive any other symbol than
       // what should be in frame then we enter an error state.
       g_error |= ERROR_SYNTAX;
+      g_debug[1] = c;
     }  
   }
   else if( state == COMM_CONNECTED )
@@ -273,6 +274,7 @@ void Decode( char c )
     {
       // This symbol is not valid in this state
       g_error |= ERROR_COMM;
+      g_debug[0] = c;
     }    
   }
   else if( state == COMM_IDLE )

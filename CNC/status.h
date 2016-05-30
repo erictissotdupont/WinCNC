@@ -8,10 +8,11 @@ typedef enum {
 	retUserAborted = -4,
 	retNoOutputFound = -5,
 	retCncNotConnected = -6,
-	retCncCommError = -7,
+	retCncStatusTimeout = -7,
 	retCncError = -8,
 	retOutOfMemory = -9,
 	retBusy = -10,
+	retBufferBusyTimeout = -11,
 
 	retPreParseComplete = -98,
 	retQuit = -99,

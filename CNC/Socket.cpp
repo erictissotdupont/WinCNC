@@ -13,10 +13,9 @@
 #define DATA_PORT         50043
 
 #define MSGPERIOD         30 // 30ms
-#define MSGBUFSIZE        255
-#define MAXINPIPE         (3 * MSGBUFSIZE / 8)
-#define TIMEPIPESIZE	  (MAXINPIPE * 2)
-#define MAX_CMD_IN_PIPE	  5000 // 5 seconds
+#define MSGBUFSIZE        200
+#define MAX_CMD_IN_PIPE	  3000 // 3 seconds
+#define TIMEPIPESIZE	  (MAX_CMD_IN_PIPE/2)
 
 #define IPSTRSIZE         80
 #define MAX_RESPONSE	  80
@@ -42,6 +41,7 @@ unsigned long timePipe[ TIMEPIPESIZE ];
 unsigned long totalInPipe;
 
 HANDLE mutexBuffer = NULL;
+//HANDLE hDebug;
 
 void getStatusString(char* szBuffer, unsigned int cbBuffer)
 {
@@ -77,8 +77,8 @@ tStatus sendCommand( char* cmd, unsigned long d )
   if( cl > MSGBUFSIZE ) return retInvalidParam;
 
   // Don't push more than 5 seconds worth of commands in the pipe
-  timeout = (MAX_CMD_IN_PIPE * 2) / MSGPERIOD;
-  while ((getDurationOfCommandsInPipe() > MAX_CMD_IN_PIPE) && timeout-- && errCount == 0)
+  timeout = 5000 / MSGPERIOD;
+  while ((getDurationOfCommandsInPipe() > MAX_CMD_IN_PIPE) && timeout-- )
   {
 	  Sleep(MSGPERIOD);
   }
@@ -86,22 +86,18 @@ tStatus sendCommand( char* cmd, unsigned long d )
   // If the command can't fit in the current buffer
   if(( strlen( outBuffer ) + cl + 1 ) >= MSGBUFSIZE )
   {
-    timeout = (MAX_CMD_IN_PIPE * 2) / MSGPERIOD;
-    // Wait for the buffer to be empty (5 sec timeout)
+    timeout = ( getDurationOfCommandsInPipe( ) + 1000 ) / MSGPERIOD;
+    // Wait for the buffer to be empty
     // printf( "outBuffer is full...\n" );
-	while (outBuffer[0] != 0 && timeout-- > 0 && errCount == 0)
+	while (outBuffer[0] != 0 && timeout-- > 0 )
 	{
 		Sleep(MSGPERIOD);
 	}
     if( timeout <= 0 )
     {
       printf( "Timeout on TX\n" );
-      return retCncCommError;
+      return retBufferBusyTimeout;
     }
-  }
-  if (errCount)
-  {
-	  return retCncError;
   }
 
   WaitForSingleObject(mutexBuffer, INFINITE);
@@ -210,7 +206,7 @@ tStatus waitForStatus( )
 		}
 		break;
 	case WAIT_TIMEOUT :
-		ret = retCncCommError;
+		ret = retCncStatusTimeout;
 		break;
 	}
 
@@ -309,25 +305,31 @@ DWORD senderThread(PVOID pParam)
 
 		if (outBuffer[0] != 0)
 		{
-			if (cmdCount - MAXINPIPE < ackCount)
+			if (outSize != strlen(outBuffer))
 			{
-				if (outSize != strlen(outBuffer))
+				printf("ERROR : buffer size mismatch. Expected %d, got %d.\n", outSize, strlen(outBuffer));
+				bRun = 0;
+			}
+			else
+			{
+				if (send(cnc, outBuffer, outSize,0) != outSize)
 				{
-					printf("ERROR : buffer size mismatch. Expected %d, got %d.\n", outSize, strlen(outBuffer));
+					printf("Write failed.\n");
 					bRun = 0;
 				}
+				/*
 				else
 				{
-					if (send(cnc, outBuffer, outSize,0) != outSize)
-					{
-						printf("Write failed.\n");
-						bRun = 0;
-					}
-
-					outSize = 0;
-					outBuffer[0] = 0;
+					DWORD dwWritten;
+					WriteFile(hDebug, outBuffer, outSize, &dwWritten, NULL);
+					WriteFile(hDebug, "-------\n", 8, &dwWritten, NULL);
 				}
+				*/
+
+				outSize = 0;
+				outBuffer[0] = 0;
 			}
+
 			idleCount = 0;
 		}
 		else
@@ -385,6 +387,8 @@ int initSocketCom(void(*callback)(CNC_SOCKET_EVENT, PVOID))
 
   outSize = 0;
   memset( outBuffer, 0, sizeof( outBuffer ));
+
+  //hDebug = CreateFile( L"C:\\Windows\\Temp\\Cncdebug.txt", GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, 0, NULL);
 
   mutexBuffer = CreateMutex(NULL, FALSE, NULL);
   hResponseReceived = CreateEvent(NULL, FALSE, FALSE, NULL);

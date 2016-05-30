@@ -146,7 +146,7 @@ WCHAR* GetCNCErrorString(tStatus status)
 	switch (status)
 	{
 	case retInvalidParam:
-		return(L"Invalid command.");
+		return(L"Invalid parameter.");
 	case retSyntaxError:
 		return(L"GCode syntax error.");
 	case retFileNotFound:
@@ -157,8 +157,10 @@ WCHAR* GetCNCErrorString(tStatus status)
 		return(L"No output.");
 	case retCncNotConnected:
 		return(L"CNC not connected.");
-	case retCncCommError:
-		return(L"CNC communication error.");
+	case retBufferBusyTimeout:
+		return(L"CNC Output buffer overflow (timeout).");
+	case retCncStatusTimeout:
+		return(L"CNC Status request timeout.");
 	case retCncError:
 		return(L"CNC in error state.");
 	case retQuit:

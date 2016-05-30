@@ -8,6 +8,6 @@ start() {
   echo "CNC Server Started"
   . /etc/profile
   echo $PATH
-  python /root/server.py &
+  nice -n -10 python /root/server.py &
 }                 
                     

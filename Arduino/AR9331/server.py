@@ -17,7 +17,7 @@ from time import sleep
 # Arbitrary non-privileged port
 BROADCAST_PORT = 50042
 DATA_PORT = 50043
-BUFFER_SIZE = 2000
+BUFFER_SIZE = 1024
 connected=False
 q = Queue.Queue()
 
@@ -37,15 +37,28 @@ thread.start_new_thread( broadcast, ( ))
 def receive( c ):
   global cmdCount
   cmdCount = 0
+  remainder = ''
+
   while connected:
     try:
-      data = c.recv(BUFFER_SIZE)
+      data = remainder + c.recv(BUFFER_SIZE)
+      remainder = ''
     except IOError:
       print 'IO Error from host.'
       break
     if not data:
-      print 'No data from host.'
+      print '\n\nWARNING: No data from host.'
       break
+
+    # If we received a command sliced between two frames (new line is missing at the end)
+    if (data[-1]!='\n'):
+      # Find the last complete command
+      last = data.rfind('\n')
+      if( last > -1 ):
+        # Save the incomplete command
+        remainder = data[last+1:]
+        # Only keep complete commands in the data buffer
+        data = data[0:last]
 
     for line in string.split(data, '\n'):
       if not line:
@@ -53,6 +66,8 @@ def receive( c ):
         break
       cmdCount = cmdCount + 1
       q.put(line+'\n')
+
+    # Insert a request to send agregated acknowledge from ATMega back to PC
     q.put('A')
 
   # This will close the connection
@@ -114,7 +129,7 @@ while 1:
         # String response. Wait for line return.
         while 1:
           if not c:
-            print 'Response timeout.'
+            print '\nResponse timeout (string).'
             break
           rsp=rsp+c
           if c == '\n':
@@ -122,7 +137,7 @@ while 1:
           c=t.read(1)
         if c: ackCount = ackCount + 1
 
-    sys.stdout.write("%06d-%06d %d \r" % (cmdCount,ackCount,cmdCount-ackCount))
+    sys.stdout.write("%06d-%06d %d\r" % (cmdCount,ackCount,cmdCount-ackCount))
     sys.stdout.flush()
 
   while not q.empty(): q.get()
