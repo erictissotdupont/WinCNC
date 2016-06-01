@@ -150,7 +150,7 @@ inline void SendStatus( )
   Serial1.write( '\n' );
 }
 
-void Decode( char c )
+void Decode(  )
 {
   static long x = 0;
   static long y = 0;
@@ -160,150 +160,154 @@ void Decode( char c )
   static int sign = 0;
   static long *pt = NULL;
   static tCommState state = COMM_IDLE;
+  char c;
   
-  if( state == COMM_IN_FRAME )
-  {
-    if( c == 'X' ) { pt = &x; sign = 1; }
-    else if( c == 'Y' ) { pt = &y; sign = 1; }
-    else if( c == 'Z' ) { pt = &z; sign = 1; }
-    else if( c == 'D' ) { pt = &d; sign = 1; }
-    else if( c == 'S' ) { pt = &s; sign = 1; s = 0; }
-    else if( c == '-' ) { sign = -1; }
-    else if( c >= '0' && c <= '9' )
+  while(( c = Serial1.read( )) >= 0 )
+  { 
+    if( state == COMM_IN_FRAME )
     {
-      if( pt )
-      { 
-        *pt = *pt * 10 + ( c - '0' ) * sign;
+      if( c == 'X' ) { pt = &x; sign = 1; }
+      else if( c == 'Y' ) { pt = &y; sign = 1; }
+      else if( c == 'Z' ) { pt = &z; sign = 1; }
+      else if( c == 'D' ) { pt = &d; sign = 1; }
+      else if( c == 'S' ) { pt = &s; sign = 1; s = 0; }
+      else if( c == '-' ) { sign = -1; }
+      else if( c >= '0' && c <= '9' )
+      {
+        if( pt )
+        { 
+          *pt = *pt * 10 + ( c - '0' ) * sign;
+        }
+        else
+        { 
+          g_error |= ERROR_NUMBER;
+        }
+      }    
+      else if( c == '\n' )
+      {        
+        Serial1.write( g_error ? 'E' : 'O' );
+        
+        if( s >= 0 )
+        {
+          digitalWrite(TOOL_ON_REPLAY, s ? HIGH : LOW);
+        }
+   
+        if( x != 0 || y != 0 || z != 0 || d != 0 )
+        {     
+          Move( x,y,z,d );
+        }
+        else
+        {
+          g_error |= ERROR_SYNTAX;
+        }
+              
+        x=0;
+        y=0;
+        z=0;
+        d=0;
+        s = -1;
+        pt = NULL;
+        state = COMM_CONNECTED;
       }
       else
-      { 
-        g_error |= ERROR_NUMBER;
-      }
-    }    
-    else if( c == '\n' )
-    {        
-      Serial1.write( g_error ? 'E' : 'O' );
-      
-      if( s >= 0 )
       {
-        digitalWrite(TOOL_ON_REPLAY, s ? HIGH : LOW);
-      }
- 
-      if( x != 0 || y != 0 || z != 0 || d != 0 )
-      {     
-        Move( x,y,z,d );
-      }
-      else
-      {
+        // This is a bit strict but if we receive any other symbol than
+        // what should be in frame then we enter an error state.
         g_error |= ERROR_SYNTAX;
+        g_debug[1] = c;
+      }  
+    }
+    else if( state == COMM_CONNECTED )
+    {
+      // START OF FRAME
+      // -------------- 
+      if( c == '@' )
+      {
+        // Save the time we received the first character of a frame so that we can take the time to 
+        // receive it into account in the delay until the first move pulse. Between 250yuS to 450uS
+        // depending on the # of arguments passed to the move function.
+        g_tSpent = micros( );
+        state = COMM_IN_FRAME;
       }
-            
-      x=0;
-      y=0;
-      z=0;
-      d=0;
-      s = -1;
-      pt = NULL;
-      state = COMM_CONNECTED;
+      // ORIGIN
+      // ------
+      else if( c == 'O' )
+      {
+        X.Reset( );
+        Y.Reset( );
+        Z.Reset( );
+        SendStatus( );
+      }
+      // CLEAR
+      // -----
+      else if( c == 'C' )
+      {
+        g_error = 0;
+        SendStatus( );
+      }    
+      // RESET
+      // -----
+      else if( c == 'R' )
+      {
+        state = COMM_RESET_1;
+      }
+      // STATUS
+      // ------
+      else if( c == 'S' )
+      {
+        SendStatus( );
+      }
+      // DEBUG
+      // -----
+      else if( c == 'D' )
+      {
+        int i;      
+        for( i=0; i<MAX_DEBUG; i++ )
+        {      
+          Serial1.write( 'a' + i );
+          Serial1.print( g_debug[i] );
+        }     
+        Serial1.write( '\n' );
+      }
+      else if ( c == '\n' )
+      {
+        // Ignore new lines symbols
+      }
+      else
+      {
+        // This symbol is not valid in this state
+        g_error |= ERROR_COMM;
+        g_debug[0] = c;
+      }    
     }
-    else
+    else if( state == COMM_IDLE )
     {
-      // This is a bit strict but if we receive any other symbol than
-      // what should be in frame then we enter an error state.
-      g_error |= ERROR_SYNTAX;
-      g_debug[1] = c;
-    }  
-  }
-  else if( state == COMM_CONNECTED )
-  {
-    // START OF FRAME
-    // -------------- 
-    if( c == '@' )
-    {
-      // Save the time we received the first character of a frame so that we can take the time to 
-      // receive it into account in the delay until the first move pulse. Between 250yuS to 450uS
-      // depending on the # of arguments passed to the move function.
-      g_tSpent = micros( );
-      state = COMM_IN_FRAME;
+      if( c == 'R' ) state = COMM_RESET_1;
     }
-    // ORIGIN
-    // ------
-    else if( c == 'O' )
+    else if( state == COMM_RESET_1 )
     {
-      X.Reset( );
-      Y.Reset( );
-      Z.Reset( );
-      SendStatus( );
+      if( c == 'S' ) 
+        state = COMM_RESET_2;
+      else
+        state = COMM_IDLE;
     }
-    // CLEAR
-    // -----
-    else if( c == 'C' )
+    else if( state == COMM_RESET_2 )
     {
-      g_error = 0;
-      SendStatus( );
-    }    
-    // RESET
-    // -----
-    else if( c == 'R' )
-    {
-      state = COMM_RESET_1;
+      if( c == 'T' )
+      {
+        Serial1.print( "HLO\n" );
+        x=0;
+        y=0;
+        z=0;
+        d=0;
+        s=-1;
+        pt = NULL;
+        state = COMM_CONNECTED;
+      }
+      else
+        state = COMM_IDLE;
     }
-    // STATUS
-    // ------
-    else if( c == 'S' )
-    {
-      SendStatus( );
-    }
-    // DEBUG
-    // -----
-    else if( c == 'D' )
-    {
-      int i;      
-      for( i=0; i<MAX_DEBUG; i++ )
-      {      
-        Serial1.write( 'a' + i );
-        Serial1.print( g_debug[i] );
-      }     
-      Serial1.write( '\n' );
-    }
-    else if ( c == '\n' )
-    {
-      // Ignore new lines symbols
-    }
-    else
-    {
-      // This symbol is not valid in this state
-      g_error |= ERROR_COMM;
-      g_debug[0] = c;
-    }    
-  }
-  else if( state == COMM_IDLE )
-  {
-    if( c == 'R' ) state = COMM_RESET_1;
-  }
-  else if( state == COMM_RESET_1 )
-  {
-    if( c == 'S' ) 
-      state = COMM_RESET_2;
-    else
-      state = COMM_IDLE;
-  }
-  else if( state == COMM_RESET_2 )
-  {
-    if( c == 'T' )
-    {
-      Serial1.print( "HLO\n" );
-      x=0;
-      y=0;
-      z=0;
-      d=0;
-      s=-1;
-      pt = NULL;
-      state = COMM_CONNECTED;
-    }
-    else
-      state = COMM_IDLE;
-  }
+  }  
 }
 
 // ------------------------------------------------------------------------
@@ -334,10 +338,8 @@ void setup() {
 
 void loop() 
 {
-  while(Serial1.available( ) > 0 )
-  {
-    Decode(Serial1.read( ));
-  }
+  Decode( );
+
   // Refresh the LCD outside of the move loop
   LCD_UpdateTask( 1000 );
   // Scan the keyboard

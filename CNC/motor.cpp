@@ -129,6 +129,8 @@ long getSpindleState( )
   return( Spindle.nextState == 3 );
 }
 
+// This flag is used to prevent requesting status while in
+// a linear motion (such as a circle) to reduce jitter
 bool g_bInMotion = false;
 
 tStatus doMove( void(*posAtStep)(t3DPoint*,int,int,void*), int stepCount, double duration, void* pArg )
@@ -184,7 +186,7 @@ tStatus doMove( void(*posAtStep)(t3DPoint*,int,int,void*), int stepCount, double
 			{
 				return retUnknownErr;
 			}
-			status = sendCommand(str, (long)duration);
+			status = sendCommand(str, x, y, z, (unsigned long)duration);
 		}
 		else
 		{
@@ -214,7 +216,7 @@ tStatus ResetCNCPosition( )
 	tStatus ret = retSuccess;
 	if (g_pSimulation == NULL)
 	{
-		ret = sendCommand("O\n", 10);
+		ret = sendCommand("O\n",0,0,0,10);
 	}
 	return ret;
 }
@@ -224,7 +226,7 @@ tStatus ClearCNCError()
 	tStatus ret = retSuccess;
 	if (g_pSimulation == NULL)
 	{
-		ret = sendCommand("C\n", 10);
+		ret = sendCommand("C\n",0,0,0,10);
 	}
 	return ret;
 }
@@ -240,15 +242,18 @@ tStatus CheckStatus( BOOL bWait )
 		if( bWait || ( g_bInMotion == false ) && ( now - lastCheck > 200 ))
 		{
 			lastCheck = now;
-			if (bWait || count & 0x01)
+			if((( count & 0x01 ) != 0 ) || bWait )
 			{
-				ret = sendCommand("S\n", 10);
+				ret = sendCommand("S\n",0,0,0,10);
 				if (ret == retSuccess && bWait)
 				{
 					ret = waitForStatus();
 				}
 			}
-			ret = sendCommand("D\n", 10);
+			else if(( count & 0x01 ) == 0 )
+			{
+				ret = sendCommand("D\n", 0, 0, 0, 10);
+			}
 			count++;
 		}
 		else ret = retBusy;

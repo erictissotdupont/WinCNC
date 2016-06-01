@@ -36,10 +36,4 @@ typedef struct
 #define WM_UPDATE_POSITION	     WM_USER
 #define WM_UPDATE_PROGRESS	     (WM_USER + 1)
 #define WM_CHECK_INITIAL_STATUS  (WM_USER + 2)
-
-// Definition of the value returned by CNC "Status" (S)
-#define ERROR_LIMIT      0x0001
-#define ERROR_NUMBER     0x0002
-#define ERROR_SYNTAX     0x0004
-#define ERROR_MATH       0x0008
-#define ERROR_COMM       0x0010
+#define WM_REDRAW				 (WM_USER + 3)

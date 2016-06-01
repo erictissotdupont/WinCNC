@@ -2,6 +2,7 @@
 #include "geometry.h"
 #include "gcode.h"
 #include "socket.h"
+#include "motor.h"
 
 #include <wchar.h>
 #include <mmsystem.h>
@@ -135,7 +136,20 @@ void OnPaint(HWND hWnd)
 		DEFAULT_PITCH,
 		VIEW_POSITION_FONT);
 	SelectObject(hdcMem, font);
-	sprintf_s(str, sizeof(str), "A:%d\r\nB:%d\r\nC:%d\r\nD:%d",
+
+	long xInPipe, yInPipe, zInPipe;
+	t3DPoint current, inPipe;
+	getCurPos(&current);
+	getDistanceInPipe(&xInPipe, &yInPipe, &zInPipe);
+	stepToPos(xInPipe, yInPipe, zInPipe, &inPipe);
+	current.x -= inPipe.x;
+	current.y -= inPipe.y;
+	current.z -= inPipe.z;
+
+	sprintf_s(str, sizeof(str), "X:%.3f Y:%.3f Z:%.3f\r\nA:%d\r\nB:%d\r\nC:%d\r\nD:%d",
+		current.x,
+		current.y,
+		current.z,
 		g_debug[0],
 		g_debug[1],
 		g_debug[2],

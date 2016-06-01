@@ -15,7 +15,7 @@
 #define MSGPERIOD         30 // 30ms
 #define MSGBUFSIZE        200
 #define MAX_CMD_IN_PIPE	  3000 // 3 seconds
-#define TIMEPIPESIZE	  (MAX_CMD_IN_PIPE/2)
+#define TIMEPIPESIZE	  (MAX_CMD_IN_PIPE/8)
 
 #define IPSTRSIZE         80
 #define MAX_RESPONSE	  80
@@ -36,19 +36,53 @@ long repeatCount = 0;
 int outSize= 0;
 char outBuffer[MSGBUFSIZE];
 
+typedef struct
+{
+	long x;
+	long y;
+	long z;
+	unsigned long duration;
+} tCommandInPipe;
+
 int timePipeInIdx, timePipeOutIdx;
-unsigned long timePipe[ TIMEPIPESIZE ];
-unsigned long totalInPipe;
+tCommandInPipe inPipe[ TIMEPIPESIZE ];
+unsigned long timeInPipe;
+long xInPipe;
+long yInPipe;
+long zInPipe;
 
 HANDLE mutexBuffer = NULL;
 //HANDLE hDebug;
 
+int getCountOfCommandsInPipe()
+{
+	int c = timePipeInIdx - timePipeOutIdx;
+	if (c < 0) c = c + TIMEPIPESIZE;
+	return c;
+}
+
+int getAckPendingCount()
+{
+	return cmdCount - ackCount;
+}
+
+int isCncConnected()
+{
+	return bConnected;
+}
+
+long getCncErrorCount()
+{
+	return errCount;
+}
+
 void getStatusString(char* szBuffer, unsigned int cbBuffer)
 {
-	sprintf_s(szBuffer, cbBuffer, "%s - %5.2fs (%3d) - Tx:%d - Ack:%d - Err:%d",
+	sprintf_s(szBuffer, cbBuffer, "%s - %5.2fs (%3d,%3d) - Tx:%d - Ack:%d - Err:%d",
 		cncIP,
-		totalInPipe / 1000.0f,
-		cmdCount - ackCount,
+		timeInPipe / 1000.0f,
+		getCountOfCommandsInPipe( ),
+		getAckPendingCount( ),
 		cmdCount,
 		ackCount,
 		errCount );
@@ -56,7 +90,14 @@ void getStatusString(char* szBuffer, unsigned int cbBuffer)
 
 unsigned long getDurationOfCommandsInPipe( )
 {
-  return totalInPipe;
+  return timeInPipe;
+}
+
+void getDistanceInPipe(long* x, long* y, long* z)
+{
+	*x = xInPipe;
+	*y = yInPipe;
+	*z = zInPipe;
 }
 
 bool isPipeAvailable(int cmdLen)
@@ -66,7 +107,7 @@ bool isPipeAvailable(int cmdLen)
 	return true;
 }
 
-tStatus sendCommand( char* cmd, unsigned long d )
+tStatus sendCommand( char* cmd, long x, long y, long z, unsigned long d )
 {
   int timeout;
   int cl = strlen( cmd );
@@ -75,12 +116,20 @@ tStatus sendCommand( char* cmd, unsigned long d )
   if (!bConnected ) return retCncNotConnected;
   if( cmd == NULL ) return retInvalidParam;
   if( cl > MSGBUFSIZE ) return retInvalidParam;
+  if (errCount && *cmd == '@') return retCncError;
 
   // Don't push more than 5 seconds worth of commands in the pipe
+  // Make sure the # of commands tracked doesn't overflow the buffer
   timeout = 5000 / MSGPERIOD;
-  while ((getDurationOfCommandsInPipe() > MAX_CMD_IN_PIPE) && timeout-- )
+  while(((getDurationOfCommandsInPipe() > MAX_CMD_IN_PIPE) ||
+	     (getCountOfCommandsInPipe() >= TIMEPIPESIZE )) && timeout-- )
   {
 	  Sleep(MSGPERIOD);
+  }  
+  if (timeout <= 0)
+  {
+	  printf("Timeout on TX\n");
+	  return retBufferBusyTimeout;
   }
 
   // If the command can't fit in the current buffer
@@ -102,9 +151,18 @@ tStatus sendCommand( char* cmd, unsigned long d )
 
   WaitForSingleObject(mutexBuffer, INFINITE);
 
-  timePipe[ timePipeInIdx++ ] = d;
-  totalInPipe += d;
-  if( timePipeInIdx >= TIMEPIPESIZE ) timePipeInIdx = 0;
+  tCommandInPipe *pt = &inPipe[timePipeInIdx++];
+  if (timePipeInIdx >= TIMEPIPESIZE) timePipeInIdx = 0;
+
+  pt->duration = d;
+  pt->x = x;
+  pt->y = y;
+  pt->z = z;
+
+  timeInPipe += d;
+  xInPipe += x;
+  yInPipe += y;
+  zInPipe += z;
 
   bl = strlen( outBuffer );
 
@@ -118,71 +176,70 @@ tStatus sendCommand( char* cmd, unsigned long d )
   return retSuccess;
 }
 
+void RemoveFromPipe()
+{
+	tCommandInPipe *pt = &inPipe[timePipeOutIdx++];
+	if (timePipeOutIdx >= TIMEPIPESIZE) timePipeOutIdx = 0;
+	timeInPipe -= pt->duration;
+	xInPipe -= pt->x;
+	yInPipe -= pt->y;
+	zInPipe -= pt->z;
+}
+
 void* receiverThread( void* arg )
 {
-  int nbytes;
-  char msgbuf[MSGBUFSIZE];
-  unsigned long tmp;
-  SOCKET cnc = (SOCKET)arg;
+	int nbytes;
+	char msgbuf[MSGBUFSIZE];
+	SOCKET cnc = (SOCKET)arg;
 
-  bConnected = true;
-  rspCnt = 0;
-  if (g_pNotifCallback) g_pNotifCallback(CNC_CONNECTED, cncIP);
+	bConnected = true;
+	rspCnt = 0;
+	if (g_pNotifCallback) g_pNotifCallback(CNC_CONNECTED, cncIP);
 
-  while( bRun )
-  {
-	memset(msgbuf, 0, sizeof(msgbuf));
-	if ((nbytes = recv(cnc, msgbuf, sizeof(msgbuf),0)) < 0) 
+	while( bRun )
 	{
-      perror("read");
-	  bRun = false;
-    }
-    tmp = 0;
-	for (int i = 0; i < nbytes;i++)
-	{
-      switch( msgbuf[i] )
-      {
-      case 'O' : 
-		ackCount++;
-		tmp += timePipe[ timePipeOutIdx++ ];  
-		if( timePipeOutIdx >= TIMEPIPESIZE ) timePipeOutIdx = 0;
-		rspCnt = 0;
-        break;
-      case 'E' : 
-		errCount++;
-		tmp += timePipe[timePipeOutIdx++];
-		if (timePipeOutIdx >= TIMEPIPESIZE) timePipeOutIdx = 0;
-		rspCnt = 0;
-		break;
-	  default:
-		  if (rspCnt < MAX_RESPONSE)
-		  {
-			  response[rspCnt++] = msgbuf[i];
-			  if (msgbuf[i] == '\n')
-			  {
-				  ackCount++;
-				  tmp += timePipe[timePipeOutIdx++];
-				  if (timePipeOutIdx >= TIMEPIPESIZE) timePipeOutIdx = 0;
-				  response[rspCnt++] = 0;
-				  if (g_pNotifCallback) g_pNotifCallback(CNC_RESPONSE, response );
-				  SetEvent(hResponseReceived);
-				  rspCnt = 0;
-			  }
-		  }
-      }
-    }
-	WaitForSingleObject(mutexBuffer,INFINITE);
-	if (tmp > totalInPipe)
-	{
-		return NULL;
+		memset(msgbuf, 0, sizeof(msgbuf));
+		if ((nbytes = recv(cnc, msgbuf, sizeof(msgbuf),0)) < 0) 
+		{
+			perror("read");
+			bRun = false;
+		}
+
+		WaitForSingleObject(mutexBuffer, INFINITE);
+		for (int i = 0; i < nbytes;i++)
+		{
+			switch( msgbuf[i] )
+			{
+			case 'O' : 
+				ackCount++;
+				RemoveFromPipe();
+				rspCnt = 0;
+				break;
+			case 'E' : 
+				errCount++;
+				RemoveFromPipe();
+				rspCnt = 0;
+				break;
+			default:
+				if (rspCnt < MAX_RESPONSE)
+				{
+					response[rspCnt++] = msgbuf[i];
+					if (msgbuf[i] == '\n')
+					{
+						ackCount++;
+						RemoveFromPipe();
+						response[rspCnt++] = 0;
+						if (g_pNotifCallback) g_pNotifCallback(CNC_RESPONSE, response );
+						SetEvent(hResponseReceived);
+						rspCnt = 0;
+					}
+				}
+			}
+		}
+		ReleaseMutex(mutexBuffer);
 	}
-    totalInPipe -= tmp;
-	ReleaseMutex(mutexBuffer);
-  }
-
-  bConnected = false;
-
-  return NULL;
+	bConnected = false;
+	return NULL;
 }
 
 tStatus waitForStatus( )
@@ -213,7 +270,7 @@ tStatus waitForStatus( )
 	return ret;
 }
 
-wchar_t sockErrStr[260];
+wchar_t sockErrStr[MAX_PATH];
 
 DWORD senderThread(PVOID pParam)
 {
@@ -221,16 +278,18 @@ DWORD senderThread(PVOID pParam)
 	struct sockaddr_in Addr;
 	struct sockaddr_in CncAddr;
 	int CncAddrSize = sizeof(CncAddr);
-	char msg[80];
+	char msg[512];
 	WSADATA wsaData;
 	int idleCount = 0;
 
-	if (WSAStartup(0x0202, &wsaData) != NO_ERROR) {
-		iResult = WSAGetLastError();
-		wsprintf(sockErrStr, L"Error at WSAStartup(). Code:%d .", iResult, iResult);
+	memset(&wsaData, 0x00, sizeof(wsaData));
+	if((iResult = WSAStartup(0x0202, &wsaData)) != NO_ERROR) {
+		wsprintf(sockErrStr, L"Error at WSAStartup(). Code:%d(%d) .", iResult, WSAGetLastError( ));
+		MessageBox(NULL, sockErrStr, L"Error", MB_OKCANCEL );
 		return 1;
 	}
 
+	memset(&Addr, 0x00, sizeof(Addr));
 	Addr.sin_addr.s_addr = htonl(INADDR_ANY);
 	Addr.sin_family = AF_INET;
 	Addr.sin_port = htons(BROADCAST_PORT);
@@ -244,11 +303,14 @@ DWORD senderThread(PVOID pParam)
 
 	if ((iResult = bind(s, (SOCKADDR*)&Addr, sizeof(Addr))) != 0) {
 		iResult = WSAGetLastError();
+		WSACleanup();
 		return iResult;
 	}
 
+	CncAddrSize = sizeof(CncAddr);
 	if ((cnt = recvfrom(s, msg, sizeof(msg), 0, (SOCKADDR*)&CncAddr, &CncAddrSize)) <= 0) {
 		iResult = WSAGetLastError();
+		WSACleanup();
 		return 1;
 	}
 
@@ -274,7 +336,7 @@ DWORD senderThread(PVOID pParam)
 	RtlIpv4AddressToStringA(&CncAddr.sin_addr, cncIP);
 	if (g_pNotifCallback) g_pNotifCallback(CNC_DISCONNECTED, 0);
 
-	strcpy_s(msg, sizeof(msg), "RST");
+	strcpy_s(msg, sizeof(msg), "RST\n");
 
 	if (send(cnc, msg, strlen(msg), 0) <= 0) {
 		iResult = WSAGetLastError();
@@ -325,7 +387,6 @@ DWORD senderThread(PVOID pParam)
 					WriteFile(hDebug, "-------\n", 8, &dwWritten, NULL);
 				}
 				*/
-
 				outSize = 0;
 				outBuffer[0] = 0;
 			}
@@ -382,8 +443,11 @@ int initSocketCom(void(*callback)(CNC_SOCKET_EVENT, PVOID))
 
   timePipeInIdx = 0;
   timePipeOutIdx = 0;
-  totalInPipe = 0;
-  memset( timePipe, 0, sizeof( timePipe ));
+  timeInPipe = 0;
+  xInPipe = 0;
+  yInPipe = 0;
+  zInPipe = 0;
+  memset( inPipe, 0, sizeof( inPipe ));
 
   outSize = 0;
   memset( outBuffer, 0, sizeof( outBuffer ));

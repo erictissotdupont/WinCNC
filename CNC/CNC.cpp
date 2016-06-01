@@ -32,17 +32,39 @@ INT_PTR CALLBACK	About(HWND, UINT, WPARAM, LPARAM);
 
 // Information about the part being machined such as size, 
 // tool position and tool size.
-//
 tMetaData g_MetaData;
 
+// Current tool position to be displayed on the screen. This gets
+// updated by the return of the "get status" commands
 t3DPoint g_displayPos;
-long g_actualX;
-long g_actualY;
-long g_actualZ;
-DWORD g_LastActualPos = 0;
+ 
+// The last motor step count received by the answer of the get status
+// command ("S\n")
+long g_actualX,g_actualY,g_actualZ;
+
+// The value following the status information. This bitfield indicates
+// various error condition of the CNC
 unsigned short g_errorState = 0;
 
+// Definition of the bits in the value returned by CNC "Status" (S)
+#define ERROR_LIMIT      0x0001
+#define ERROR_NUMBER     0x0002
+#define ERROR_SYNTAX     0x0004
+#define ERROR_MATH       0x0008
+#define ERROR_COMM       0x0010
+
+// The values returned by the answer of the debug command
+// Those are NOT fetched by the release of the code.
 int g_debug[4];
+
+
+tStatus GetCncStatus()
+{
+	if (!isCncConnected()) return retCncNotConnected;
+	if (g_errorState) return retCncError;
+	if (getCncErrorCount() != 0 ) return retCncError;
+	return retSuccess;
+}
 
 tStatus parseLine(char* cmd)
 {
@@ -125,7 +147,7 @@ tStatus parseLine(char* cmd)
 	return ret;
 }
 
-void UpdatePosition( HWND hWnd, char* str )
+void OnCncStatus( HWND hWnd, char* str )
 {
 	int x, y, z, s;	
 	char* pt;
@@ -159,12 +181,11 @@ void UpdatePosition( HWND hWnd, char* str )
 		g_actualX = x;
 		g_actualY = y;
 		g_actualZ = z;
-		g_LastActualPos = GetTickCount();
-
 		stepToPos(x, y, z, &g_displayPos);
 	}
 
-	InvalidateRgn(hWnd, NULL, false);
+	// If we got some information, refresh the screen
+	if( gotWhat ) PostMessage(hWnd, WM_REDRAW, 0, 0);
 }
 
 void OnSocketEvent(CNC_SOCKET_EVENT event, PVOID param)
@@ -181,7 +202,7 @@ void OnSocketEvent(CNC_SOCKET_EVENT event, PVOID param)
 		PostMessage(hMainWindow, WM_CHECK_INITIAL_STATUS, 0, 0);
 		break;
 	case CNC_RESPONSE:
-		UpdatePosition(hMainWindow, (char*)param);
+		OnCncStatus(hMainWindow, (char*)param);
 		break;
 	}
 }
@@ -321,7 +342,6 @@ void OnKey(int key)
 	}
 }
 
-
 void OnRunGCode(HWND hWnd,BOOL bSimulate)
 {
 	WCHAR szFile[260];       // buffer for file name
@@ -382,6 +402,7 @@ void OnRunGCode(HWND hWnd,BOOL bSimulate)
 //
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
+	tStatus status;
 	int wmId, wmEvent;
 
 	switch (message)
@@ -419,27 +440,32 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		break;
 
 	case WM_CHECK_INITIAL_STATUS:
-		if (CheckStatus(true) == retSuccess)
-		{
-			if (g_errorState)
-			{
-				WCHAR msg[MAX_PATH];
-				wsprintf(msg, L"CNC in error state 0x%02X (", g_errorState);
-				if (g_errorState & ERROR_LIMIT) wcscat_s(msg, MAX_PATH, L" Limit");
-				if( g_errorState & ERROR_NUMBER ) wcscat_s(msg, MAX_PATH, L" Number");
-				if( g_errorState & ERROR_SYNTAX ) wcscat_s(msg, MAX_PATH, L" Syntax");
-				if( g_errorState & ERROR_MATH   ) wcscat_s(msg, MAX_PATH, L" Math");
-				if( g_errorState & ERROR_COMM   ) wcscat_s(msg, MAX_PATH, L" Comm");
-				wcscat_s(msg, MAX_PATH, L" ) \r\nClear error state?");
 
-				if (MessageBox(hMainWindow,
-					msg, L"Error", MB_YESNO | MB_ICONERROR) == IDYES)
-				{
-					ClearCNCError();
-					ResetCNCPosition();
-				}
+		status = CheckStatus(true);
+
+		if( status == retCncError || g_errorState )
+		{
+			WCHAR msg[MAX_PATH];
+			wsprintf(msg, L"CNC in error state 0x%02X (", g_errorState);
+			if (g_errorState & ERROR_LIMIT) wcscat_s(msg, MAX_PATH, L" Limit");
+			if( g_errorState & ERROR_NUMBER ) wcscat_s(msg, MAX_PATH, L" Number");
+			if( g_errorState & ERROR_SYNTAX ) wcscat_s(msg, MAX_PATH, L" Syntax");
+			if( g_errorState & ERROR_MATH   ) wcscat_s(msg, MAX_PATH, L" Math");
+			if( g_errorState & ERROR_COMM   ) wcscat_s(msg, MAX_PATH, L" Comm");
+			wcscat_s(msg, MAX_PATH, L" ) \r\nClear error state?");
+
+			if (MessageBox(hMainWindow,
+				msg, L"Error", MB_YESNO | MB_ICONERROR) == IDYES)
+			{
+				ClearCNCError();
+				ResetCNCPosition();
+				CheckStatus(true);
+				PostMessage(hWnd, WM_CHECK_INITIAL_STATUS, 0, 0);
 			}
-			else if (g_actualX != 0 || g_actualY != 0 || g_actualZ != 0)
+		}
+		else if( status == retSuccess )
+		{
+			if (g_actualX != 0 || g_actualY != 0 || g_actualZ != 0)
 			{
 				if (MessageBox( hMainWindow, 
 					            L"CNC is not at origin position.\r\n\r\nDo you want to reset the CNC? If you select 'No' the remote location will be used.", 
@@ -451,16 +477,24 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 				{
 					resetMotorPosition(g_actualX, g_actualY, g_actualZ);
 				}
+				CheckStatus(true);
+				PostMessage(hWnd, WM_CHECK_INITIAL_STATUS, 0, 0);
 			}
 		}
 		else
 		{
-			MessageBox(hMainWindow, L"Unable to fetch CNC status.", L"Error", MB_ICONERROR);
+			WCHAR msg[MAX_PATH];
+			wsprintf(msg, L"Unable to fetch CNC status. Reason: %s.", GetCNCErrorString(status));
+			MessageBox(hMainWindow, msg, L"Error", MB_ICONERROR);
 		}
 		break;
 
 	case WM_UPDATE_POSITION:
 		getCurPos(&g_displayPos);
+		InvalidateRgn(hWnd, NULL, false);
+		break;
+
+	case WM_REDRAW:
 		InvalidateRgn(hWnd, NULL, false);
 		break;
 
