@@ -12,11 +12,13 @@ typedef struct _tSpindle {
   int nextState;
 } tSpindle;
 
+void motorInit( );
 void setExportFile( HANDLE file );
 void setSimulationMode(tStatus(*callback)(t3DPoint, long, long, long, long, long));
 
+void getDistanceInPipe(long* x, long* y, long* z);
+
 void initAxis( int a, double scale );
-void initSpindle( );
 
 void stepToPos(long x, long y, long z, t3DPoint* P);
 void getCurPos( t3DPoint* P );

@@ -188,23 +188,23 @@ void OnCncStatus( HWND hWnd, char* str )
 	if( gotWhat ) PostMessage(hWnd, WM_REDRAW, 0, 0);
 }
 
-void OnSocketEvent(CNC_SOCKET_EVENT event, PVOID param)
+void OnConnected(PVOID param)
 {
-	switch (event)
+	if (param == NULL)
 	{
-	case CNC_DISCONNECTED:
 		InvalidateRgn(hMainWindow, NULL, false);
-		break;
-
-	case CNC_CONNECTED:
+	}
+	else
+	{
 		InvalidateRgn(hMainWindow, NULL, false);
 		SetTimer(hMainWindow, 1, 220, NULL);
 		PostMessage(hMainWindow, WM_CHECK_INITIAL_STATUS, 0, 0);
-		break;
-	case CNC_RESPONSE:
-		OnCncStatus(hMainWindow, (char*)param);
-		break;
 	}
+}
+
+void OnResponse(PVOID param)
+{
+	OnCncStatus(hMainWindow, (char*)param);
 }
 
 int APIENTRY _tWinMain(_In_ HINSTANCE hInstance,
@@ -232,16 +232,17 @@ int APIENTRY _tWinMain(_In_ HINSTANCE hInstance,
 
 	hAccelTable = LoadAccelerators(hInstance, MAKEINTRESOURCE(IDC_CNC));
 
+	motorInit();
+
 	// 1/16 step - 400 steps - 2.8in per turn = 0.0004375 per step
 	// Error of 0.32% (too far) = 0.0004393
-
 	initAxis(0, 0.0004389); // X
 	initAxis(1, 0.0004389); // Y
 	initAxis(2, 0.0003125); // Z - 1/4 step - 400 steps - 0.5in per turn
 
-	initSpindle();
-
-	initSocketCom(OnSocketEvent);
+	registerSocketCallback(CNC_CONNECTED, OnConnected);
+	registerSocketCallback(CNC_RESPONSE, OnResponse);
+	initSocketCom( );
 
 	// Main message loop:
 	while (GetMessage(&msg, NULL, 0, 0))

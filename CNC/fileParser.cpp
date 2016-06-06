@@ -163,6 +163,8 @@ WCHAR* GetCNCErrorString(tStatus status)
 		return(L"CNC Status request timeout.");
 	case retCncError:
 		return(L"CNC in error state.");
+	case retCncCommunicationError:
+		return(L"CNC communication error.");
 	case retQuit:
 		return(L"Quit.");
 	case retUnknownErr:

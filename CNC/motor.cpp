@@ -1,18 +1,98 @@
 
 #include "CNC.h"
-
 #include "status.h"
 #include "geometry.h"
 #include "motor.h"
 #include "keyboard.h"
 #include "socket.h"
 
+#define MAX_CMD_IN_PIPE	  3000 // 3 seconds
+#define TIMEPIPESIZE	  (MAX_CMD_IN_PIPE/8)
+#define POLL_RATE		  30 // ms
+
+
+#define COMMAND_RESET_ORIGIN   "O\n"
+#define COMMAND_CLEAR_ERROR    "C\n"
+#define COMMAND_GET_POSITION   "P\n"
+#define COMMAND_GET_DEBUG	   "D\n"
+
 HANDLE exportFile = NULL;
 tAxis XMotor,YMotor,ZMotor;
 tAxis* pMotor[] = {&XMotor,&YMotor,&ZMotor};
 tSpindle Spindle;
 
+typedef struct
+{
+	long x;
+	long y;
+	long z;
+	unsigned long duration;
+} tCommandInPipe;
+
+int timePipeInIdx, timePipeOutIdx;
+tCommandInPipe inPipe[TIMEPIPESIZE];
+unsigned long timeInPipe;
+long xInPipe;
+long yInPipe;
+long zInPipe;
+
 tStatus(*g_pSimulation)(t3DPoint, long, long, long, long, long) = NULL;
+
+int getCountOfCommandsInPipe()
+{
+	int c = timePipeInIdx - timePipeOutIdx;
+	if (c < 0) c = c + TIMEPIPESIZE;
+	return c;
+}
+
+unsigned long getDurationOfCommandsInPipe()
+{
+	return timeInPipe;
+}
+
+
+void getDistanceInPipe(long* x, long* y, long* z)
+{
+	*x = xInPipe;
+	*y = yInPipe;
+	*z = zInPipe;
+}
+
+bool isPipeAvailable(int cmdLen)
+{
+	if (getDurationOfCommandsInPipe() > MAX_CMD_IN_PIPE) return false;
+	
+	// Add function to check if the out buffer is full
+
+	return true;
+}
+
+
+void addCommandToPipe( long x, long y, long z, unsigned long d )
+{
+	tCommandInPipe *pt = &inPipe[timePipeInIdx++];
+	if (timePipeInIdx >= TIMEPIPESIZE) timePipeInIdx = 0;
+
+	pt->duration = d;
+	pt->x = x;
+	pt->y = y;
+	pt->z = z;
+
+	timeInPipe += d;
+	xInPipe += x;
+	yInPipe += y;
+	zInPipe += z;
+}
+
+void removeCommandFromPipe( )
+{
+	tCommandInPipe *pt = &inPipe[timePipeOutIdx++];
+	if (timePipeOutIdx >= TIMEPIPESIZE) timePipeOutIdx = 0;
+	timeInPipe -= pt->duration;
+	xInPipe -= pt->x;
+	yInPipe -= pt->y;
+	zInPipe -= pt->z;
+}
 
 void setExportFile( HANDLE file )
 {
@@ -70,12 +150,6 @@ void initAxis( int a, double scale )
   pA->step = 0;
   pA->scale = scale;
   pA->cutComp = 0.0;
-}
-
-void initSpindle( )
-{
-  Spindle.currentState = 0;
-  Spindle.nextState = 0;
 }
 
 void resetMotorPosition( long x, long y, long z )
@@ -186,7 +260,26 @@ tStatus doMove( void(*posAtStep)(t3DPoint*,int,int,void*), int stepCount, double
 			{
 				return retUnknownErr;
 			}
-			status = sendCommand(str, x, y, z, (unsigned long)duration);
+
+			// Push a preset # of seconds worth of commands in the pipe
+			// Make sure the # of commands tracked doesn't overflow the buffer
+			int timeout = 5000 / POLL_RATE;
+			while (((getDurationOfCommandsInPipe() > MAX_CMD_IN_PIPE) ||
+				    (getCountOfCommandsInPipe() >= TIMEPIPESIZE)) && timeout--)
+			{
+				Sleep(POLL_RATE);
+			}
+			if (timeout <= 0)
+			{
+				return retBufferBusyTimeout;
+			}
+
+			status = sendCommand( str );
+
+			if (status == retSuccess)
+			{
+				addCommandToPipe(x, y, z, (unsigned long)duration);
+			}
 		}
 		else
 		{
@@ -216,7 +309,8 @@ tStatus ResetCNCPosition( )
 	tStatus ret = retSuccess;
 	if (g_pSimulation == NULL)
 	{
-		ret = sendCommand("O\n",0,0,0,10);
+		ret = sendCommand( COMMAND_RESET_ORIGIN );
+		if (ret == retSuccess) addCommandToPipe(0, 0, 0, 10);
 	}
 	return ret;
 }
@@ -226,7 +320,8 @@ tStatus ClearCNCError()
 	tStatus ret = retSuccess;
 	if (g_pSimulation == NULL)
 	{
-		ret = sendCommand("C\n",0,0,0,10);
+		ret = sendCommand( COMMAND_CLEAR_ERROR );
+		if (ret == retSuccess) addCommandToPipe(0, 0, 0, 10);
 	}
 	return ret;
 }
@@ -244,19 +339,44 @@ tStatus CheckStatus( BOOL bWait )
 			lastCheck = now;
 			if((( count & 0x01 ) != 0 ) || bWait )
 			{
-				ret = sendCommand("S\n",0,0,0,10);
+				ret = sendCommand( COMMAND_GET_POSITION );
+				if (ret == retSuccess) addCommandToPipe(0, 0, 0, 10);
 				if (ret == retSuccess && bWait)
 				{
-					ret = waitForStatus();
+					// Give one more second that the duration of commands peninding in
+					// the pipe
+					ret = waitForStatus( getDurationOfCommandsInPipe( ) + 1000 );
 				}
 			}
 			else if(( count & 0x01 ) == 0 )
 			{
-				ret = sendCommand("D\n", 0, 0, 0, 10);
+				ret = sendCommand( COMMAND_GET_DEBUG );
+				if (ret == retSuccess) addCommandToPipe(0, 0, 0, 10);
 			}
 			count++;
 		}
 		else ret = retBusy;
 	}
 	return ret;
+}
+
+void OnAcknowledge(PVOID pParam)
+{
+	removeCommandFromPipe();
+}
+
+void motorInit()
+{
+	Spindle.currentState = 0;
+	Spindle.nextState = 0;
+
+	timePipeInIdx = 0;
+	timePipeOutIdx = 0;
+	timeInPipe = 0;
+	xInPipe = 0;
+	yInPipe = 0;
+	zInPipe = 0;
+	memset(inPipe, 0, sizeof(inPipe));
+
+	registerSocketCallback(CNC_ACKNOWLEDGE, OnAcknowledge);
 }

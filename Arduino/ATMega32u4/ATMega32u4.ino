@@ -196,10 +196,6 @@ void Decode(  )
         {     
           Move( x,y,z,d );
         }
-        else
-        {
-          g_error |= ERROR_SYNTAX;
-        }
               
         x=0;
         y=0;
@@ -251,9 +247,9 @@ void Decode(  )
       {
         state = COMM_RESET_1;
       }
-      // STATUS
-      // ------
-      else if( c == 'S' )
+      // POSITION
+      // --------
+      else if( c == 'P' )
       {
         SendStatus( );
       }

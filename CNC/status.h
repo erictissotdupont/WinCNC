@@ -13,6 +13,7 @@ typedef enum {
 	retOutOfMemory = -9,
 	retBusy = -10,
 	retBufferBusyTimeout = -11,
+	retCncCommunicationError = -12,
 
 	retPreParseComplete = -98,
 	retQuit = -99,

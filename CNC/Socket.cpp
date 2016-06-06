@@ -14,19 +14,20 @@
 
 #define MSGPERIOD         30 // 30ms
 #define MSGBUFSIZE        200
-#define MAX_CMD_IN_PIPE	  3000 // 3 seconds
-#define TIMEPIPESIZE	  (MAX_CMD_IN_PIPE/8)
-
 #define IPSTRSIZE         80
 #define MAX_RESPONSE	  80
 
-void(*g_pNotifCallback)(CNC_SOCKET_EVENT, PVOID) = NULL;
+void(*g_pOnResponse)( PVOID ) = NULL;
+void(*g_pOnConnected)( PVOID ) = NULL;
+void(*g_pOnAcknowledge)( PVOID ) = NULL;
+
 char cncIP[IPSTRSIZE];
 char response[MAX_RESPONSE];
 int rspCnt = 0;
 HANDLE hResponseReceived = NULL;
 int bConnected = 0;
 int bRun = 1;
+int g_errorLevel = 0;
 
 long ackCount = 0;
 long cmdCount = 0;
@@ -36,30 +37,8 @@ long repeatCount = 0;
 int outSize= 0;
 char outBuffer[MSGBUFSIZE];
 
-typedef struct
-{
-	long x;
-	long y;
-	long z;
-	unsigned long duration;
-} tCommandInPipe;
-
-int timePipeInIdx, timePipeOutIdx;
-tCommandInPipe inPipe[ TIMEPIPESIZE ];
-unsigned long timeInPipe;
-long xInPipe;
-long yInPipe;
-long zInPipe;
-
 HANDLE mutexBuffer = NULL;
-//HANDLE hDebug;
-
-int getCountOfCommandsInPipe()
-{
-	int c = timePipeInIdx - timePipeOutIdx;
-	if (c < 0) c = c + TIMEPIPESIZE;
-	return c;
-}
+HANDLE hDebug;
 
 int getAckPendingCount()
 {
@@ -80,34 +59,15 @@ void getStatusString(char* szBuffer, unsigned int cbBuffer)
 {
 	sprintf_s(szBuffer, cbBuffer, "%s - %5.2fs (%3d,%3d) - Tx:%d - Ack:%d - Err:%d",
 		cncIP,
-		timeInPipe / 1000.0f,
-		getCountOfCommandsInPipe( ),
+		1.0, //timeInPipe / 1000.0f,
+		1, // getCountOfCommandsInPipe( ),
 		getAckPendingCount( ),
 		cmdCount,
 		ackCount,
 		errCount );
 }
 
-unsigned long getDurationOfCommandsInPipe( )
-{
-  return timeInPipe;
-}
-
-void getDistanceInPipe(long* x, long* y, long* z)
-{
-	*x = xInPipe;
-	*y = yInPipe;
-	*z = zInPipe;
-}
-
-bool isPipeAvailable(int cmdLen)
-{
-	if( getDurationOfCommandsInPipe() > MAX_CMD_IN_PIPE) return false;
-	if ((strlen(outBuffer) + cmdLen + 1) >= MSGBUFSIZE) return false;
-	return true;
-}
-
-tStatus sendCommand( char* cmd, long x, long y, long z, unsigned long d )
+tStatus sendCommand( char* cmd )
 {
   int timeout;
   int cl = strlen( cmd );
@@ -118,24 +78,12 @@ tStatus sendCommand( char* cmd, long x, long y, long z, unsigned long d )
   if( cl > MSGBUFSIZE ) return retInvalidParam;
   if (errCount && *cmd == '@') return retCncError;
 
-  // Don't push more than 5 seconds worth of commands in the pipe
-  // Make sure the # of commands tracked doesn't overflow the buffer
-  timeout = 5000 / MSGPERIOD;
-  while(((getDurationOfCommandsInPipe() > MAX_CMD_IN_PIPE) ||
-	     (getCountOfCommandsInPipe() >= TIMEPIPESIZE )) && timeout-- )
-  {
-	  Sleep(MSGPERIOD);
-  }  
-  if (timeout <= 0)
-  {
-	  printf("Timeout on TX\n");
-	  return retBufferBusyTimeout;
-  }
+  if (*cmd == 'S') ResetEvent(hResponseReceived);
 
   // If the command can't fit in the current buffer
   if(( strlen( outBuffer ) + cl + 1 ) >= MSGBUFSIZE )
   {
-    timeout = ( getDurationOfCommandsInPipe( ) + 1000 ) / MSGPERIOD;
+    timeout = 5000 / MSGPERIOD;
     // Wait for the buffer to be empty
     // printf( "outBuffer is full...\n" );
 	while (outBuffer[0] != 0 && timeout-- > 0 )
@@ -151,19 +99,6 @@ tStatus sendCommand( char* cmd, long x, long y, long z, unsigned long d )
 
   WaitForSingleObject(mutexBuffer, INFINITE);
 
-  tCommandInPipe *pt = &inPipe[timePipeInIdx++];
-  if (timePipeInIdx >= TIMEPIPESIZE) timePipeInIdx = 0;
-
-  pt->duration = d;
-  pt->x = x;
-  pt->y = y;
-  pt->z = z;
-
-  timeInPipe += d;
-  xInPipe += x;
-  yInPipe += y;
-  zInPipe += z;
-
   bl = strlen( outBuffer );
 
   // Add the new command to the buffer
@@ -176,25 +111,17 @@ tStatus sendCommand( char* cmd, long x, long y, long z, unsigned long d )
   return retSuccess;
 }
 
-void RemoveFromPipe()
-{
-	tCommandInPipe *pt = &inPipe[timePipeOutIdx++];
-	if (timePipeOutIdx >= TIMEPIPESIZE) timePipeOutIdx = 0;
-	timeInPipe -= pt->duration;
-	xInPipe -= pt->x;
-	yInPipe -= pt->y;
-	zInPipe -= pt->z;
-}
 
 void* receiverThread( void* arg )
 {
 	int nbytes;
 	char msgbuf[MSGBUFSIZE];
 	SOCKET cnc = (SOCKET)arg;
+	bool gotStatus = false;
 
 	bConnected = true;
 	rspCnt = 0;
-	if (g_pNotifCallback) g_pNotifCallback(CNC_CONNECTED, cncIP);
+	if (g_pOnConnected) g_pOnConnected( cncIP );
 
 	while( bRun )
 	{
@@ -212,26 +139,38 @@ void* receiverThread( void* arg )
 			{
 			case 'O' : 
 				ackCount++;
-				RemoveFromPipe();
+				if (g_pOnAcknowledge) g_pOnAcknowledge((PVOID)TRUE);
 				rspCnt = 0;
+				gotStatus = false;
 				break;
 			case 'E' : 
 				errCount++;
-				RemoveFromPipe();
+				if (g_pOnAcknowledge) g_pOnAcknowledge((PVOID)FALSE);
 				rspCnt = 0;
+				gotStatus = false;
 				break;
 			default:
 				if (rspCnt < MAX_RESPONSE)
 				{
 					response[rspCnt++] = msgbuf[i];
+					if (msgbuf[i] == 'S') gotStatus = true;
 					if (msgbuf[i] == '\n')
 					{
 						ackCount++;
-						RemoveFromPipe();
 						response[rspCnt++] = 0;
-						if (g_pNotifCallback) g_pNotifCallback(CNC_RESPONSE, response );
-						SetEvent(hResponseReceived);
+						if (g_pOnResponse) g_pOnResponse(response);
+						if (g_pOnAcknowledge) g_pOnAcknowledge((PVOID)TRUE);
+						if (gotStatus)
+						{
+							char* pt = strchr(response, 'S');
+							if (pt)
+							{
+								if (sscanf_s(pt + 1, "%d", &g_errorLevel) != 1) g_errorLevel = -1;
+							}
+							SetEvent(hResponseReceived);
+						}
 						rspCnt = 0;
+						gotStatus = false;
 					}
 				}
 			}
@@ -242,31 +181,23 @@ void* receiverThread( void* arg )
 	return NULL;
 }
 
-tStatus waitForStatus( )
+tStatus waitForStatus( unsigned long timeout )
 {
-	tStatus ret = retCncError;
-	char* pt;
+	tStatus ret = retUnknownErr;
 
 	// Allow for one more second than the max duration of commands pending for
 	// the answer to come back.
-	switch (WaitForSingleObject( hResponseReceived, MAX_CMD_IN_PIPE + 1000 ))
+	switch (WaitForSingleObject( hResponseReceived, timeout ))
 	{
 	case WAIT_OBJECT_0 :
-		pt = strchr( response, 'S');
-		if (pt)
-		{
-			int errorLevel;
-			if (sscanf_s(pt + 1, "%d", &errorLevel) == 1)
-			{
-				if (errorLevel == 0) ret = retSuccess;
-			}
-		}
+		if (g_errorLevel == 0) ret = retSuccess; else ret = retCncError;
 		break;
 	case WAIT_TIMEOUT :
 		ret = retCncStatusTimeout;
 		break;
+	default:
+		ret = retUnknownErr;
 	}
-
 	return ret;
 }
 
@@ -334,7 +265,7 @@ DWORD senderThread(PVOID pParam)
 	}
 
 	RtlIpv4AddressToStringA(&CncAddr.sin_addr, cncIP);
-	if (g_pNotifCallback) g_pNotifCallback(CNC_DISCONNECTED, 0);
+	if (g_pOnConnected) g_pOnConnected(NULL);
 
 	strcpy_s(msg, sizeof(msg), "RST\n");
 
@@ -379,46 +310,17 @@ DWORD senderThread(PVOID pParam)
 					printf("Write failed.\n");
 					bRun = 0;
 				}
-				/*
 				else
 				{
 					DWORD dwWritten;
 					WriteFile(hDebug, outBuffer, outSize, &dwWritten, NULL);
 					WriteFile(hDebug, "-------\n", 8, &dwWritten, NULL);
 				}
-				*/
 				outSize = 0;
 				outBuffer[0] = 0;
 			}
 
 			idleCount = 0;
-		}
-		else
-		{
-			int inPipe;
-			// Each time we start to be idle, check the duration of the commands
-			// currently pending acknowledge and set the timeout when it's been
-			// too long for receiving an acknowledge. Give a 5sec grace period.
-			if (idleCount == 0)
-			{
-				inPipe = ((getDurationOfCommandsInPipe() + 50)) / MSGPERIOD;
-				// printf( "%.2f sec of commands. Will wait for %ld loops.\n", getDurationOfCommandsInPipe( ) / 1000.0, inPipe );
-			}
-
-			// If we've been idle for one second longer than the amount of
-			// commands still pending to be acknowledged, check that the count
-			// of sent matches the # of ACKs
-			if (idleCount++ > inPipe)
-			{
-				if (cmdCount != ackCount)
-				{
-					printf("Commands send:%ld. ACKs:%ld. ETA:%.1f sec (%ld).\n",
-					cmdCount,
-					ackCount,
-					getDurationOfCommandsInPipe() / 1000.0,
-					inPipe);
-				}
-			}
 		}
 		ReleaseMutex(mutexBuffer);
 		// if (pthread_mutex_unlock(&mutexBuffer) < 0) { perror("pthread_mutex_unlock"); }
@@ -437,30 +339,36 @@ DWORD senderThread(PVOID pParam)
 
 }
 
-int initSocketCom(void(*callback)(CNC_SOCKET_EVENT, PVOID))
+void registerSocketCallback(CNC_SOCKET_EVENT event, void(*pCallback)(PVOID))
+{
+	switch (event)
+	{
+	case CNC_CONNECTED :
+		g_pOnConnected = pCallback;
+		break;
+	case CNC_ACKNOWLEDGE :
+		g_pOnAcknowledge = pCallback;
+		break;
+	case CNC_RESPONSE :
+		g_pOnResponse = pCallback;
+		break;
+	}
+}
+
+int initSocketCom( )
 {
   DWORD threadId;
-
-  timePipeInIdx = 0;
-  timePipeOutIdx = 0;
-  timeInPipe = 0;
-  xInPipe = 0;
-  yInPipe = 0;
-  zInPipe = 0;
-  memset( inPipe, 0, sizeof( inPipe ));
 
   outSize = 0;
   memset( outBuffer, 0, sizeof( outBuffer ));
 
-  //hDebug = CreateFile( L"C:\\Windows\\Temp\\Cncdebug.txt", GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, 0, NULL);
+  hDebug = CreateFile( L"C:\\Windows\\Temp\\Cncdebug.txt", GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, 0, NULL);
 
   mutexBuffer = CreateMutex(NULL, FALSE, NULL);
   hResponseReceived = CreateEvent(NULL, FALSE, FALSE, NULL);
 
-  g_pNotifCallback = callback;
-
   strcpy_s(cncIP, sizeof(cncIP), "Disconnected");
-  if (g_pNotifCallback) g_pNotifCallback(CNC_DISCONNECTED, 0);
+  if (g_pOnConnected) g_pOnConnected(NULL);
 
   CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)senderThread, NULL, 0, &threadId);
 
