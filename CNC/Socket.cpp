@@ -9,17 +9,20 @@
 #include "status.h"
 #include "socket.h"
 
-#define BROADCAST_PORT    50042
-#define DATA_PORT         50043
+#define BROADCAST_PORT			50042
+#define DATA_PORT				50043
 
-#define MSGPERIOD         30 // 30ms
-#define MSGBUFSIZE        200
-#define IPSTRSIZE         80
-#define MAX_RESPONSE	  80
+#define MSGPERIOD				30 // 30ms
+#define MSGBUFSIZE				200
+#define IPSTRSIZE				80
+#define MAX_RESPONSE			80
+#define BUFFER_MUTEX_TIMEOUT	1000
 
-void(*g_pOnResponse)( PVOID ) = NULL;
-void(*g_pOnConnected)( PVOID ) = NULL;
-void(*g_pOnAcknowledge)( PVOID ) = NULL;
+#define MAX_CALLBACK			10
+
+void(*g_pEventCallback[CND_MAX_EVENT][MAX_CALLBACK])( PVOID );
+int g_pCallbackCount[CND_MAX_EVENT];
+#define NOTIFY_CALLBACK(event,param) for(int j=0;j<g_pCallbackCount[event];j++) g_pEventCallback[event][j](param);
 
 char cncIP[IPSTRSIZE];
 char response[MAX_RESPONSE];
@@ -27,7 +30,6 @@ int rspCnt = 0;
 HANDLE hResponseReceived = NULL;
 int bConnected = 0;
 int bRun = 1;
-int g_errorLevel = 0;
 
 long ackCount = 0;
 long cmdCount = 0;
@@ -38,7 +40,7 @@ int outSize= 0;
 char outBuffer[MSGBUFSIZE];
 
 HANDLE mutexBuffer = NULL;
-HANDLE hDebug;
+HANDLE hDebug = INVALID_HANDLE_VALUE;
 
 int getAckPendingCount()
 {
@@ -55,15 +57,15 @@ long getCncErrorCount()
 	return errCount;
 }
 
-void getStatusString(char* szBuffer, unsigned int cbBuffer)
+unsigned long getDurationOfCommandsInPipe();
+
+void getSocketStatusString(char* szBuffer, unsigned int cbBuffer)
 {
-	sprintf_s(szBuffer, cbBuffer, "%s - %5.2fs (%3d,%3d) - Tx:%d - Ack:%d - Err:%d",
+	sprintf_s(szBuffer, cbBuffer, "%s - Tx:%d - Ack:%d (P:%d %.1f sec) - Err:%d",
 		cncIP,
-		1.0, //timeInPipe / 1000.0f,
-		1, // getCountOfCommandsInPipe( ),
-		getAckPendingCount( ),
 		cmdCount,
-		ackCount,
+		ackCount, getAckPendingCount(),
+		getDurationOfCommandsInPipe( ) / 1000.0,
 		errCount );
 }
 
@@ -97,7 +99,10 @@ tStatus sendCommand( char* cmd )
     }
   }
 
-  WaitForSingleObject(mutexBuffer, INFINITE);
+  if (WaitForSingleObject(mutexBuffer, BUFFER_MUTEX_TIMEOUT) == WAIT_TIMEOUT)
+  {
+	  return retBufferMutexTimeout;
+  }
 
   bl = strlen( outBuffer );
 
@@ -121,7 +126,8 @@ void* receiverThread( void* arg )
 
 	bConnected = true;
 	rspCnt = 0;
-	if (g_pOnConnected) g_pOnConnected( cncIP );
+	NOTIFY_CALLBACK(CNC_CONNECTED,cncIP)
+	//if (g_pOnConnected) g_pOnConnected( cncIP );
 
 	while( bRun )
 	{
@@ -131,51 +137,57 @@ void* receiverThread( void* arg )
 			perror("read");
 			bRun = false;
 		}
-
-		WaitForSingleObject(mutexBuffer, INFINITE);
-		for (int i = 0; i < nbytes;i++)
+		else
 		{
-			switch( msgbuf[i] )
+			if (hDebug != INVALID_HANDLE_VALUE)
 			{
-			case 'O' : 
-				ackCount++;
-				if (g_pOnAcknowledge) g_pOnAcknowledge((PVOID)TRUE);
-				rspCnt = 0;
-				gotStatus = false;
-				break;
-			case 'E' : 
-				errCount++;
-				if (g_pOnAcknowledge) g_pOnAcknowledge((PVOID)FALSE);
-				rspCnt = 0;
-				gotStatus = false;
-				break;
-			default:
-				if (rspCnt < MAX_RESPONSE)
+				WriteFile(hDebug, " IN:", 4, NULL, NULL);
+				WriteFile(hDebug, msgbuf, nbytes, NULL, NULL);
+				WriteFile(hDebug, "\r\n", 2, NULL, NULL);
+			}
+
+			if (WaitForSingleObject(mutexBuffer, BUFFER_MUTEX_TIMEOUT) == WAIT_TIMEOUT)
+			{
+				bRun = FALSE;
+				continue;
+			}
+
+			for (int i = 0; i < nbytes; i++)
+			{
+				switch (msgbuf[i])
 				{
-					response[rspCnt++] = msgbuf[i];
-					if (msgbuf[i] == 'S') gotStatus = true;
-					if (msgbuf[i] == '\n')
-					{
-						ackCount++;
-						response[rspCnt++] = 0;
-						if (g_pOnResponse) g_pOnResponse(response);
-						if (g_pOnAcknowledge) g_pOnAcknowledge((PVOID)TRUE);
-						if (gotStatus)
-						{
-							char* pt = strchr(response, 'S');
-							if (pt)
-							{
-								if (sscanf_s(pt + 1, "%d", &g_errorLevel) != 1) g_errorLevel = -1;
-							}
-							SetEvent(hResponseReceived);
-						}
+				case 'O':
+					ackCount++;
+					NOTIFY_CALLBACK(CNC_ACKNOWLEDGE, (PVOID)TRUE)
 						rspCnt = 0;
-						gotStatus = false;
+					gotStatus = false;
+					break;
+				case 'E':
+					errCount++;
+					NOTIFY_CALLBACK(CNC_ACKNOWLEDGE, (PVOID)FALSE);
+					rspCnt = 0;
+					gotStatus = false;
+					break;
+				default:
+					if (rspCnt < MAX_RESPONSE)
+					{
+						response[rspCnt++] = msgbuf[i];
+						if (msgbuf[i] == 'S') gotStatus = true;
+						if (msgbuf[i] == '\n')
+						{
+							ackCount++;
+							response[rspCnt++] = 0;
+							NOTIFY_CALLBACK(CNC_RESPONSE, response);
+							NOTIFY_CALLBACK(CNC_ACKNOWLEDGE, (PVOID)TRUE);
+							if (gotStatus) SetEvent(hResponseReceived);
+							rspCnt = 0;
+							gotStatus = false;
+						}
 					}
 				}
 			}
+			ReleaseMutex(mutexBuffer);
 		}
-		ReleaseMutex(mutexBuffer);
 	}
 	bConnected = false;
 	return NULL;
@@ -190,7 +202,7 @@ tStatus waitForStatus( unsigned long timeout )
 	switch (WaitForSingleObject( hResponseReceived, timeout ))
 	{
 	case WAIT_OBJECT_0 :
-		if (g_errorLevel == 0) ret = retSuccess; else ret = retCncError;
+		ret = retSuccess;
 		break;
 	case WAIT_TIMEOUT :
 		ret = retCncStatusTimeout;
@@ -212,6 +224,9 @@ DWORD senderThread(PVOID pParam)
 	char msg[512];
 	WSADATA wsaData;
 	int idleCount = 0;
+
+	Sleep(30);
+	NOTIFY_CALLBACK(CNC_CONNECTED, NULL)
 
 	memset(&wsaData, 0x00, sizeof(wsaData));
 	if((iResult = WSAStartup(0x0202, &wsaData)) != NO_ERROR) {
@@ -265,7 +280,7 @@ DWORD senderThread(PVOID pParam)
 	}
 
 	RtlIpv4AddressToStringA(&CncAddr.sin_addr, cncIP);
-	if (g_pOnConnected) g_pOnConnected(NULL);
+	NOTIFY_CALLBACK( CNC_CONNECTED,NULL)
 
 	strcpy_s(msg, sizeof(msg), "RST\n");
 
@@ -294,7 +309,11 @@ DWORD senderThread(PVOID pParam)
 
 	while (bRun) {
 
-		WaitForSingleObject(mutexBuffer, INFINITE);
+		if (WaitForSingleObject(mutexBuffer, BUFFER_MUTEX_TIMEOUT) == WAIT_TIMEOUT)
+		{
+			bRun = FALSE;
+			continue;
+		}
 
 		if (outBuffer[0] != 0)
 		{
@@ -312,9 +331,12 @@ DWORD senderThread(PVOID pParam)
 				}
 				else
 				{
-					DWORD dwWritten;
-					WriteFile(hDebug, outBuffer, outSize, &dwWritten, NULL);
-					WriteFile(hDebug, "-------\n", 8, &dwWritten, NULL);
+					if (hDebug != INVALID_HANDLE_VALUE)
+					{
+						WriteFile(hDebug, "OUT:", 4, NULL, NULL);
+						WriteFile(hDebug, outBuffer, outSize, NULL, NULL);
+						WriteFile(hDebug, "\r\n", 2, NULL, NULL);
+					}
 				}
 				outSize = 0;
 				outBuffer[0] = 0;
@@ -341,17 +363,9 @@ DWORD senderThread(PVOID pParam)
 
 void registerSocketCallback(CNC_SOCKET_EVENT event, void(*pCallback)(PVOID))
 {
-	switch (event)
+	if (g_pCallbackCount[event] < MAX_CALLBACK)
 	{
-	case CNC_CONNECTED :
-		g_pOnConnected = pCallback;
-		break;
-	case CNC_ACKNOWLEDGE :
-		g_pOnAcknowledge = pCallback;
-		break;
-	case CNC_RESPONSE :
-		g_pOnResponse = pCallback;
-		break;
+		g_pEventCallback[event][g_pCallbackCount[event]++] = pCallback;
 	}
 }
 
@@ -361,14 +375,15 @@ int initSocketCom( )
 
   outSize = 0;
   memset( outBuffer, 0, sizeof( outBuffer ));
+  memset(g_pCallbackCount, 0x00, sizeof(g_pCallbackCount));
+  memset(g_pEventCallback, 0x00, sizeof(g_pEventCallback));
 
-  hDebug = CreateFile( L"C:\\Windows\\Temp\\Cncdebug.txt", GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, 0, NULL);
+  //hDebug = CreateFile( L"C:\\Windows\\Temp\\Cncdebug.txt", GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, 0, NULL);
 
   mutexBuffer = CreateMutex(NULL, FALSE, NULL);
   hResponseReceived = CreateEvent(NULL, FALSE, FALSE, NULL);
 
   strcpy_s(cncIP, sizeof(cncIP), "Disconnected");
-  if (g_pOnConnected) g_pOnConnected(NULL);
 
   CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)senderThread, NULL, 0, &threadId);
 

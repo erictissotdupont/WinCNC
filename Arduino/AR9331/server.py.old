@@ -107,7 +107,6 @@ while 1:
       # This a request to send agreagated response from ATMega to the host
       try:
         conn.send(rsp)
-	print 'Sent to host :', rsp
         rsp=''
       except socket.error, msg:
         print 'Socket error sending to host.'

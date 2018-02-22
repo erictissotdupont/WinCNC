@@ -3,7 +3,7 @@
 
 #include "CNC.h"
 #include <Commdlg.h>
-#include "BasicShapes.h"
+#include "Shapes.h"
 
 #include "motor.h"
 #include "gcode.h"
@@ -44,7 +44,7 @@ long g_actualX,g_actualY,g_actualZ;
 
 // The value following the status information. This bitfield indicates
 // various error condition of the CNC
-unsigned short g_errorState = 0;
+unsigned short g_errorStatusFlags = 0;
 
 // Definition of the bits in the value returned by CNC "Status" (S)
 #define ERROR_LIMIT      0x0001
@@ -61,7 +61,7 @@ int g_debug[4];
 tStatus GetCncStatus()
 {
 	if (!isCncConnected()) return retCncNotConnected;
-	if (g_errorState) return retCncError;
+	if (g_errorStatusFlags) return retCncError;
 	if (getCncErrorCount() != 0 ) return retCncError;
 	return retSuccess;
 }
@@ -173,7 +173,7 @@ void OnCncStatus( HWND hWnd, char* str )
 
 	if (gotWhat & 0x08)
 	{
-		g_errorState = s;
+		g_errorStatusFlags = s;
 	}
 	
 	if (gotWhat & 0x07)
@@ -232,6 +232,10 @@ int APIENTRY _tWinMain(_In_ HINSTANCE hInstance,
 
 	hAccelTable = LoadAccelerators(hInstance, MAKEINTRESOURCE(IDC_CNC));
 
+	initSocketCom();
+	registerSocketCallback(CNC_CONNECTED, OnConnected);
+	registerSocketCallback(CNC_RESPONSE, OnResponse);
+
 	motorInit();
 
 	// 1/16 step - 400 steps - 2.8in per turn = 0.0004375 per step
@@ -239,10 +243,6 @@ int APIENTRY _tWinMain(_In_ HINSTANCE hInstance,
 	initAxis(0, 0.0004389); // X
 	initAxis(1, 0.0004389); // Y
 	initAxis(2, 0.0003125); // Z - 1/4 step - 400 steps - 0.5in per turn
-
-	registerSocketCallback(CNC_CONNECTED, OnConnected);
-	registerSocketCallback(CNC_RESPONSE, OnResponse);
-	initSocketCom( );
 
 	// Main message loop:
 	while (GetMessage(&msg, NULL, 0, 0))
@@ -420,11 +420,12 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		case IDM_SIMULATE_GCODE:
 			OnRunGCode(hWnd, true);
 			break;
-
 		case IDM_BASIC_SHAPE:
 			BasicShapes(hWnd);
 			break;
-
+		case IDM_COMPLEX_SHAPE:
+			ComplexShapes(hWnd);
+			break;
 		case IDM_ABOUT:
 			DialogBox(hInst, MAKEINTRESOURCE(IDD_ABOUTBOX), hWnd, About);
 			break;
@@ -444,15 +445,15 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
 		status = CheckStatus(true);
 
-		if( status == retCncError || g_errorState )
+		if( status == retCncError || g_errorStatusFlags )
 		{
 			WCHAR msg[MAX_PATH];
-			wsprintf(msg, L"CNC in error state 0x%02X (", g_errorState);
-			if (g_errorState & ERROR_LIMIT) wcscat_s(msg, MAX_PATH, L" Limit");
-			if( g_errorState & ERROR_NUMBER ) wcscat_s(msg, MAX_PATH, L" Number");
-			if( g_errorState & ERROR_SYNTAX ) wcscat_s(msg, MAX_PATH, L" Syntax");
-			if( g_errorState & ERROR_MATH   ) wcscat_s(msg, MAX_PATH, L" Math");
-			if( g_errorState & ERROR_COMM   ) wcscat_s(msg, MAX_PATH, L" Comm");
+			wsprintf(msg, L"CNC in error state 0x%02X (", g_errorStatusFlags);
+			if (g_errorStatusFlags & ERROR_LIMIT) wcscat_s(msg, MAX_PATH, L" Limit");
+			if( g_errorStatusFlags & ERROR_NUMBER ) wcscat_s(msg, MAX_PATH, L" Number");
+			if( g_errorStatusFlags & ERROR_SYNTAX ) wcscat_s(msg, MAX_PATH, L" Syntax");
+			if( g_errorStatusFlags & ERROR_MATH   ) wcscat_s(msg, MAX_PATH, L" Math");
+			if( g_errorStatusFlags & ERROR_COMM   ) wcscat_s(msg, MAX_PATH, L" Comm");
 			wcscat_s(msg, MAX_PATH, L" ) \r\nClear error state?");
 
 			if (MessageBox(hMainWindow,
@@ -508,7 +509,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		break;
 
 	case WM_TIMER :
-		if (CheckStatus(false) != retSuccess)
+		if( CheckStatus(false) != retSuccess )
 		{
 			InvalidateRgn(hWnd, NULL, false);
 		}

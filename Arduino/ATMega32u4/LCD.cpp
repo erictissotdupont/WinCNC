@@ -356,7 +356,7 @@ LCD_Button LCD_ScanButtons( void )
   LCD_Button button = BUTTON_NONE;
   int buttonVoltage = analogRead( LCD_BTN );
   static LCD_Button debounce = BUTTON_NONE;
-  static int count = 0;
+  static unsigned char count = 0;
   
   /*
   char tmp[6];
@@ -393,8 +393,7 @@ LCD_Button LCD_ScanButtons( void )
 
    if( debounce != button )
    {
-     count++;
-     if( count > 1 ) debounce = button;
+     if( count++ >= 100 || button == BUTTON_NONE ) debounce = button;
    }
    else count = 0;
 
@@ -414,12 +413,10 @@ LCD_Button LCD_ScanButtons( void )
 typedef enum {
  ButtonMode_XY = 0,
  ButtonMode_Z,
- ButtonMode_Reset,
- ButtonMode_Debug,
  ButtonMode_Max
 } ButtonMode;
 
-const char* ModeString[ButtonMode_Max] = { "XY", "Z ", "RS", "LK" };
+const char* ModeString[ButtonMode_Max] = { "XY", "Z " };
 
 void DoButtonAction( LCD_Button button, int longPress )
 {
@@ -441,10 +438,10 @@ void DoButtonAction( LCD_Button button, int longPress )
     case ButtonMode_XY :
       switch(button)
       {
-      case BUTTON_RIGHT: x = 1; break;
-      case BUTTON_UP:    y = 1; break;
-      case BUTTON_DOWN:  y = -1; break;
-      case BUTTON_LEFT:  x = -1; break;
+      case BUTTON_RIGHT: x = -1; break;
+      case BUTTON_UP:    y = -1; break;
+      case BUTTON_DOWN:  y = 1; break;
+      case BUTTON_LEFT:  x = 1; break;
       }
       break;
     case ButtonMode_Z :

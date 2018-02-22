@@ -6,15 +6,15 @@
 #include "keyboard.h"
 #include "socket.h"
 
-#define MAX_CMD_IN_PIPE	  3000 // 3 seconds
-#define TIMEPIPESIZE	  (MAX_CMD_IN_PIPE/8)
+#define MAX_CMD_IN_PIPE	  1024 // 1 second
+#define TIMEPIPESIZE	  (MAX_CMD_IN_PIPE/16)
 #define POLL_RATE		  30 // ms
-
 
 #define COMMAND_RESET_ORIGIN   "O\n"
 #define COMMAND_CLEAR_ERROR    "C\n"
 #define COMMAND_GET_POSITION   "P\n"
 #define COMMAND_GET_DEBUG	   "D\n"
+
 
 HANDLE exportFile = NULL;
 tAxis XMotor,YMotor,ZMotor;
@@ -92,6 +92,10 @@ void removeCommandFromPipe( )
 	xInPipe -= pt->x;
 	yInPipe -= pt->y;
 	zInPipe -= pt->z;
+	if (pt->x || pt->y || pt->z)
+	{
+		printf("move\r\n");
+	}
 }
 
 void setExportFile( HANDLE file )
@@ -203,10 +207,6 @@ long getSpindleState( )
   return( Spindle.nextState == 3 );
 }
 
-// This flag is used to prevent requesting status while in
-// a linear motion (such as a circle) to reduce jitter
-bool g_bInMotion = false;
-
 tStatus doMove( void(*posAtStep)(t3DPoint*,int,int,void*), int stepCount, double duration, void* pArg )
 {
   int i;
@@ -225,8 +225,6 @@ tStatus doMove( void(*posAtStep)(t3DPoint*,int,int,void*), int stepCount, double
   duration = duration / stepCount;
   // Convert that in uS for the CNC
   d = (long)(duration * 1000);
-
-  g_bInMotion = true;
  
   for( i=1; i<=stepCount; i++ )
   {
@@ -256,18 +254,21 @@ tStatus doMove( void(*posAtStep)(t3DPoint*,int,int,void*), int stepCount, double
 			strcat_s(str, sizeof(str), "\n");
 
 			// If the duration is more than 10sec there is a problem
-			if (duration > 10000000)
+			if (duration > 5000000.0)
 			{
 				return retUnknownErr;
 			}
 
 			// Push a preset # of seconds worth of commands in the pipe
 			// Make sure the # of commands tracked doesn't overflow the buffer
-			int timeout = 5000 / POLL_RATE;
-			while (((getDurationOfCommandsInPipe() > MAX_CMD_IN_PIPE) ||
-				    (getCountOfCommandsInPipe() >= TIMEPIPESIZE)) && timeout--)
+			int timeout = 10000 / POLL_RATE;
+			unsigned long pipeDuration;
+			unsigned long pipeCount;
+			while (((((pipeDuration = getDurationOfCommandsInPipe( )) > MAX_CMD_IN_PIPE) ||
+				     ((pipeCount = getCountOfCommandsInPipe( )) >= TIMEPIPESIZE))) && timeout >= 0 )
 			{
 				Sleep(POLL_RATE);
+				timeout--;
 			}
 			if (timeout <= 0)
 			{
@@ -298,7 +299,6 @@ tStatus doMove( void(*posAtStep)(t3DPoint*,int,int,void*), int stepCount, double
     }
   }
 
-  g_bInMotion = false;
   CheckStatus(false);
 
   return status;
@@ -331,10 +331,13 @@ tStatus CheckStatus( BOOL bWait )
 	static DWORD count = 0;
 	static DWORD lastCheck = 0;
 	tStatus ret = retSuccess;
+
+	//if (bWait == false) return retSuccess;
+
 	if (g_pSimulation == NULL)
 	{
 		DWORD now = GetTickCount();
-		if( bWait || ( g_bInMotion == false ) && ( now - lastCheck > 200 ))
+		if( bWait || (( getDurationOfCommandsInPipe( ) == 0 ) && (( now - lastCheck ) > 200 )))
 		{
 			lastCheck = now;
 			if((( count & 0x01 ) != 0 ) || bWait )

@@ -1,24 +1,22 @@
 #include "CNC.h"
 #include "Resource.h"
 #include "Windowsx.h"
+#include "math.h"
 
 #include "gcode.h"
 #include "fileParser.h"
-
-#define MAX_STR	80
+#include "Shapes.h"
 
 typedef struct
 {
-	// General parameters
-	float toolRadius;
-	float toolMaxDepth;
-	float cutDepth;
-	int cutSpeed;
-	int motorControl;
+	tGeneralToolInfo tool;
 
 	// Circle
-	float circleRadius;
+	float circleRadiusX;
+	float circleRadiusY;
+	int circleOval;
 	float circleDepth;
+	int circleExternal;
 	int circleFill;
 
 	// Rectangle
@@ -30,21 +28,6 @@ typedef struct
 } tSimpleShapeParam;
 
 tSimpleShapeParam g_Params;
-
-const struct { WCHAR* str; float val; } TOOL_SIZES[] = {
-	{L"0.5       (1/2)",0.5f},
-	{L"0.25     (1/4)",0.25f},
-	{L"0.125   (1/8)",0.125f},
-	{L"0.0625 (1/16)",0.0625}};
-
-const struct { WCHAR* str; int val; } CUT_SPEED[] = {
-	{L"F10",10},
-	{L"F20",20},
-	{L"F30",30},
-	{L"F40",40},
-	{L"F60",50}};
-
-#define ITEM_CNT(x) (sizeof(x)/sizeof(x[0]))
 
 void BasicShapeInit(HWND hWnd)
 {
@@ -66,10 +49,7 @@ void BasicShapeInit(HWND hWnd)
 			return;
 		}
 	}
-	g_Params.toolRadius = 0.125f;
-	g_Params.toolMaxDepth = 0.75f;
-	g_Params.cutSpeed = 30;
-	g_Params.circleDepth = 0.1f;
+	ShapeInitToolInfo(&g_Params.tool);
 }
 
 void BasicShapeSave()
@@ -81,114 +61,21 @@ void BasicShapeSave()
 	}
 }
 
-UINT GetSetFloat(HWND hWnd, UINT id, BOOL get, float* val)
-{
-	WCHAR str[MAX_STR];
-	HWND hItem;
-	hItem = GetDlgItem(hWnd, id);
-	if (get)
-	{
-		GetWindowText(hItem, str, MAX_STR);
-		if (swscanf_s(str, L"%f", val) != 1) return id;
-	}
-	else
-	{
-		StringCbPrintf(str, sizeof(str), L"%.4f", *val );
-		SetWindowText(hItem, str);
-	}
-	return 0;
-}
-
-UINT GetSetBool(HWND hWnd, UINT id, BOOL get, int* val)
-{
-	HWND hItem;
-	hItem = GetDlgItem(hWnd, id);
-	if (get)
-	{
-		*val = Button_GetCheck(hItem);
-	}
-	else
-	{
-		Button_SetCheck(hItem, *val);
-	}
-	return 0;
-}
-
-
-
 UINT BasicShapeGetSet(BOOL get, HWND hWnd )
 {
-	HWND hItem;
-	WCHAR str[MAX_STR];
-	float val;
-	int i;
+	ShapeGetSetTool(hWnd, get, &g_Params.tool);
 
-	hItem = GetDlgItem(hWnd, IDC_TOOL_SIZE);
-	if (get)
-	{
-		ComboBox_GetText(hItem, str, MAX_STR);
-		if (swscanf_s(str, L"%f", &val) != 1) return IDC_TOOL_SIZE;
-		g_Params.toolRadius = val / 2.0f;
-	}
-	else
-	{
-		for (i = 0; i < ITEM_CNT(TOOL_SIZES); i++)
-		{
-			if (TOOL_SIZES[i].val == (g_Params.toolRadius * 2.0f))
-			{
-				ComboBox_SetCurSel(hItem, i);
-				break;
-			}
-		}
-		if( i== ITEM_CNT(TOOL_SIZES))
-		{
-			StringCbPrintf( str,sizeof(str),L"%f", g_Params.toolRadius * 2.0f);
-			ComboBox_SetText(hItem, str);
-		}
-	}
-
-	hItem = GetDlgItem(hWnd, IDC_CUT_SPEED);
-	if (get)
-	{
-		i = ComboBox_GetCurSel(hItem);
-		if (i != CB_ERR) 
-			g_Params.cutSpeed = CUT_SPEED[i].val;
-		else
-		{
-			ComboBox_GetText(hItem, str, MAX_STR);
-			if (swscanf_s(str, L"%d", &i) != 1) return IDC_CUT_SPEED;
-			g_Params.cutSpeed = i;
-		}
-	}
-	else
-	{
-		for (i = 0; i < ITEM_CNT(CUT_SPEED); i++)
-		{
-			if (CUT_SPEED[i].val == g_Params.cutSpeed)
-			{
-				ComboBox_SetCurSel(hItem, i);
-				break;
-			}
-		}
-		if (i == ITEM_CNT(CUT_SPEED))
-		{
-			StringCbPrintf(str, sizeof(str), L"%d", g_Params.cutSpeed );
-			ComboBox_SetText(hItem, str);
-		}
-	}
-
-	GetSetFloat(hWnd, IDC_CUT_DEPTH, get, &g_Params.cutDepth);
-	GetSetFloat(hWnd, IDC_MAX_TOOL_DEPTH, get, &g_Params.toolMaxDepth);
-	GetSetBool(hWnd, IDC_MOTOR, get, &g_Params.motorControl);
-
-	GetSetFloat(hWnd, IDC_CIRCLE_RADIUS, get, &g_Params.circleRadius);
-	GetSetFloat(hWnd, IDC_CIRCLE_DEPTH, get, &g_Params.circleDepth);
-	GetSetBool(hWnd, IDC_CIRCLE_FILL, get, &g_Params.circleFill);
-
-	GetSetFloat(hWnd, IDC_RECT_DEPTH, get, &g_Params.rectDepth);
-	GetSetFloat(hWnd, IDC_RECT_X, get, &g_Params.rectX);
-	GetSetFloat(hWnd, IDC_RECT_Y, get, &g_Params.rectY);
-	GetSetBool(hWnd, IDC_RECT_FILL, get, &g_Params.rectFill);
+	ShapeGetSetFloat(hWnd, IDC_CIRCLE_RADIUS_X, get, &g_Params.circleRadiusX);
+	ShapeGetSetFloat(hWnd, IDC_CIRCLE_RADIUS_Y, get, &g_Params.circleRadiusY);
+	ShapeGetSetFloat(hWnd, IDC_CIRCLE_DEPTH, get, &g_Params.circleDepth);
+	ShapeGetSetBool(hWnd, IDC_CIRCLE_OVAL, get, &g_Params.circleOval);
+	ShapeGetSetBool(hWnd, IDC_CIRCLE_FILL, get, &g_Params.circleFill);
+	ShapeGetSetBool(hWnd, IDC_CIRCLE_EXTERNAL_RADIUS, get, &g_Params.circleExternal);
+	
+	ShapeGetSetFloat(hWnd, IDC_RECT_DEPTH, get, &g_Params.rectDepth);
+	ShapeGetSetFloat(hWnd, IDC_RECT_X, get, &g_Params.rectX);
+	ShapeGetSetFloat(hWnd, IDC_RECT_Y, get, &g_Params.rectY);
+	ShapeGetSetBool(hWnd, IDC_RECT_FILL, get, &g_Params.rectFill);
 
 	return 0;
 }
@@ -203,8 +90,8 @@ G0 X - 4.625
 */
 
 #define NEAR_ZERO		0.00001f
-#define SMALL_OVELAP	0.015625f // 1/64
-#define SMALLEST_RADIUS	( g_Params.toolRadius + SMALL_OVELAP )
+#define SMALL_OVELAP	(1/128.0f)
+#define SMALLEST_RADIUS	( g_Params.tool.radius + SMALL_OVELAP )
 
 BOOL CarveCircle(HWND hWnd)
 {
@@ -213,47 +100,67 @@ BOOL CarveCircle(HWND hWnd)
 	float r;
 
 	// Can't use a tool so small
-	if (g_Params.toolRadius < SMALL_OVELAP * 2) return FALSE;
+	if (g_Params.tool.radius < SMALL_OVELAP * 2)
+	{
+		MessageBoxA(hWnd, "Tool is too small.", "Circle", MB_ICONERROR);
+		return FALSE;
+	}
 
 	// Can't carve a hole smaller than the smallest radius we can 
 	// circle down (aribitrary to limit cutting down without advancing.
-	if (g_Params.circleRadius < SMALLEST_RADIUS ) return FALSE;
+	if (g_Params.circleRadiusX < SMALLEST_RADIUS || ( g_Params.circleOval && g_Params.circleRadiusY < SMALLEST_RADIUS ))
+	{
+		MessageBoxA(hWnd, "Radius is too small.", "Circle", MB_ICONERROR);
+		return FALSE;
+	}
 
 	// Can't carve deeper than the tool max depth
-	if (g_Params.circleDepth > g_Params.toolMaxDepth) return FALSE;
+	if (g_Params.circleDepth > g_Params.tool.maxDepth)
+	{
+		MessageBoxA(hWnd, "Carving too deep.", "Circle", MB_ICONERROR);
+		return FALSE;
+	}
 
 	// Can't carve 
-	if (g_Params.circleDepth < NEAR_ZERO) return FALSE;
+	if (g_Params.circleDepth < NEAR_ZERO)
+	{
+		MessageBoxA(hWnd, "Carving is too shallow.", "Circle", MB_ICONERROR);
+		return FALSE;
+	}
 
 	cmd = (char*)malloc(MAX_BUF);
-	if (cmd == NULL) return FALSE;
+	if (cmd == NULL)
+	{
+		MessageBoxA(hWnd, "Failled to allocate buffer.", "Circle", MB_ICONERROR);
+		return FALSE;
+	}
 	memset(cmd, 0x00, MAX_BUF);
 	
 	// G91: Relative Motion
 	// Fxx : Carve speed
 	// M3 : Motor ON
 	// G4 P1 : Wait 1sec. for tool spindle to start
-	sprintf_s(str, MAX_STR, "G91 F%d %s\r\n", g_Params.cutSpeed, g_Params.motorControl ? "M3 G4 P1" : "");
+	sprintf_s(str, MAX_STR, "G91 F%d %s\r\n", g_Params.tool.cutSpeed, g_Params.tool.motorControl ? "M3 G4 P1" : "");
 	strcat_s(cmd, MAX_BUF, str);
 
 	// Calculate the distance between concentric circles needed to fill
 	// the circle with a small overlap between each of them.
-	float R = g_Params.circleRadius + SMALL_OVELAP;
-	int t =  1 + (int)(R / (( g_Params.toolRadius * 2 ) - SMALL_OVELAP ));
+	float R = g_Params.circleRadiusX + SMALL_OVELAP;
+	int t =  1 + (int)(R / (( g_Params.tool.radius * 2 ) - SMALL_OVELAP ));
 	float d = R / t;
 
 	bool bDone = false;
-	r = g_Params.circleRadius - g_Params.toolRadius;
+	r = g_Params.circleRadiusX - g_Params.tool.radius;
 	do
 	{
 		// Move from the center to the radius of the circle (9 o'clock)
 		sprintf_s(str, MAX_STR, "G1 X%f\r\n", -r );
 		strcat_s(cmd, MAX_BUF, str);
 
-		// Spiral down, making as many turns as needed to cut less than 'cutDepth' 
+		// Spiral down, making as many turns as needed to cut less than 'tool.cutDepth' 
 		// for each pass. When P is two G2 makes a 450 degree turn. Starts at 9, end
 		// at 12 o'clock.
-		int P = 2 + (int)(g_Params.circleDepth / g_Params.cutDepth);
+		int P = 2 + (int)(g_Params.circleDepth / g_Params.tool.cutDepth);
 		sprintf_s(str, MAX_STR, "G2 X%f Y%f I%f Z%f P%d\r\n", r, r, r, -g_Params.circleDepth, P);
 		strcat_s(cmd, MAX_BUF, str);
 		
@@ -281,12 +188,12 @@ BOOL CarveCircle(HWND hWnd)
 		strcat_s(cmd, MAX_BUF, str);
 
 		if( g_Params.circleFill &&
-		  ( r > (g_Params.toolRadius - SMALL_OVELAP)) && 
+		  ( r > (g_Params.tool.radius - SMALL_OVELAP)) && 
 		  (r > SMALLEST_RADIUS ))
 		{
 			// Move to next concentric circle
 			// Overlap each concentic circle to ensure smooth bottom
-			//r = r - ((g_Params.toolRadius * 2) - SMALL_OVELAP);
+			//r = r - ((g_Params.tool.radius * 2) - SMALL_OVELAP);
 			r = r - d;
 			if (r < SMALLEST_RADIUS)
 			{
@@ -298,7 +205,7 @@ BOOL CarveCircle(HWND hWnd)
 			bDone = true;
 		}
 		// End the line and stop the motor if needed
-		strcat_s(cmd, MAX_BUF, bDone && g_Params.motorControl ? " M0\r\n" : "\r\n");
+		strcat_s(cmd, MAX_BUF, bDone && g_Params.tool.motorControl ? " M0\r\n" : "\r\n");
 	}
 	while (!bDone);
 
@@ -348,14 +255,14 @@ BOOL CarveRect(HWND hWnd)
 	char* cmd;
 
 	// Can't use a tool so small
-	if (g_Params.toolRadius < SMALL_OVELAP * 2) return FALSE;
+	if (g_Params.tool.radius < SMALL_OVELAP * 2) return FALSE;
 
 	// Can't carve a rectangle so small the tool has no space to dive
-	if (g_Params.rectX < SMALLEST_RADIUS * 2 ) return FALSE;
+	if (g_Params.rectX < SMALLEST_RADIUS * 2) return FALSE;
 	if (g_Params.rectY < SMALLEST_RADIUS * 2) return FALSE;
 
 	// Can't carve deeper than the tool max depth
-	if (g_Params.rectDepth > g_Params.toolMaxDepth) return FALSE;
+	if (g_Params.rectDepth > g_Params.tool.maxDepth) return FALSE;
 
 	// Nothing to carve if there is no depth
 	if (g_Params.rectDepth < NEAR_ZERO) return FALSE;
@@ -368,7 +275,7 @@ BOOL CarveRect(HWND hWnd)
 	// Fxx : Carve speed
 	// M3 : Motor ON
 	// G4 P1 : Wait 1sec for tool spindle to start
-	sprintf_s(str, MAX_STR, "G91 F%d %s\r\n", g_Params.cutSpeed, g_Params.motorControl ? "M3 G4 P1" : "");
+	sprintf_s(str, MAX_STR, "G91 F%d %s\r\n", g_Params.tool.cutSpeed, g_Params.tool.motorControl ? "M3 G4 P1" : "");
 	strcat_s(cmd, MAX_BUF, str);
 
 	// True if X is longest side of the rect
@@ -377,10 +284,10 @@ BOOL CarveRect(HWND hWnd)
 	// Current long and short side of the rect remaining to carve
 	float L = bXisLong ? g_Params.rectX : g_Params.rectY;
 	float S = bXisLong ? g_Params.rectY : g_Params.rectX;
-	L = L - (g_Params.toolRadius * 2);
-	S = S - (g_Params.toolRadius * 2);
+	L = L - (g_Params.tool.radius * 2);
+	S = S - (g_Params.tool.radius * 2);
 
-	int t = 1 + (int)(S / ((g_Params.toolRadius * 2 ) - SMALL_OVELAP));
+	int t = 1 + (int)(S / ((g_Params.tool.radius * 2) - SMALL_OVELAP));
 	float d = S / t;
 	float Offset = 0.0f;
 	bool bDone = false;
@@ -393,13 +300,13 @@ BOOL CarveRect(HWND hWnd)
 		float w = d - SMALL_OVELAP;
 
 		// Dive while depth has not reached target rect depth
-		while (Z < g_Params.rectDepth - NEAR_ZERO )
+		while (Z < g_Params.rectDepth - NEAR_ZERO)
 		{
 			float D;
 			// If what remains to be carve is larger than the max cut depth 
-			if (g_Params.rectDepth - Z > g_Params.cutDepth)
+			if (g_Params.rectDepth - Z > g_Params.tool.cutDepth)
 				// Dive by the max cut depth
-				D = g_Params.cutDepth;
+				D = g_Params.tool.cutDepth;
 			else
 				// Dive by what's left
 				D = g_Params.rectDepth - Z;
@@ -411,7 +318,7 @@ BOOL CarveRect(HWND hWnd)
 			MakeRectMove(bXisLong, cmd, L, 0.0f, -D);
 			if (bInside)
 			{
-				MakeRectMove(bXisLong, cmd, w, 0.0f, 0.0f );
+				MakeRectMove(bXisLong, cmd, w, 0.0f, 0.0f);
 				MakeRectMove(bXisLong, cmd, -w, 0.0f, 0.0f);
 			}
 
@@ -448,15 +355,15 @@ BOOL CarveRect(HWND hWnd)
 		strcat_s(cmd, MAX_BUF, str);
 
 		// Come back to orgin
-		if( bXisLong )
-			sprintf_s(str, MAX_STR, "G0 X%f\r\n", -L );
+		if (bXisLong)
+			sprintf_s(str, MAX_STR, "G0 X%f\r\n", -L);
 		else
-			sprintf_s(str, MAX_STR, "G0 Y%f\r\n", -L);	
+			sprintf_s(str, MAX_STR, "G0 Y%f\r\n", -L);
 		strcat_s(cmd, MAX_BUF, str);
-		
+
 		// If we need to carve the inside and if the current rectangle still
 		// has material in its center.
-		if (g_Params.rectFill && S > ((g_Params.toolRadius * 2) - SMALL_OVELAP ))
+		if (g_Params.rectFill && S > ((g_Params.tool.radius * 2) - SMALL_OVELAP))
 		{
 			// Move along the short side by an increment before going through
 			// another smaller square. 
@@ -485,7 +392,7 @@ BOOL CarveRect(HWND hWnd)
 	} while (!bDone);
 
 	// End the line and stop the motor if needed
-	if (g_Params.motorControl)
+	if (g_Params.tool.motorControl)
 	{
 		strcat_s(cmd, MAX_BUF, "M0\r\n");
 	}
@@ -496,7 +403,6 @@ BOOL CarveRect(HWND hWnd)
 
 	return TRUE;
 }
-
 
 void BasicShapeOneCommand(HWND hWnd)
 {
@@ -514,8 +420,8 @@ void BasicShapeOneCommand(HWND hWnd)
 	}
 }
 
-WNDPROC g_oldDlgdProc = NULL;
-BOOL CALLBACK InterceptWndProc(HWND hWnd,
+WNDPROC g_oldBasicDlgdProc = NULL;
+BOOL CALLBACK BasicInterceptWndProc(HWND hWnd,
 	UINT message,
 	WPARAM wParam,
 	LPARAM lParam)
@@ -528,7 +434,7 @@ BOOL CALLBACK InterceptWndProc(HWND hWnd,
 			return MNC_CLOSE << 16;
 		}	
 	}
-	return g_oldDlgdProc(hWnd, message, wParam, lParam);
+	return g_oldBasicDlgdProc(hWnd, message, wParam, lParam);
 }
 
 BOOL CALLBACK BasicShapesProc(HWND hWnd,
@@ -546,8 +452,8 @@ BOOL CALLBACK BasicShapesProc(HWND hWnd,
 
 		// This is to capture the CTRL+A on the GCode edit box
 		hDlg = GetDlgItem(hWnd, IDC_GCODE);
-		g_oldDlgdProc = (WNDPROC)GetWindowLong(hDlg, GWL_WNDPROC);
-		SetWindowLong(hDlg, GWL_WNDPROC, (LONG)InterceptWndProc);
+		g_oldBasicDlgdProc = (WNDPROC)GetWindowLong(hDlg, GWL_WNDPROC);
+		SetWindowLong(hDlg, GWL_WNDPROC, (LONG)BasicInterceptWndProc);
 		return TRUE;
 		break;
 
@@ -570,7 +476,6 @@ BOOL CALLBACK BasicShapesProc(HWND hWnd,
 			BasicShapeGetSet(TRUE, hWnd);
 			CarveRect(hWnd);
 			break;
-
 		case IDOK:
 			/*
 			if (!GetDlgItemText(hwndDlg, ID_ITEMNAME, szItemName, 80))

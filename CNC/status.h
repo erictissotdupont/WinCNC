@@ -14,6 +14,7 @@ typedef enum {
 	retBusy = -10,
 	retBufferBusyTimeout = -11,
 	retCncCommunicationError = -12,
+	retBufferMutexTimeout = -13,
 
 	retPreParseComplete = -98,
 	retQuit = -99,

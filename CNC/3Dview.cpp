@@ -92,7 +92,7 @@ void OnPaint(HWND hWnd)
 		DEFAULT_PITCH, 
 		VIEW_STATUS_FONT);
 	SelectObject(hdcMem, font);
-	getStatusString(str, sizeof(str));
+	getSocketStatusString(str, sizeof(str));
 	DrawTextA(hdcMem, str, -1, &rect, 0);
 	DeleteObject(font);
 

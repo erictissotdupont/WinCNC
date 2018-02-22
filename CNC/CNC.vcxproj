@@ -91,7 +91,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="3Dview.h" />
-    <ClInclude Include="BasicShapes.h" />
+    <ClInclude Include="Shapes.h" />
     <ClInclude Include="CNC.h" />
     <ClInclude Include="fileParser.h" />
     <ClInclude Include="gcode.h" />
@@ -108,10 +108,12 @@
   <ItemGroup>
     <ClCompile Include="BasicShapes.cpp" />
     <ClCompile Include="CNC.cpp" />
+    <ClCompile Include="ComplexShapes.cpp" />
     <ClCompile Include="fileParser.cpp" />
     <ClCompile Include="gcode.cpp" />
     <ClCompile Include="geometry.cpp" />
     <ClCompile Include="motor.cpp" />
+    <ClCompile Include="Shapes.cpp" />
     <ClCompile Include="Socket.cpp" />
     <ClCompile Include="3Dview.cpp" />
     <ClCompile Include="stdafx.cpp">
