@@ -1,30 +1,19 @@
-#include "LCD.h"
 #include "CNC.h"
-
+#include "LCD.h"
 #include <stdio.h>
 #include <string.h>
 #include <inttypes.h>
-#include "Arduino.h"
 #include "motor.h"
 
+// To get the current position 
 extern Motor X;
 extern Motor Y;
 extern Motor Z;
-extern void Move(long,long,long,long);
-extern unsigned int g_error;
-extern unsigned int g_duration;
-extern long g_tSpent;
-
-#define LCD_D0  4
-#define LCD_D1  5
-#define LCD_D2  6
-#define LCD_D3  7
-#define LCD_RS  8
-#define LCD_EN  9
-#define LCD_BTN A0
 
 void LCD_Init( )
 {
+  delay( 250 );
+  
   pinMode(LCD_RS, OUTPUT);
   pinMode(LCD_EN, OUTPUT);
   pinMode(LCD_BTN, INPUT);
@@ -73,7 +62,7 @@ void LCD_Init( )
 void LCD_Clear( void )
 {
   LCD_command(LCD_CLEARDISPLAY);  // clear display, set cursor position to zero
-  delayMicroseconds(5000);  // this command takes a long time!
+  delay( 250 );
 }
 
 // Allows us to fill the first 8 CGRAM locations
@@ -474,8 +463,7 @@ void DoButtonAction( LCD_Button button, int longPress )
   
   if( x || y || z )
   {
-    g_tSpent = micros();
-    Move( x, y, z, CONT_DELAY * 1100L );
+    Motor_Move( x, y, z, CONT_DELAY * 1100L );
   }
 }
 

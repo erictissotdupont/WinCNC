@@ -1,4 +1,4 @@
-#include <Arduino.h>
+#include "CNC.h"
 #include "helper.h"
 
 void DebugPulse( int c )

@@ -1,6 +1,6 @@
 class Motor {
 public : 
-  Motor( int sp, int dp, int ep, int s );
+  Motor( int sp, int dp, int ep, int s, unsigned int lf );
   void Reset( );
   void SetDirection( int d );
   long InitMove( long s, long t );
@@ -15,6 +15,7 @@ private :
   char curDir;
   char toggle;
   char swap;
+  unsigned int limitFlag;
   
   char stepPin;
   char dirPin;
@@ -29,5 +30,6 @@ private :
   unsigned int stepDecrement;
 };
 
-long NonObjectTest( long i );
+void Motor_Init( );
+void Motor_Move( long x, long y, long z, long d );
 

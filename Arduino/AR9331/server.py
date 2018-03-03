@@ -116,12 +116,18 @@ while 1:
     else:
       # Everything else gets sent down to the ATMega expecting a response
       retry = 0
-      t.write(cmd)
-      c=t.read(1)
+      c = 'C'
+      while( c == 'C' and retry < 3 ):
+        t.write(cmd)
+        c = t.read(1)
+        retry = retry + 1
       if not c:
         print 'Response timeout.'
         break
-        
+      if( c == 'C' ):
+        # CRC error, retries failed
+        print 'CRC error.'
+        break
       if( c == 'O' or c == 'E' ):
         # Command OKAYed or ERROR
         rsp=rsp+c

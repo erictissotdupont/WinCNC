@@ -1,10 +1,11 @@
-#include <Arduino.h>
 #include "CNC.h"
 #include "helper.h"
 #include "motor.h"
+#include "LCD.h"
+#include "UART.h"
 
-extern unsigned int g_error;
-extern int g_debug[MAX_DEBUG];
+unsigned int g_error;
+int g_debug[MAX_DEBUG];
 
 #define RAMP_TIME     400000L
 #define MIN_SPEED     60L
@@ -20,12 +21,24 @@ extern int g_debug[MAX_DEBUG];
 
 #define MAX_BACKSTEPS 2000
 
-Motor::Motor( int sp, int dp, int ep, int s )
+// Instantiation and configuration of the stepper motor controlers.
+// (StepPin, DirPin, EndPin, Direction)
+//
+Motor X( 13, 12, A5,  1, ERROR_LIMIT_X );  // 13, 12, A5, 1
+Motor Y( 11, 10, A4,  1, ERROR_LIMIT_Y );  // 11, 10, A4, 1
+Motor Z(  3,  2, A3,  1, ERROR_LIMIT_Z );  //  3,  2, A3, 1
+
+unsigned long g_tSpent;     // Tracks time since last move to calculated accurate step delay
+                            // Also used in LCD.cpp to track time spent updating the LCD.
+
+
+Motor::Motor( int sp, int dp, int ep, int s, unsigned int lf )
 {
   stepPin = sp;
   dirPin = dp;
   endPin = ep;
   swap = s;
+  limitFlag = lf;
 }
 
 void Motor::Reset( )
@@ -150,7 +163,7 @@ long Motor::Move( )
     // Turn OFF the tool
     digitalWrite(TOOL_ON_REPLAY, LOW);
     
-    g_error |= ERROR_LIMIT;
+    g_error |= limitFlag;
     // Reset the move distance to force the stopping
     moveLength = 0;
     return -1;
@@ -202,5 +215,125 @@ long Motor::GetPos( )
 long Motor::FakeMove( long s )
 {
   curPos += s;
+}
+
+// Move the tool position by the specified # of steps for x,y,z directions.
+// Duration of the motion determines the speed. d is in microseconds
+void Motor_Move( long x, long y, long z, long d )
+{
+  long s;
+  unsigned int count = 0;
+  long tX,tY,tZ;
+  
+  // If in error state, dot not move
+  if( g_error != 0 )
+  {
+    return;
+  }
+  
+  // No movement means dwell (GCode "P")
+  if( x==0 && y==0 && z==0 )
+  {
+    // d is in microseconds
+    delay( d / 1000 );
+    return;
+  }
+  
+  // This calculates the interval between steps for each axis and returns the time
+  // to wait until the first move needs to occur (-1 if no move necessary).
+  tX = X.InitMove( x, d );
+  tY = Y.InitMove( y, d );
+  tZ = Z.InitMove( z, d ); 
+  
+#ifdef TEST_TIME
+  long start = micros();
+  g_debug[2] = start-g_tSpent;
+#endif
+  
+  do
+  {
+    // Finds which of the non negative wait times is the shortest.
+    s = minOf3( tX, tY, tZ );
+              
+    // Remove the wait time from each axis. At least one should become zero.
+    tX = tX - s;
+    tY = tY - s;
+    tZ = tZ - s;
+    
+#ifdef TEST_TIME 
+    // This skip the delay and allow to mesure the processing time of the move
+    // routine (calculated at the end)
+    s = 0;
+#endif
+ 
+    // If we have at least 150uS to wait, perform background
+    // update tasks
+    if( s > 150 )
+    {
+      // Alternate between LCD and UART
+      if( count++ & 1 )
+      {
+        // Refresh the LCD screen (if enough time)
+        LCD_UpdateTask( s - 150 );
+      }
+      else
+      {
+        // Read from UART and decode (one char at a time)
+        UART_Task( );
+      }
+    }
+    
+    // Calculate how much time we spent processing since the last move pulse
+    g_tSpent = micros() - g_tSpent;
+    
+    // If we still have time to wait
+    if( s > g_tSpent )
+    {
+      s = s - g_tSpent;
+      // When sleeping more than 16388 uS, documentation says don't use delayMicroseconds.
+      if( s < 16000 )
+      {
+        if( s ) delayMicroseconds( s );
+      }
+      else 
+      {
+        delay( s / 1000 );
+        delayMicroseconds( s % 1000 );
+      }
+    }
+#ifndef TEST_TIME
+    // Counts how many times move was late for making a motor pulse
+    else g_debug[3]++;
+#endif
+
+    // For each axis where the time to move has been reached, move.
+    // Save the duration to the next move or a negative value if the
+    // axis has eached the end position.
+    g_tSpent = micros();
+    if( tX == 0 ) tX = X.Move( );
+    if( tY == 0 ) tY = Y.Move( );    
+    if( tZ == 0 ) tZ = Z.Move( );
+    
+  } while(( tX > 0 ) || ( tY > 0 ) || ( tZ > 0 ));
+  
+#ifdef TEST_TIME
+  long finish = micros();
+  g_debug[0] = (finish-start)/count;
+  g_debug[1] = count;
+#endif
+
+}
+
+void Motor_Init( )
+{
+  g_error = 0;
+  for( int i=0; i<MAX_DEBUG; i++ ) g_debug[i] = 0;
+  
+  pinMode(TOOL_ON_REPLAY, OUTPUT);
+  digitalWrite(TOOL_ON_REPLAY, LOW);
+  
+  X.Reset( );
+  Y.Reset( );
+  Z.Reset( );
 }
 
