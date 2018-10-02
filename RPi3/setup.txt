@@ -1,0 +1,24 @@
+
+1) Download NOOB and copy files to SDCard. 
+https://www.raspberrypi.org/downloads/noobs/
+
+2) Boot, connect to network and install Raspbian Lite
+
+3) Login (default is usr:pi pwd:raspberry)
+
+4) Run:sudo raspi-config
+   4.1) Change the default password
+   4.2) In Interfacing options,
+     Enable SSH and 
+     Disable Serial console and Enable Serial hardware
+   4.3) Reboot. Check that /dev/ttyS0 exists
+     TX = GPIO14 = Pin 8
+     RX = GPIO15 = Pin 10
+
+5) Install python serial module.
+   Run:sudo apt-get install python-serial
+
+6) Using SCP, copy server.py into \home\pi
+
+7) Run:sudo nano .bashrc
+   Add line at the end: python \home\pi\server.py &

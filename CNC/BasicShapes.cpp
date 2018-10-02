@@ -89,15 +89,15 @@ G0 Z0.3
 G0 X - 4.625
 */
 
-#define NEAR_ZERO		0.00001f
-#define SMALL_OVELAP	(1/128.0f)
-#define SMALLEST_RADIUS	( g_Params.tool.radius + SMALL_OVELAP )
+#define NEAR_ZERO			0.00001f
+#define SMALL_OVELAP		(1/128.0f)
+#define SMALLEST_RADIUS		( g_Params.tool.radius + SMALL_OVELAP )
+#define SAFE_TRAVEL_HEIGHT	0.25f
 
 BOOL CarveCircle(HWND hWnd)
 {
 	char str[MAX_STR];
 	char* cmd;
-	float r;
 
 	// Can't use a tool so small
 	if (g_Params.tool.radius < SMALL_OVELAP * 2)
@@ -148,56 +148,65 @@ BOOL CarveCircle(HWND hWnd)
 	float R = g_Params.circleRadiusX + SMALL_OVELAP;
 	int t =  1 + (int)(R / (( g_Params.tool.radius * 2 ) - SMALL_OVELAP ));
 	float d = R / t;
+	float rx,ry;
 
 	bool bDone = false;
-	r = g_Params.circleRadiusX - g_Params.tool.radius;
+	rx = g_Params.circleRadiusX - g_Params.tool.radius;
+	ry = g_Params.circleRadiusY - g_Params.tool.radius;
+
 	do
 	{
 		// Move from the center to the radius of the circle (9 o'clock)
-		sprintf_s(str, MAX_STR, "G1 X%f\r\n", -r );
+		sprintf_s(str, MAX_STR, "G0 Z%f\r\n", SAFE_TRAVEL_HEIGHT );
+		strcat_s(cmd, MAX_BUF, str);
+		sprintf_s(str, MAX_STR, "G0 X%f\r\n", -rx );
+		strcat_s(cmd, MAX_BUF, str);
+		sprintf_s(str, MAX_STR, "G1 Z%f\r\n", -SAFE_TRAVEL_HEIGHT);
 		strcat_s(cmd, MAX_BUF, str);
 
 		// Spiral down, making as many turns as needed to cut less than 'tool.cutDepth' 
 		// for each pass. When P is two G2 makes a 450 degree turn. Starts at 9, end
 		// at 12 o'clock.
 		int P = 2 + (int)(g_Params.circleDepth / g_Params.tool.cutDepth);
-		sprintf_s(str, MAX_STR, "G2 X%f Y%f I%f Z%f P%d\r\n", r, r, r, -g_Params.circleDepth, P);
+		sprintf_s(str, MAX_STR, "G2 X%f Y%f I%f Z%f P%d\r\n", rx, ry, rx, -g_Params.circleDepth, P);
 		strcat_s(cmd, MAX_BUF, str);
 		
 		// Make another full circle to finish the bottom flat. To avoid making
 		// an additional 1/2 turn using the P parameter, do it in 4 G2 commands.
 		// First quarter (12 to 3)
-		sprintf_s(str, MAX_STR, "G2 X%f Y%f J%f\r\n", r, -r, -r);
+		sprintf_s(str, MAX_STR, "G2 X%f Y%f J%f\r\n", rx, -ry, -ry);
 		strcat_s(cmd, MAX_BUF, str);
 		// Second quarter (3 to 6)
-		sprintf_s(str, MAX_STR, "G2 X%f Y%f I%f\r\n", -r, -r, -r);
+		sprintf_s(str, MAX_STR, "G2 X%f Y%f I%f\r\n", -rx, -ry, -rx);
 		strcat_s(cmd, MAX_BUF, str);
 		// Third quarter (6 to 9)
-		sprintf_s(str, MAX_STR, "G2 X%f Y%f J%f\r\n", -r, r, r);
+		sprintf_s(str, MAX_STR, "G2 X%f Y%f J%f\r\n", -rx, ry, ry);
 		strcat_s(cmd, MAX_BUF, str);
 		// Fourth quarter (9 to 12)
-		sprintf_s(str, MAX_STR, "G2 X%f Y%f I%f\r\n", r, r, r);
+		sprintf_s(str, MAX_STR, "G2 X%f Y%f I%f\r\n", rx, ry, rx);
 		strcat_s(cmd, MAX_BUF, str);
 
 		// Come back to starting height
-		sprintf_s(str, MAX_STR, "G0 Z%f\r\n", g_Params.circleDepth);
+		sprintf_s(str, MAX_STR, "G0 Z%f\r\n", g_Params.circleDepth + SAFE_TRAVEL_HEIGHT);
+		strcat_s(cmd, MAX_BUF, str);
+		// Move back to center of circle.
+		sprintf_s(str, MAX_STR, "G0 Y%f\r\n", -ry);
+		strcat_s(cmd, MAX_BUF, str);
+		sprintf_s(str, MAX_STR, "G1 Z%f", -SAFE_TRAVEL_HEIGHT);
 		strcat_s(cmd, MAX_BUF, str);
 
-		// Move back to center of circle.
-		sprintf_s(str, MAX_STR, "G0 Y%f", -r);
-		strcat_s(cmd, MAX_BUF, str);
 
 		if( g_Params.circleFill &&
-		  ( r > (g_Params.tool.radius - SMALL_OVELAP)) && 
-		  (r > SMALLEST_RADIUS ))
+		  ( rx > (g_Params.tool.radius - SMALL_OVELAP)) && 
+		  (rx > SMALLEST_RADIUS ))
 		{
 			// Move to next concentric circle
 			// Overlap each concentic circle to ensure smooth bottom
 			//r = r - ((g_Params.tool.radius * 2) - SMALL_OVELAP);
-			r = r - d;
-			if (r < SMALLEST_RADIUS)
+			rx = rx - d;
+			if (rx < SMALLEST_RADIUS)
 			{
-				r = SMALLEST_RADIUS;
+				rx = SMALLEST_RADIUS;
 			}
 		}
 		else

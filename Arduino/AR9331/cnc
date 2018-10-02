@@ -1,13 +1,1 @@
-#!/bin/sh /etc/rc.common
-# This script should be placed in /etc/init.d
-
-START=99
-   
-start() {        
-  sleep 5   # make sure boot process is done, no more console msgs
-  echo "CNC Server Started"
-  . /etc/profile
-  echo $PATH
-  nice -n -10 python /root/server.py &
-}                 
-                    
+#!/bin/sh /etc/rc.common# This script should be placed in /etc/init.dSTART=99start() {  sleep 5   # make sure boot process is done, no more console msgs  echo "CNC Server Started"  . /etc/profile  echo $PATH  nice -n -10 python /home/pi/server.py &}

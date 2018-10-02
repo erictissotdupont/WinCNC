@@ -241,9 +241,13 @@ int APIENTRY _tWinMain(_In_ HINSTANCE hInstance,
 	// 1/16 step - 400 steps - 2.8in per turn = 0.0004375 per step
 	// Error of 0.32% (too far) = 0.0004393
 	initAxis(0, 0.0004389); // X
-	initAxis(1, 0.0004389); // Y
-	initAxis(2, 0.0003125); // Z - 1/4 step - 400 steps - 0.5in per turn
+	
+	//initAxis(0, 0.0003937);  // Z axis new machine
 
+	initAxis(1, 0.0004389); // Y
+
+	initAxis(2, 0.0003125); // Z - 1/4 step - 400 steps - 0.5in per turn
+	
 	// Main message loop:
 	while (GetMessage(&msg, NULL, 0, 0))
 	{

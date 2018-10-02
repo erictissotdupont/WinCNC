@@ -92,6 +92,7 @@ DWORD					g_index = 0;
 WCHAR					g_szAltDataFile[MAX_PATH];
 HANDLE					g_hRender = NULL;
 HANDLE					g_hMapFile = NULL;
+HANDLE					g_hFileChangeEvent = NULL;
 
 float*					g_alt = NULL;
 header_t*				g_h;
@@ -105,6 +106,13 @@ void CleanupDevice();
 LRESULT CALLBACK    WndProc( HWND, UINT, WPARAM, LPARAM );
 void Render();
 
+DWORD FileChangeWatcherThread()
+{
+	while (1)
+	{
+		
+	}
+}
 
 //--------------------------------------------------------------------------------------
 // Entry point to the program. Initializes everything and goes into a message processing 
@@ -115,6 +123,13 @@ int WINAPI wWinMain( _In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance,
     UNREFERENCED_PARAMETER( hPrevInstance );
     
 	wcscpy_s(g_szAltDataFile, lpCmdLine);
+
+	g_hFileChangeEvent = FindFirstChangeNotification(g_szAltDataFile, FALSE, FILE_NOTIFY_CHANGE_LAST_WRITE);
+	if (g_hFileChangeEvent)
+	{
+		DWORD dwThreadId;
+		CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)WatcherThread, NULL, 0, &dwThreadId);
+	}
 
     if( FAILED( InitWindow( hInstance, nCmdShow ) ) )
         return 0;
