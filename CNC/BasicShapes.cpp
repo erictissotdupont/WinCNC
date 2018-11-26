@@ -6,6 +6,7 @@
 #include "gcode.h"
 #include "fileParser.h"
 #include "Shapes.h"
+#include "3Dview.h"
 
 typedef struct
 {
@@ -24,6 +25,9 @@ typedef struct
 	float rectX;
 	float rectY;
 	int rectFill;
+	int rectExternal;
+	int rectRounded;
+	float rectRadius;
 
 } tSimpleShapeParam;
 
@@ -75,8 +79,11 @@ UINT BasicShapeGetSet(BOOL get, HWND hWnd )
 	ShapeGetSetFloat(hWnd, IDC_RECT_DEPTH, get, &g_Params.rectDepth);
 	ShapeGetSetFloat(hWnd, IDC_RECT_X, get, &g_Params.rectX);
 	ShapeGetSetFloat(hWnd, IDC_RECT_Y, get, &g_Params.rectY);
+	ShapeGetSetFloat(hWnd, IDC_RECT_RADIUS, get, &g_Params.rectRadius);
 	ShapeGetSetBool(hWnd, IDC_RECT_FILL, get, &g_Params.rectFill);
-
+	ShapeGetSetBool(hWnd, IDC_RECT_EXTERNAL, get, &g_Params.rectExternal);
+	ShapeGetSetBool(hWnd, IDC_RECT_ROUNDED, get, &g_Params.rectRounded);
+	
 	return 0;
 }
 
@@ -90,7 +97,7 @@ G0 X - 4.625
 */
 
 #define NEAR_ZERO			0.00001f
-#define SMALL_OVELAP		(1/128.0f)
+#define SMALL_OVELAP		(1/64.0f)
 #define SMALLEST_RADIUS		( g_Params.tool.radius + SMALL_OVELAP )
 #define SAFE_TRAVEL_HEIGHT	0.25f
 
@@ -293,20 +300,76 @@ BOOL CarveRect(HWND hWnd)
 	// Current long and short side of the rect remaining to carve
 	float L = bXisLong ? g_Params.rectX : g_Params.rectY;
 	float S = bXisLong ? g_Params.rectY : g_Params.rectX;
-	L = L - (g_Params.tool.radius * 2);
-	S = S - (g_Params.tool.radius * 2);
+	float r = g_Params.rectRadius;
+	
+	// If the X and Y are external dimensions, remove tool radius
+	// for each corner (twice)
+	if (g_Params.rectExternal)
+	{
+		L = L - (g_Params.tool.radius * 2);
+		S = S - (g_Params.tool.radius * 2);
+		r = r - g_Params.tool.radius;
+	}
+	else
+	{
+		// Dimensions are the internal ones. Then add the tool
+		// radius
+		L = L + (g_Params.tool.radius * 2);
+		S = S + (g_Params.tool.radius * 2);
+		r = r + g_Params.tool.radius;
+	}
 
-	int t = 1 + (int)(S / ((g_Params.tool.radius * 2) - SMALL_OVELAP));
-	float d = S / t;
-	float Offset = 0.0f;
+	// If the corners are rounded, remove the radius for
+	// each side (twice) on each length of the sides.
+	if (g_Params.rectRounded)
+	{
+		L = L - r * 2;
+		S = S - r * 2;
+		// Also check the radius is't zero either
+		if (r <= NEAR_ZERO) return FALSE;
+	}
+	else
+	{
+		// Clear this to avoid using when rounded corners are
+		// not enabled and filled (empty) is enabled
+		r = 0.0f;
+	}
+
+	// final check that dimensions make sense (no zero or negative)
+	if ((L <= NEAR_ZERO) || (S <= NEAR_ZERO)) return FALSE;
+
+	float OffsetL = 0.0f;
+	float OffsetS = 0.0f;
 	bool bDone = false;
-	bool bInside = false;
+	bool bClipCornerTriangle = false;
+	bool bRounded = g_Params.rectRounded;
+
+	// Move to the start of the first corner. Do it above in case
+	// the tool is alread flush
+	if (bRounded)
+	{
+		sprintf_s(str, MAX_STR, "G0 Z%f\r\n", g_Params.tool.radius );
+		strcat_s(cmd, MAX_BUF, str);
+		if (bXisLong)
+		{
+			sprintf_s(str, MAX_STR, "G0 X%f\r\n", r);
+			strcat_s(cmd, MAX_BUF, str);
+		}
+		else
+		{
+			sprintf_s(str, MAX_STR, "G0 Y%f\r\n", r);
+			strcat_s(cmd, MAX_BUF, str);
+		}
+		sprintf_s(str, MAX_STR, "G0 Z%f\r\n", -g_Params.tool.radius );
+		strcat_s(cmd, MAX_BUF, str);
+	}
 
 	do
 	{
 		// Start at zero depth.
 		float Z = 0.0f;
-		float w = d - SMALL_OVELAP;
+		float w = g_Params.tool.radius / 2;
+		float d = (g_Params.tool.radius * 2) - SMALL_OVELAP;
 
 		// Dive while depth has not reached target rect depth
 		while (Z < g_Params.rectDepth - NEAR_ZERO)
@@ -325,80 +388,195 @@ BOOL CarveRect(HWND hWnd)
 
 			// Dive by 'D' on the long side of the rect
 			MakeRectMove(bXisLong, cmd, L, 0.0f, -D);
-			if (bInside)
+			if (bClipCornerTriangle)
 			{
-				MakeRectMove(bXisLong, cmd, w, 0.0f, 0.0f);
-				MakeRectMove(bXisLong, cmd, -w, 0.0f, 0.0f);
+				MakeRectMove(bXisLong, cmd, w, -w, 0.0f);
+				MakeRectMove(bXisLong, cmd, -w, w, 0.0f);
+			}
+
+			// First corner
+			if (bRounded && r > NEAR_ZERO)
+			{
+				if (bXisLong)
+				{
+					sprintf_s(str, MAX_STR, "G3 X%f Y%f J%f\r\n", r, r, r);
+					strcat_s(cmd, MAX_BUF, str);
+				}
+				else
+				{
+					sprintf_s(str, MAX_STR, "G2 X%f Y%f I%f\r\n", r, r, r);
+					strcat_s(cmd, MAX_BUF, str);
+				}
 			}
 
 			// Go along the short side
 			MakeRectMove(bXisLong, cmd, 0.0f, S, 0.0f);
-			if (bInside)
+			if (bClipCornerTriangle)
 			{
-				MakeRectMove(bXisLong, cmd, 0.0f, w, 0.0f);
-				MakeRectMove(bXisLong, cmd, 0.0f, -w, 0.0f);
+				MakeRectMove(bXisLong, cmd, w, w, 0.0f );
+				MakeRectMove(bXisLong, cmd, -w, -w, 0.0f );
+			}
+
+			// Second corner
+			if (bRounded && r > NEAR_ZERO)
+			{
+				if (bXisLong)
+				{
+					sprintf_s(str, MAX_STR, "G3 X%f Y%f I%f\r\n", -r, r, -r);
+					strcat_s(cmd, MAX_BUF, str);
+				}
+				else
+				{
+					sprintf_s(str, MAX_STR, "G2 X%f Y%f J%f\r\n", r, -r, -r);
+					strcat_s(cmd, MAX_BUF, str);
+				}
 			}
 
 			// Come back the long side
 			MakeRectMove(bXisLong, cmd, -L, 0.0f, 0.0f);
-			if (bInside)
+			if (bClipCornerTriangle)
 			{
-				MakeRectMove(bXisLong, cmd, -w, 0.0f, 0.0f);
-				MakeRectMove(bXisLong, cmd, w, 0.0f, 0.0f);
+				MakeRectMove(bXisLong, cmd, -w, w, 0.0f);
+				MakeRectMove(bXisLong, cmd, w, -w, 0.0f);
+			}
+
+			// Third corner
+			if (bRounded && r > NEAR_ZERO)
+			{
+				if (bXisLong)
+				{
+					sprintf_s(str, MAX_STR, "G3 X%f Y%f J%f\r\n", -r, -r, -r);
+					strcat_s(cmd, MAX_BUF, str);
+				}
+				else
+				{
+					sprintf_s(str, MAX_STR, "G2 X%f Y%f I%f\r\n", -r, -r, -r);
+					strcat_s(cmd, MAX_BUF, str);
+				}
 			}
 
 			// Come back the short side
 			MakeRectMove(bXisLong, cmd, 0.0f, -S, 0.0f);
-			if (bInside)
+			if (bClipCornerTriangle)
 			{
-				MakeRectMove(bXisLong, cmd, 0.0f, -w, 0.0f);
-				MakeRectMove(bXisLong, cmd, 0.0f, w, 0.0f);
+				MakeRectMove(bXisLong, cmd, -w, -w, 0.0f);
+				MakeRectMove(bXisLong, cmd, w, w, 0.0f);
+			}
+
+			// Fourth corner
+			if (bRounded && r > NEAR_ZERO )
+			{
+				if (bXisLong)
+				{
+					sprintf_s(str, MAX_STR, "G3 X%f Y%f I%f\r\n", r, -r, r);
+					strcat_s(cmd, MAX_BUF, str);
+				}
+				else
+				{
+					sprintf_s(str, MAX_STR, "G2 X%f Y%f J%f\r\n", -r, r, r);
+					strcat_s(cmd, MAX_BUF, str);
+				}
 			}
 		}
 
 		// Flatten the bottom along the long side
 		MakeRectMove(bXisLong, cmd, L, 0.0f, 0.0f);
 
-		// Get back out to starting height
 		sprintf_s(str, MAX_STR, "G0 Z%f\r\n", Z);
 		strcat_s(cmd, MAX_BUF, str);
 
-		// Come back to orgin
+		// Come back to orgin on long axis and altitude
 		if (bXisLong)
-			sprintf_s(str, MAX_STR, "G0 X%f\r\n", -L);
+			sprintf_s(str, MAX_STR, "G0 X%f\r\n", -L );
 		else
-			sprintf_s(str, MAX_STR, "G0 Y%f\r\n", -L);
+			sprintf_s(str, MAX_STR, "G0 Y%f\r\n", -L );
 		strcat_s(cmd, MAX_BUF, str);
 
 		// If we need to carve the inside and if the current rectangle still
 		// has material in its center.
-		if (g_Params.rectFill && S > ((g_Params.tool.radius * 2) - SMALL_OVELAP))
+		if (g_Params.rectFill && S > NEAR_ZERO )
 		{
-			// Move along the short side by an increment before going through
-			// another smaller square. 
-			S = S - (d * 2);
-			L = L - (d * 2);
-			sprintf_s(str, MAX_STR, "G1 X%f Y%f\r\n", d, d);
-			strcat_s(cmd, MAX_BUF, str);
+			if (r > d)
+			{
+				r = r - d;
+				MakeRectMove(bXisLong, cmd, 0.0f, d, 0.0f);
+				OffsetS += d;
+			}
+			else
+			{
+				if (r > NEAR_ZERO)
+				{
+					if (( S + r ) > d)
+					{
+						MakeRectMove(bXisLong, cmd, (d - r) / 2, d, 0.0f);
+						OffsetL += ((d - r) / 2);
+						OffsetS += d;
+						L = L - d + r;
+						S = S - d + r;
+					}
+					else
+					{
+						MakeRectMove(bXisLong, cmd, (d - r) / 2, S / 2, 0.0f);
+						OffsetL += ((d - r) / 2);
+						OffsetS += (S / 2);
+						L = L - d + r;
+						S = 0.0f;
+					}
+					r = 0.0;
+					bClipCornerTriangle = true;
+				}
+				else
+				{
+					if (S > d * 2)
+					{
+						MakeRectMove(bXisLong, cmd, d, d, 0.0f);
+						OffsetL += d;
+						OffsetS += d;
+						L = L - d * 2;
+						S = S - d * 2;
+					}
+					else
+					{
+						MakeRectMove(bXisLong, cmd, d, S / 2, 0.0f);
+						OffsetL += d;
+						OffsetS += (S / 2);
+						L = L - d * 2;
+						S = 0.0f;
+					}
 
-			// Accumulate the deltas so that we can return back to origin
-			// at the end.
-			Offset += d;
-			// Set to enable the removal of corner triangles
-			bInside = true;
+					bClipCornerTriangle = true;
+				}				
+			}			
 		}
 		else
 		{
-			if (Offset != 0.0f)
+			if (OffsetL != 0.0f || OffsetS != 0.0f)
 			{
 				// Come back up to origin
-				sprintf_s(str, MAX_STR, "G0 X%f Y%f\r\n", -Offset, -Offset);
-				strcat_s(cmd, MAX_BUF, str);
+				MakeRectMove(bXisLong, cmd, -OffsetL, -OffsetS, 0.0f);
 			}
 			bDone = true;
 		}
-
 	} while (!bDone);
+
+
+	if (bRounded)
+	{
+		sprintf_s(str, MAX_STR, "G0 Z%f\r\n", g_Params.tool.radius);
+		strcat_s(cmd, MAX_BUF, str);
+		if (bXisLong)
+		{
+			sprintf_s(str, MAX_STR, "G0 X%f\r\n", -r);
+			strcat_s(cmd, MAX_BUF, str);
+		}
+		else
+		{
+			sprintf_s(str, MAX_STR, "G0 Y%f\r\n", -r);
+			strcat_s(cmd, MAX_BUF, str);
+		}
+		sprintf_s(str, MAX_STR, "G0 Z%f\r\n", -g_Params.tool.radius);
+		strcat_s(cmd, MAX_BUF, str);
+	}
 
 	// End the line and stop the motor if needed
 	if (g_Params.tool.motorControl)
@@ -476,6 +654,9 @@ BOOL CALLBACK BasicShapesProc(HWND hWnd,
 		{
 		case IDC_EXECUTE :
 			BasicShapeOneCommand(hWnd);
+			break;
+		case IDC_RESET_SIM :
+			resetBlockSurface();
 			break;
 		case IDC_CARVE_CIRCLE:
 			BasicShapeGetSet(TRUE , hWnd );

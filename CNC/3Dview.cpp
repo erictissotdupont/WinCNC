@@ -179,107 +179,102 @@ typedef struct
 
 float g_res;
 float *g_alt = NULL;
-header_t *g_header = NULL;
+header_t g_header;
 DWORD g_cbAlt = 0;
-HANDLE g_hAltFile = NULL;
-HANDLE g_hMapFile = NULL;
-
 DWORD countX,countY;
+WCHAR g_szAltFileName[MAX_PATH];
+HANDLE g_hFileChangeEvent = INVALID_HANDLE_VALUE;
 
-struct {
+#define MAX_TOOL_SHAPE	1000
+
+typedef struct {
 	int dx;
 	int dy;
-} toolShape[1000];
+} g_toolShape_t;
+
+g_toolShape_t* g_toolShape = NULL;
 
 DWORD iToolPoints = 0;
 
+//
+// TODO : Find the path dynamically instead of hardcoded.
+//
 void startViewer(const WCHAR* szFilePath)
 {
 	STARTUPINFO si;
 	PROCESS_INFORMATION pi;
-
+	
+	memset(&pi, 0x00, sizeof(pi));
+	memset(&si, 0x00, sizeof(si));
+	si.cb = sizeof(STARTUPINFO);
 	GetStartupInfo(&si);
 
-	SetCurrentDirectory(L"C:\\Users\\Eric\\Documents\\GitHub\\WinCnc\\Debug");
+	g_hFileChangeEvent = CreateEvent(NULL, FALSE, FALSE, L"Local\\AltFileChangeEvent");
 
-	WCHAR curDir[MAX_PATH];
-	GetCurrentDirectory(MAX_PATH, curDir);
+	// This to make sure Viewer.exe finds the file Viewer.fx
+	SetCurrentDirectory(L"C:\\Users\\Eric\\Documents\\GitHub\\WinCnc\\Viewer");
 
 	WCHAR cmdLine[MAX_PATH];
 	wcscpy_s(cmdLine, MAX_PATH, L"Viewer.exe ");
 	wcscat_s(cmdLine, MAX_PATH, szFilePath);
 
-	if (!CreateProcess(L"Viewer.exe", cmdLine, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi))
+	if (!CreateProcess(L"C:\\Users\\Eric\\Documents\\GitHub\\WinCnc\\Debug\\Viewer.exe", cmdLine, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi))
 	{
 		WCHAR msg[MAX_PATH + 80];
-		wsprintf(msg, L"Unable to open viewer. Reason %d.\r\n%s", GetLastError(), curDir);
+		wsprintf(msg, L"Unable to open viewer. Reason %d.\r\n", GetLastError());
 		MessageBox(NULL, msg, L"CNC", MB_OK);
 	}
+	CloseHandle(pi.hProcess);
+	CloseHandle(pi.hThread);
 }
 
 void saveAltitude(WCHAR* szFilePath)
 {
 	HANDLE hFile;
-
 	hFile = CreateFile(szFilePath, GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, 0, NULL);
-
 	if (hFile != INVALID_HANDLE_VALUE)
 	{
 		DWORD dwWritten;
-		WriteFile(hFile, g_header, sizeof(g_header), &dwWritten, NULL);
+		WriteFile(hFile, &g_header, sizeof(header_t), &dwWritten, NULL);
 		WriteFile(hFile, g_alt, g_cbAlt, &dwWritten, NULL);
 		CloseHandle(hFile);
+		SetEvent(g_hFileChangeEvent);
 	}
 }
 
 extern tMetaData g_MetaData;
-const WCHAR szShareMemName[] = L"CNCFileMappingObject";
+
+void resetBlockSurface()
+{
+	if (g_alt)
+	{
+		// Set the height of the block for all the vertexes on the surface
+		for (DWORD x = 0; x < countX; x++) for (DWORD y = 0; y < countY; y++)
+		{
+			g_alt[x*countY + y] = (float)(g_MetaData.blockZ - g_MetaData.offsetZ);
+		}
+
+		saveAltitude(g_szAltFileName);
+	}
+}
 
 void init3DView( float res )
 {
-	volatile int err;
-
 	g_res = res;
 
 	countX = 1 + (DWORD)(g_MetaData.blockX / res);
 	countY = 1 + (DWORD)(g_MetaData.blockY / res);
 
 	g_cbAlt = sizeof(float) * countX * countY;
-	DWORD cbMap = g_cbAlt + sizeof(header_t);
 
-	g_hMapFile = CreateFileMapping(
-		INVALID_HANDLE_VALUE,    // use paging file
-		NULL,                    // default security
-		PAGE_READWRITE,          // read/write access
-		0,                       // maximum object size (high-order DWORD)
-		cbMap,					 // maximum object size (low-order DWORD)
-		szShareMemName);         // name of mapping object
+	g_header.id = 0x00010002;
+	g_header.dx = countX;
+	g_header.dy = countY;
+	g_header.res = g_res;
+	g_header.cbAlt = g_cbAlt;
 
-	if (g_hMapFile == NULL)
-	{
-		err = GetLastError();
-		return;
-	}
-
-	g_header = (header_t*)MapViewOfFile(g_hMapFile,   // handle to map object
-		FILE_MAP_ALL_ACCESS, // read/write permission
-		0,
-		0,
-		cbMap);
-
-	if (g_header == NULL)
-	{
-		CloseHandle(g_hMapFile);
-		return;
-	}
-
-	g_header->id = 0x00010002;
-	g_header->dx = countX;
-	g_header->dy = countY;
-	g_header->res = g_res;
-	g_header->cbAlt = g_cbAlt;
-
-	g_alt = (float*)(g_header+1);
+	if (g_alt) free(g_alt);
+	g_alt = (float*)malloc(g_cbAlt);
 
 	// Set the height of the block for all the vertexes on the surface
 	for (DWORD x = 0; x < countX; x++) for (DWORD y = 0; y < countY; y++)
@@ -305,36 +300,40 @@ void init3DView( float res )
 	// the surface. This is an optimization to avoid calculating all the points
 	// contained within the tool for every position of the tool motion.
 	//
-	int iRtool = (int)(g_MetaData.toolRadius / res);
+	int iRtool = (int)(g_MetaData.toolRadius / res) + 1;
 
-	for (int i = 0; i <= iRtool; i++) for (int j = 0; j <= iRtool; j++)
+	iToolPoints = 0;
+	if (g_toolShape) free(g_toolShape);
+	g_toolShape = (g_toolShape_t*)malloc(iRtool*iRtool*sizeof(g_toolShape_t));
+
+	for (int i = 0; i < iRtool; i++) for (int j = 0; j < iRtool; j++)
 	{
 		float x = i*res;
 		float y = j*res;
 		if (sqrt(x*x + y*y) <= g_MetaData.toolRadius)
 		{
-			toolShape[iToolPoints].dx = i;
-			toolShape[iToolPoints].dy = j;
+			g_toolShape[iToolPoints].dx = i;
+			g_toolShape[iToolPoints].dy = j;
 			iToolPoints++;
 		}
 	}
 
+	wcscpy_s(g_szAltFileName, MAX_PATH, L"C:\\windows\\temp\\simAltitude.dat");
+
+	saveAltitude(g_szAltFileName);
+
 	// This launches the 3D viewer window
-	startViewer(szShareMemName);
+	startViewer(g_szAltFileName);
 }
 
-void end3DView()
+void update3DView()
 {
-	WCHAR szFilePath[MAX_PATH];
-	GetCurrentDirectory(MAX_PATH, szFilePath);
-	wcscat_s(szFilePath, L"\\CNC_Result.dat");
-
-	saveAltitude( szFilePath );
-
-	UnmapViewOfFile(g_header);
-	CloseHandle(g_hMapFile);
-
-	return;
+	if (g_alt)
+	{
+		saveAltitude(g_szAltFileName);
+	}
+	// This launches the 3D viewer window
+	// startViewer(g_szAltFileName);
 }
 
 inline void toolAt(long x, long y, float z)
@@ -379,20 +378,22 @@ tStatus buildPath(t3DPoint P, long x, long y, long z, long d, long s)
 
 		for (DWORD i = 0; i < iToolPoints; i++)
 		{
-			toolAt(iX + toolShape[i].dx, iY + toolShape[i].dy, (float)p.z);
+			toolAt(iX + g_toolShape[i].dx, iY + g_toolShape[i].dy, (float)p.z);
 			if (i != 0)
 			{
-				toolAt(iX - toolShape[i].dx, iY + toolShape[i].dy, (float)p.z);
-				toolAt(iX - toolShape[i].dx, iY - toolShape[i].dy, (float)p.z);
-				toolAt(iX + toolShape[i].dx, iY - toolShape[i].dy, (float)p.z);
+				toolAt(iX - g_toolShape[i].dx, iY + g_toolShape[i].dy, (float)p.z);
+				toolAt(iX - g_toolShape[i].dx, iY - g_toolShape[i].dy, (float)p.z);
+				toolAt(iX + g_toolShape[i].dx, iY - g_toolShape[i].dy, (float)p.z);
 			}
 		}
 		DWORD current = timeGetTime();
-		if (current > prevTime + 40)
+		if (current > prevTime + 50 )
 		{
 			PostMessage(hMainWindow, WM_UPDATE_POSITION, 0, 0);
 			prevTime = current;
 		}
+
+		Sleep(1);
 	}
 	p = P;
 
@@ -417,7 +418,7 @@ tStatus buildPath(t3DPoint P, long x, long y, long z, long d, long s)
 	//Sleep( d / 1000 );
 	
 	// 3x faster
-	// Sleep(d / 3000);
+	//Sleep(d / 3000);
 
 	return retSuccess;
 }

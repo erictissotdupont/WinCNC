@@ -83,7 +83,7 @@ float					g_tZ = 0.0f;
 float					g_tY = 0.0f;
 
 DWORD					g_vCount = 0;
-SimpleVertex*			vertices = NULL;
+SimpleVertex*			g_vertices = NULL;
 
 DWORD					g_iCount = 0;
 DWORD*					indices = NULL;
@@ -95,7 +95,7 @@ HANDLE					g_hMapFile = NULL;
 HANDLE					g_hFileChangeEvent = NULL;
 
 float*					g_alt = NULL;
-header_t*				g_h;
+header_t				g_header;
 
 //--------------------------------------------------------------------------------------
 // Forward declarations
@@ -105,13 +105,25 @@ HRESULT InitDevice();
 void CleanupDevice();
 LRESULT CALLBACK    WndProc( HWND, UINT, WPARAM, LPARAM );
 void Render();
+HRESULT LoadAltitudeFile();
+
 
 DWORD FileChangeWatcherThread()
 {
 	while (1)
 	{
-		
+		if (WaitForSingleObject(g_hFileChangeEvent, INFINITE) == WAIT_OBJECT_0)
+		{
+			SendMessage(g_hWnd, WM_USER, 1, 0);
+			Sleep(1);
+		}
+		else
+		{
+			// Abort
+			break;
+		}
 	}
+	return 0;
 }
 
 //--------------------------------------------------------------------------------------
@@ -123,13 +135,6 @@ int WINAPI wWinMain( _In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance,
     UNREFERENCED_PARAMETER( hPrevInstance );
     
 	wcscpy_s(g_szAltDataFile, lpCmdLine);
-
-	g_hFileChangeEvent = FindFirstChangeNotification(g_szAltDataFile, FALSE, FILE_NOTIFY_CHANGE_LAST_WRITE);
-	if (g_hFileChangeEvent)
-	{
-		DWORD dwThreadId;
-		CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)WatcherThread, NULL, 0, &dwThreadId);
-	}
 
     if( FAILED( InitWindow( hInstance, nCmdShow ) ) )
         return 0;
@@ -240,9 +245,9 @@ BOOL UpdateAltitude( )
 	DWORD iX, iY;
 
 	n = 0;
-	for (iX = 0; iX<g_h->dx; iX++) for (iY = 0; iY<g_h->dy; iY++)
+	for (iX = 0; iX<g_header.dx; iX++) for (iY = 0; iY<g_header.dy; iY++)
 	{
-		vertices[n].Pos.y = g_alt[n]; // g_alt[iX*g_h->dy + iY];
+		g_vertices[n].Pos.y = g_alt[n]; // g_alt[iX*g_header.dy + iY];
 		n++;
 	}
 
@@ -250,29 +255,29 @@ BOOL UpdateAltitude( )
 	BOOL bUpdateScreen = FALSE;
 	BOOL bUpdateVertex;
 
-	for (iX = 0; iX < g_h->dx - 1; iX++) for (iY = 0; iY < g_h->dy - 1; iY++)
+	for (iX = 0; iX < g_header.dx - 1; iX++) for (iY = 0; iY < g_header.dy - 1; iY++)
 	{
-		int a = g_h->dy * iX + iY;
+		int a = g_header.dy * iX + iY;
 		int b = a + 1;
-		int c = a + g_h->dy;
+		int c = a + g_header.dy;
 		int d = c + 1;
 		float l;
 		XMFLOAT3 V1, V2, P;
 
 		/*
 		bUpdateVertex = FALSE;
-		if (vertices[a].Pos.y != g_alt[a]) { vertices[a].Pos.y = g_alt[a]; bUpdateVertex = TRUE; }
-		if (vertices[b].Pos.y != g_alt[b]) { vertices[b].Pos.y = g_alt[b]; bUpdateVertex = TRUE; }
-		if (vertices[c].Pos.y != g_alt[c]) { vertices[c].Pos.y = g_alt[c]; bUpdateVertex = TRUE; }
-		if (vertices[d].Pos.y != g_alt[d]) { vertices[d].Pos.y = g_alt[d]; bUpdateVertex = TRUE; }
+		if (g_vertices[a].Pos.y != g_alt[a]) { g_vertices[a].Pos.y = g_alt[a]; bUpdateVertex = TRUE; }
+		if (g_vertices[b].Pos.y != g_alt[b]) { g_vertices[b].Pos.y = g_alt[b]; bUpdateVertex = TRUE; }
+		if (g_vertices[c].Pos.y != g_alt[c]) { g_vertices[c].Pos.y = g_alt[c]; bUpdateVertex = TRUE; }
+		if (g_vertices[d].Pos.y != g_alt[d]) { g_vertices[d].Pos.y = g_alt[d]; bUpdateVertex = TRUE; }
 		if (!bUpdateVertex) continue;
 		bUpdateScreen = TRUE;
 		*/
 
 #define CP(u,v)		u.y*v.z - u.z*v.y, u.z*v.x - u.x*v.z, u.x*v.y - u.y*v.x
 #define DP(u,v)		(u.x*v.x + u.y*v.y + u.z*v.z)
-#define LENGTH(u)	sqrt(DP(u,u))
-#define V(i,j)		vertices[i].Pos.x - vertices[j].Pos.x, vertices[i].Pos.y - vertices[j].Pos.y, vertices[i].Pos.z - vertices[j].Pos.z
+#define LENGTH(u)	((float)(sqrt(DP(u,u))))
+#define V(i,j)		g_vertices[i].Pos.x - g_vertices[j].Pos.x, g_vertices[i].Pos.y - g_vertices[j].Pos.y, g_vertices[i].Pos.z - g_vertices[j].Pos.z
 
 		if (((iX + iY) & 1) == 0)
 		{
@@ -289,134 +294,94 @@ BOOL UpdateAltitude( )
 		P.x = P.x / l;
 		P.y = P.y / l;
 		P.z = P.z / l;
-		vertices[a].Normal = P;
-		if (iX == g_h->dx - 1) vertices[c].Normal = P;
-		if (iY == g_h->dy - 1) vertices[b].Normal = P;
+		g_vertices[a].Normal = P;
+		if (iX == g_header.dx - 1) g_vertices[c].Normal = P;
+		if (iY == g_header.dy - 1) g_vertices[b].Normal = P;
 	}
 
 	return bUpdateScreen;
 }
 
-HRESULT LoadAltitudeFile()
+HRESULT LoadAltitudeFile( )
 {
 	static HANDLE hFile = INVALID_HANDLE_VALUE;
-	static DWORD cbAlt;
+	static DWORD cbAlt = 0;
 	DWORD iX, iY;
 	int n = 0;
 
-	g_hMapFile = OpenFileMapping(
-		FILE_MAP_ALL_ACCESS,      // read/write access
-		FALSE,                    // do not inherit the name
-		g_szAltDataFile);         // name of mapping object
-
-	// If the memory mapped file doesn't exist, assume the parameter is the name of
-	// an actual file (static view). In this case, the update thread won't get started.
-	if (g_hMapFile == NULL)
+	hFile = CreateFile(g_szAltDataFile, FILE_READ_ACCESS, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
+	if (hFile == INVALID_HANDLE_VALUE)
 	{
-		hFile = CreateFile(g_szAltDataFile, FILE_READ_ACCESS, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
-		if (hFile == INVALID_HANDLE_VALUE)
-		{
-			return S_FALSE;
-		}
+		return S_FALSE;
+	}
 	
-		g_h = (header_t*)malloc(sizeof(header_t));
-		ReadFile(hFile, g_h, sizeof(header_t), NULL, NULL);
+	ReadFile(hFile, &g_header, sizeof(header_t), NULL, NULL);
 
-		cbAlt = g_h->dx * g_h->dy * sizeof(float);
-		g_alt = (float*)malloc(cbAlt);
+	cbAlt = g_header.dx * g_header.dy * sizeof(float);
 
-		ReadFile(hFile, g_alt, cbAlt, NULL, NULL);
+	if (g_alt) free(g_alt);
+	g_alt = (float*)malloc(cbAlt);
 
-		CloseHandle(hFile);
-	}
-	else
-	{
-		DWORD cbMap = GetFileSize(g_hMapFile, NULL);
+	ReadFile(hFile, g_alt, cbAlt, NULL, NULL);
+	CloseHandle(hFile);
 
-		g_h = (header_t*)MapViewOfFile(g_hMapFile,   // handle to map object
-			FILE_MAP_ALL_ACCESS, // read/write permission
-			0,
-			0,
-			sizeof(header_t));
+	int iXsz = g_header.dx;			// 1 + Xsz / resolution;
+	int iYsz = g_header.dy;			// 1 + Ysz / resolution;
 
-		if (g_h == NULL)
-		{
-			CloseHandle(g_hMapFile);
-			return S_FALSE;
-		}
-
-		cbMap = sizeof(header_t) + g_h->cbAlt;
-		UnmapViewOfFile(g_h);
-		g_h = (header_t*)MapViewOfFile(g_hMapFile,   // handle to map object
-			FILE_MAP_ALL_ACCESS, // read/write permission
-			0,
-			0,
-			cbMap);
-
-		if (g_h == NULL)
-		{
-			CloseHandle(g_hMapFile);
-			return S_FALSE;
-		}
-
-		cbAlt = g_h->dx * g_h->dy * sizeof(float);
-		g_alt = (float*)(g_h + 1);
-	}
-
-	int iXsz = g_h->dx;			// 1 + Xsz / resolution;
-	int iYsz = g_h->dy;			// 1 + Ysz / resolution;
-
-	// Number of vertices is same as points in file
+	// Number of g_vertices is same as points in file
 	g_vCount = iXsz * iYsz;
-	vertices = (SimpleVertex*)malloc(g_vCount * sizeof(SimpleVertex));
-
-	// Number of squares, 2 triangles per squares, 3 points per triangle
-	g_iCount = (iXsz - 1) * (iYsz - 1) * 2 * 3;
-	indices = (DWORD*)malloc(g_iCount * sizeof(DWORD));
-
-	n = 0;
-	for (iX = 0; iX < g_h->dx - 1; iX++) for (iY = 0; iY < g_h->dy - 1; iY++)
+	if (g_vertices == NULL)
 	{
-		int a = g_h->dy * iX + iY;
-		int b = a + 1;
-		int c = a + g_h->dy;
-		int d = c + 1;
+		g_vertices = (SimpleVertex*)malloc(g_vCount * sizeof(SimpleVertex));
 
-		if (((iX + iY) & 1) == 0)
+		// Number of squares, 2 triangles per squares, 3 points per triangle
+		g_iCount = (iXsz - 1) * (iYsz - 1) * 2 * 3;
+		indices = (DWORD*)malloc(g_iCount * sizeof(DWORD));
+
+		n = 0;
+		for (iX = 0; iX < g_header.dx - 1; iX++) for (iY = 0; iY < g_header.dy - 1; iY++)
 		{
-			indices[n++] = a;
-			indices[n++] = b;
-			indices[n++] = d;
+			int a = g_header.dy * iX + iY;
+			int b = a + 1;
+			int c = a + g_header.dy;
+			int d = c + 1;
 
-			indices[n++] = a;
-			indices[n++] = d;
-			indices[n++] = c;
+			if (((iX + iY) & 1) == 0)
+			{
+				indices[n++] = a;
+				indices[n++] = b;
+				indices[n++] = d;
+
+				indices[n++] = a;
+				indices[n++] = d;
+				indices[n++] = c;
+			}
+			else
+			{
+				indices[n++] = a;
+				indices[n++] = b;
+				indices[n++] = c;
+
+				indices[n++] = b;
+				indices[n++] = d;
+				indices[n++] = c;
+			}
 		}
-		else
+
+		n = 0;
+		float Xsz = (g_header.dx - 1) * g_header.res; // 6.0f;
+		float Ysz = (g_header.dy - 1) * g_header.res; // 5.0f;
+		float Xoffset = -(Xsz / 2.0f);
+		float Yoffset = -(Ysz / 2.0f);
+		float x, z;
+
+		for (iX = 0; iX < g_header.dx; iX++) for (iY = 0; iY < g_header.dy; iY++)
 		{
-			indices[n++] = a;
-			indices[n++] = b;
-			indices[n++] = c;
-
-			indices[n++] = b;
-			indices[n++] = d;
-			indices[n++] = c;
+			x = Xoffset + iX * g_header.res;
+			z = Yoffset + iY * g_header.res;
+			g_vertices[n].Pos = XMFLOAT3(x, 0, z);
+			n++;
 		}
-	}
-
-	n = 0;
-	float Xsz = (g_h->dx - 1) * g_h->res; // 6.0f;
-	float Ysz = (g_h->dy - 1) * g_h->res; // 5.0f;
-	float Xoffset = -(Xsz / 2.0f);
-	float Yoffset = -(Ysz / 2.0f);
-	float x, z;
-
-	for (iX = 0; iX<g_h->dx; iX++) for (iY = 0; iY<g_h->dy; iY++)
-	{
-		x = Xoffset + iX * g_h->res;
-		z = Yoffset + iY * g_h->res;
-		vertices[n].Pos = XMFLOAT3(x, 0, z);
-		n++;
 	}
 
 	UpdateAltitude( );
@@ -449,9 +414,9 @@ HRESULT LoadAltitudeFile()
 		int iXsz = h.dx;			// 1 + Xsz / resolution;
 		int iYsz = h.dy;			// 1 + Ysz / resolution;
 
-		// Number of vertices is same as points in file
+		// Number of g_vertices is same as points in file
 		g_vCount = iXsz * iYsz;
-		vertices = (SimpleVertex*)malloc(g_vCount * sizeof(SimpleVertex));
+		g_vertices = (SimpleVertex*)malloc(g_vCount * sizeof(SimpleVertex));
 
 		// Number of squares, 2 triangles per squares, 3 points per triangle
 		g_iCount = (iXsz - 1) * (iYsz - 1) * 2 * 3;       
@@ -498,7 +463,7 @@ HRESULT LoadAltitudeFile()
 		{
 			x = Xoffset + iX * h.res;
 			z = Yoffset + iY * h.res;
-			vertices[n].Pos = XMFLOAT3(x, 0, z);
+			g_vertices[n].Pos = XMFLOAT3(x, 0, z);
 			n++;
 		}
 	}
@@ -512,7 +477,7 @@ HRESULT LoadAltitudeFile()
 	n = 0;
 	for (iX = 0; iX<h.dx; iX++) for (iY = 0; iY<h.dy; iY++)
 	{
-		vertices[n++].Pos.y = alt[iX*h.dy + iY];
+		g_vertices[n++].Pos.y = alt[iX*h.dy + iY];
 	}
 
 	n = 0;
@@ -528,7 +493,7 @@ HRESULT LoadAltitudeFile()
 #define CP(u,v)		u.y*v.z - u.z*v.y, u.z*v.x - u.x*v.z, u.x*v.y - u.y*v.x
 #define DP(u,v)		(u.x*v.x + u.y*v.y + u.z*v.z)
 #define LENGTH(u)	sqrt(DP(u,u))
-#define V(i,j)		vertices[i].Pos.x - vertices[j].Pos.x, vertices[i].Pos.y - vertices[j].Pos.y, vertices[i].Pos.z - vertices[j].Pos.z
+#define V(i,j)		g_vertices[i].Pos.x - g_vertices[j].Pos.x, g_vertices[i].Pos.y - g_vertices[j].Pos.y, g_vertices[i].Pos.z - g_vertices[j].Pos.z
 
 		if (((iX + iY) & 1) == 0)
 		{
@@ -545,9 +510,9 @@ HRESULT LoadAltitudeFile()
 		P.x = P.x / l;
 		P.y = P.y / l;
 		P.z = P.z / l;
-		vertices[a].Normal = P;
-		if (iX == h.dx - 1) vertices[c].Normal = P;
-		if (iY == h.dy - 1) vertices[b].Normal = P;
+		g_vertices[a].Normal = P;
+		if (iX == h.dx - 1) g_vertices[c].Normal = P;
+		if (iY == h.dy - 1) g_vertices[b].Normal = P;
 	}
 
 	//CloseHandle(hFile);
@@ -559,18 +524,18 @@ HRESULT LoadAltitudeFile()
 
 DWORD UpdateVerticesThread(LPVOID pParam)
 {
-	SimpleVertex *vertices = (SimpleVertex*)pParam;
+	// SimpleVertex *g_vertices = (SimpleVertex*)pParam;
 
 	while (1)
 	{
-		Sleep(100);
+		Sleep(250);
 		
 		UpdateAltitude();
 		
 		D3D11_MAPPED_SUBRESOURCE resource;
 		WaitForSingleObject(g_hRender, INFINITE);
 		g_pImmediateContext->Map(g_pVertexBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &resource);
-		memcpy(resource.pData, vertices, sizeof(SimpleVertex) * g_vCount);
+		memcpy(resource.pData, g_vertices, sizeof(SimpleVertex) * g_vCount);
 		g_pImmediateContext->Unmap(g_pVertexBuffer, 0);
 		ReleaseMutex(g_hRender);
 
@@ -840,7 +805,7 @@ HRESULT InitDevice()
 	
 	D3D11_SUBRESOURCE_DATA InitData;
 	ZeroMemory(&InitData, sizeof(InitData));
-	InitData.pSysMem = vertices;
+	InitData.pSysMem = g_vertices;
 	hr = g_pd3dDevice->CreateBuffer(&bd, &InitData, &g_pVertexBuffer);
 	if (FAILED(hr))
 		return hr;
@@ -886,15 +851,18 @@ HRESULT InitDevice()
     // Initialize the projection matrix
 	g_Projection = XMMatrixPerspectiveFovLH( XM_PIDIV4, width / (FLOAT)height, 0.01f, 100.0f );
 
+	g_hRender = CreateMutex(NULL, FALSE, NULL);
+
 	Render();
 
-	DWORD dwThreadId;
-	g_hRender = CreateMutex(NULL, FALSE, NULL);
-	if (g_hMapFile != NULL)
+	g_hFileChangeEvent = CreateEvent(NULL, FALSE, FALSE, L"Local\\AltFileChangeEvent");
+	// FindFirstChangeNotification(g_szAltDataFile, FALSE, FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NOTIFY_CHANGE_LAST_ACCESS );
+	if (g_hFileChangeEvent)
 	{
-		CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)UpdateVerticesThread, (PVOID)vertices, 0, &dwThreadId);
+		DWORD dwThreadId;
+		CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)FileChangeWatcherThread, NULL, 0, &dwThreadId);
 	}
-
+	
     return S_OK;
 }
 
@@ -905,6 +873,7 @@ HRESULT InitDevice()
 void Render()
 {
 	WaitForSingleObject(g_hRender, INFINITE);
+
 	// Rotate cube around the origin
 	g_World = XMMatrixRotationY( g_tY );
 	
@@ -1029,7 +998,18 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam 
     switch( message )
     {
 		case WM_USER:
-			if (wParam == 1) Render();
+			if (wParam == 1)
+			{
+				D3D11_MAPPED_SUBRESOURCE resource;
+
+				LoadAltitudeFile();
+
+				g_pImmediateContext->Map(g_pVertexBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &resource);
+				memcpy(resource.pData, g_vertices, sizeof(SimpleVertex) * g_vCount);
+				g_pImmediateContext->Unmap(g_pVertexBuffer, 0);
+
+				Render();
+			} 
 			break;
 
 		case WM_KEYDOWN:

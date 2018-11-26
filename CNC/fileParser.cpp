@@ -4,6 +4,7 @@
 #include "Windowsx.h"
 #include "Commctrl.h"
 #include "resource.h"
+#include "3Dview.h"
 
 typedef struct {
 	char* buffer;

@@ -304,7 +304,8 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
    hInst = hInstance; // Store instance handle in our global variable
 
    hMainWindow = CreateWindow(szWindowClass, szTitle, WS_OVERLAPPEDWINDOW,
-      CW_USEDEFAULT, 0, CW_USEDEFAULT, 0, NULL, NULL, hInstance, NULL);
+	   0, 0, 800, 600, NULL, NULL, hInstance, NULL);
+      //CW_USEDEFAULT, 0, CW_USEDEFAULT, 0, NULL, NULL, hInstance, NULL);
 
    if (!hMainWindow)
    {
@@ -347,9 +348,9 @@ void OnKey(int key)
 	}
 }
 
-void OnRunGCode(HWND hWnd,BOOL bSimulate)
+void OnRunGCode(HWND hWnd)
 {
-	WCHAR szFile[260];       // buffer for file name
+	WCHAR szFile[MAX_PATH];       // buffer for file name
 	OPENFILENAME ofn;
 
 	// Initialize OPENFILENAME
@@ -370,29 +371,34 @@ void OnRunGCode(HWND hWnd,BOOL bSimulate)
 
 	if (GetOpenFileName(&ofn))
 	{
-		if (bSimulate)
-		{
-			g_MetaData.blockX = 0;
-			g_MetaData.blockY = 0;
-			g_MetaData.blockZ = 0;
-			g_MetaData.offsetX = 0;
-			g_MetaData.offsetY = 0;
-			g_MetaData.offsetZ = 0;
-			g_MetaData.toolRadius = 0;
-			g_MetaData.toolHeight = 0;
-			g_MetaData.gotWhatTool = 0;
-			g_MetaData.gotWhatStart = 0;
-			g_MetaData.gotWhatBlock = 0;
-
-			ParseGCodeFile(hWnd, szFile, preParse);
-
-			init3DView(0.005f);
-
-			setSimulationMode(buildPath);
-		}
-		
 		ParseGCodeFile( hWnd, szFile, doGcode );
 	}
+}
+
+void OnSetSimulationMode(HWND hWnd)
+{
+	// TODO : MAKE THIS DYNAMIC
+
+	// PIECE OF 7x5n 0.5in thick with the tool starting flush at 1,1 inch
+	// ofset for the corner (tool always starts at 0,0)
+	g_MetaData.blockX = 5;
+	g_MetaData.blockY = 3;
+	g_MetaData.blockZ = 0.5;
+	g_MetaData.offsetX = -0.5;
+	g_MetaData.offsetY = -0.5;
+	g_MetaData.offsetZ = 0.5;	// Make it same as blockZ to when tool starts flush with top of block
+	g_MetaData.toolRadius = 0.125;
+	g_MetaData.toolHeight = 1.0;
+	g_MetaData.gotWhatTool = 1;
+	g_MetaData.gotWhatStart = 1;
+	g_MetaData.gotWhatBlock = 1;
+
+	// This is to get the metadata from the G-Code file
+	//ParseGCodeFile(hWnd, szFile, preParse);
+
+	init3DView(0.005f);
+
+	setSimulationMode(buildPath);
 }
 
 //
@@ -419,10 +425,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		switch (wmId)
 		{
 		case IDM_RUN_GCODE:
-			OnRunGCode(hWnd, false);
+			OnRunGCode(hWnd);
 			break;
 		case IDM_SIMULATE_GCODE:
-			OnRunGCode(hWnd, true);
+			OnSetSimulationMode(hWnd);
 			break;
 		case IDM_BASIC_SHAPE:
 			BasicShapes(hWnd);
@@ -498,6 +504,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 	case WM_UPDATE_POSITION:
 		getCurPos(&g_displayPos);
 		InvalidateRgn(hWnd, NULL, false);
+		update3DView();
 		break;
 
 	case WM_REDRAW:
