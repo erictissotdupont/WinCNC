@@ -83,7 +83,17 @@ UINT BasicShapeGetSet(BOOL get, HWND hWnd )
 	ShapeGetSetBool(hWnd, IDC_RECT_FILL, get, &g_Params.rectFill);
 	ShapeGetSetBool(hWnd, IDC_RECT_EXTERNAL, get, &g_Params.rectExternal);
 	ShapeGetSetBool(hWnd, IDC_RECT_ROUNDED, get, &g_Params.rectRounded);
+
+	// Filling shape is only relevant when external dimensions are requested
+	EnableWindow(GetDlgItem(hWnd, IDC_CIRCLE_FILL), Button_GetCheck(GetDlgItem(hWnd, IDC_CIRCLE_EXTERNAL_RADIUS)));
+	EnableWindow(GetDlgItem(hWnd, IDC_RECT_FILL), Button_GetCheck(GetDlgItem(hWnd, IDC_RECT_EXTERNAL)));
+
+	// Y dimension is only relevant when Oval option is used
+	EnableWindow(GetDlgItem(hWnd, IDC_CIRCLE_RADIUS_Y), Button_GetCheck(GetDlgItem(hWnd, IDC_CIRCLE_OVAL)));
 	
+	// Corner radius only relevant when rounder corner option is used
+	EnableWindow(GetDlgItem(hWnd, IDC_RECT_RADIUS), Button_GetCheck(GetDlgItem(hWnd, IDC_RECT_ROUNDED)));
+
 	return 0;
 }
 
@@ -96,7 +106,6 @@ G0 Z0.3
 G0 X - 4.625
 */
 
-#define NEAR_ZERO			0.00001f
 #define SMALL_OVELAP		(1/64.0f)
 #define SMALLEST_RADIUS		( g_Params.tool.radius + SMALL_OVELAP )
 #define SAFE_TRAVEL_HEIGHT	0.25f
@@ -142,7 +151,11 @@ BOOL CarveCircle(HWND hWnd)
 		return FALSE;
 	}
 	memset(cmd, 0x00, MAX_BUF);
-	
+
+	// ------------------------------------
+	// START OF GCODE GENERATION FOR CIRCLE
+	// ------------------------------------
+
 	// G91: Relative Motion
 	// Fxx : Carve speed
 	// M3 : Motor ON
@@ -157,10 +170,23 @@ BOOL CarveCircle(HWND hWnd)
 	float d = R / t;
 	float rx,ry;
 
-	bool bDone = false;
-	rx = g_Params.circleRadiusX - g_Params.tool.radius;
-	ry = g_Params.circleRadiusY - g_Params.tool.radius;
+	rx = g_Params.circleRadiusX;
+	ry = g_Params.circleOval ? g_Params.circleRadiusY : rx;
 
+	if (g_Params.circleExternal)
+	{
+		// Dimension is external. Remove the tool radius.
+		rx -= g_Params.tool.radius;
+		ry -= g_Params.tool.radius;
+	}
+	else
+	{
+		// Dimension is internal. Add the tool radius.
+		rx += g_Params.tool.radius;
+		ry += g_Params.tool.radius;
+	}
+
+	bool bDone = false;
 	do
 	{
 		// Move from the center to the radius of the circle (9 o'clock)
@@ -269,30 +295,48 @@ BOOL CarveRect(HWND hWnd)
 {
 	char str[MAX_STR];
 	char* cmd;
+	float OffsetL = 0.0f;
+	float OffsetS = 0.0f;
+	bool bDone = false;
+	bool bClipCornerTriangle = false;
+	int bRounded = g_Params.rectRounded;
 
 	// Can't use a tool so small
-	if (g_Params.tool.radius < SMALL_OVELAP * 2) return FALSE;
+	if (g_Params.tool.radius < SMALL_OVELAP * 2)
+	{
+		MessageBoxA(hWnd, "Tool is too small.", "Rectangle", MB_ICONERROR);
+		return FALSE;
+	}
 
-	// Can't carve a rectangle so small the tool has no space to dive
-	if (g_Params.rectX < SMALLEST_RADIUS * 2) return FALSE;
-	if (g_Params.rectY < SMALLEST_RADIUS * 2) return FALSE;
+	// When the dimension is inside dimension, cannot carve a rectangle 
+	// smaller than the tool itself	
+	if (g_Params.rectExternal)
+	{
+		if (g_Params.rectX < SMALLEST_RADIUS * 2)
+		{
+			MessageBoxA(hWnd, "Dimension X is smaller than the tool.", "Rectangle", MB_ICONERROR);
+			return FALSE;
+		}
+		if (g_Params.rectY < SMALLEST_RADIUS * 2)
+		{
+			MessageBoxA(hWnd, "Dimension Y is smaller than the toll.", "Rectangle", MB_ICONERROR);
+			return FALSE;
+		}
+	}
 
 	// Can't carve deeper than the tool max depth
-	if (g_Params.rectDepth > g_Params.tool.maxDepth) return FALSE;
+	if (g_Params.rectDepth > g_Params.tool.maxDepth)
+	{
+		MessageBoxA(hWnd, "Depth is longer than the tool length.", "Rectangle", MB_ICONERROR);
+		return FALSE;
+	}
 
 	// Nothing to carve if there is no depth
-	if (g_Params.rectDepth < NEAR_ZERO) return FALSE;
-
-	cmd = (char*)malloc(MAX_BUF);
-	if (cmd == NULL) return FALSE;
-	memset(cmd, 0x00, MAX_BUF);
-
-	// G91: Relative Motion
-	// Fxx : Carve speed
-	// M3 : Motor ON
-	// G4 P1 : Wait 1sec for tool spindle to start
-	sprintf_s(str, MAX_STR, "G91 F%d %s\r\n", g_Params.tool.cutSpeed, g_Params.tool.motorControl ? "M3 G4 P1" : "");
-	strcat_s(cmd, MAX_BUF, str);
+	if (g_Params.rectDepth < NEAR_ZERO)
+	{
+		MessageBoxA(hWnd, "Depth is too shallow.", "Rectangle", MB_ICONERROR);
+		return FALSE;
+	}
 
 	// True if X is longest side of the rect
 	bool bXisLong = (g_Params.rectX > g_Params.rectY);
@@ -312,6 +356,12 @@ BOOL CarveRect(HWND hWnd)
 	}
 	else
 	{
+		if (g_Params.rectFill)
+		{
+			MessageBoxA(hWnd, "Fill option requires external dimensions.", "Rectangle", MB_ICONERROR);
+			return FALSE;
+		}
+
 		// Dimensions are the internal ones. Then add the tool
 		// radius
 		L = L + (g_Params.tool.radius * 2);
@@ -326,7 +376,11 @@ BOOL CarveRect(HWND hWnd)
 		L = L - r * 2;
 		S = S - r * 2;
 		// Also check the radius is't zero either
-		if (r <= NEAR_ZERO) return FALSE;
+		if (r <= NEAR_ZERO)
+		{
+			MessageBoxA(hWnd, "Rounded corner radius is too small.", "Rectangle", MB_ICONERROR);
+			return FALSE;
+		}
 	}
 	else
 	{
@@ -336,15 +390,32 @@ BOOL CarveRect(HWND hWnd)
 	}
 
 	// final check that dimensions make sense (no zero or negative)
-	if ((L <= NEAR_ZERO) || (S <= NEAR_ZERO)) return FALSE;
+	if ((L <= NEAR_ZERO) || (S <= NEAR_ZERO))
+	{
+		MessageBoxA(hWnd, "Invalid dimension. Radius is too large", "Rectangle", MB_ICONERROR);
+		return FALSE;
+	}
 
-	float OffsetL = 0.0f;
-	float OffsetS = 0.0f;
-	bool bDone = false;
-	bool bClipCornerTriangle = false;
-	bool bRounded = g_Params.rectRounded;
+	cmd = (char*)malloc(MAX_BUF);
+	if (cmd == NULL)
+	{
+		MessageBoxA(hWnd, "Failed to allocate buffer.", "Rectangle", MB_ICONERROR);
+		return FALSE;
+	}
+	memset(cmd, 0x00, MAX_BUF);
 
-	// Move to the start of the first corner. Do it above in case
+	// ---------------------------------------
+	// START OF GCODE GENERATION FOR RECTANGLE
+	// ---------------------------------------
+
+	// G91: Relative Motion
+	// Fxx : Carve speed
+	// M3 : Motor ON
+	// G4 P1 : Wait 1sec for tool spindle to start
+	sprintf_s(str, MAX_STR, "G91 F%d %s\r\n", g_Params.tool.cutSpeed, g_Params.tool.motorControl ? "M3 G4 P1" : "");
+	strcat_s(cmd, MAX_BUF, str);
+
+	// Move to the start of the first corner. Traverse at
 	// the tool is alread flush
 	if (bRounded)
 	{
@@ -362,6 +433,8 @@ BOOL CarveRect(HWND hWnd)
 		}
 		sprintf_s(str, MAX_STR, "G0 Z%f\r\n", -g_Params.tool.radius );
 		strcat_s(cmd, MAX_BUF, str);
+
+		OffsetL += r;
 	}
 
 	do
@@ -650,32 +723,43 @@ BOOL CALLBACK BasicShapesProc(HWND hWnd,
 		break;
 
 	case WM_COMMAND:
-		switch (LOWORD(wParam))
+		if (HIWORD(wParam) == BN_CLICKED)
 		{
-		case IDC_EXECUTE :
-			BasicShapeOneCommand(hWnd);
-			break;
-		case IDC_RESET_SIM :
-			resetBlockSurface();
-			break;
-		case IDC_CARVE_CIRCLE:
-			BasicShapeGetSet(TRUE , hWnd );
-			CarveCircle(hWnd);
-			break;
-		case IDC_CARVE_RECT:
-			BasicShapeGetSet(TRUE, hWnd);
-			CarveRect(hWnd);
-			break;
-		case IDOK:
-			/*
-			if (!GetDlgItemText(hwndDlg, ID_ITEMNAME, szItemName, 80))
-			*szItemName = 0;
+			switch (LOWORD(wParam))
+			{
+			// Update options based on new state of those items
+			case IDC_RECT_EXTERNAL :
+			case IDC_RECT_ROUNDED :
+			case IDC_CIRCLE_EXTERNAL_RADIUS :
+			case IDC_CIRCLE_OVAL :
+				BasicShapeGetSet(TRUE, hWnd);
+				break;
 
-			// Fall through.
-			*/
-		case IDCANCEL:
-			EndDialog(hWnd, wParam);
-			return TRUE;
+			case IDC_EXECUTE:
+				BasicShapeOneCommand(hWnd);
+				break;
+			case IDC_RESET_SIM:
+				resetBlockSurface();
+				break;
+			case IDC_CARVE_CIRCLE:
+				BasicShapeGetSet(TRUE, hWnd);
+				CarveCircle(hWnd);
+				break;
+			case IDC_CARVE_RECT:
+				BasicShapeGetSet(TRUE, hWnd);
+				CarveRect(hWnd);
+				break;
+			case IDOK:
+				/*
+				if (!GetDlgItemText(hwndDlg, ID_ITEMNAME, szItemName, 80))
+				*szItemName = 0;
+
+				// Fall through.
+				*/
+			case IDCANCEL:
+				EndDialog(hWnd, wParam);
+				return TRUE;
+			}
 		}
 	}
 	return FALSE;

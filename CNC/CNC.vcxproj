@@ -107,6 +107,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="BasicShapes.cpp" />
+    <ClCompile Include="BitmapShape.cpp" />
     <ClCompile Include="CNC.cpp" />
     <ClCompile Include="ComplexShapes.cpp" />
     <ClCompile Include="fileParser.cpp" />

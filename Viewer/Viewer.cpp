@@ -95,7 +95,7 @@ HANDLE					g_hMapFile = NULL;
 HANDLE					g_hFileChangeEvent = NULL;
 
 float*					g_alt = NULL;
-header_t				g_header;
+header_t*				g_header = NULL;;
 
 //--------------------------------------------------------------------------------------
 // Forward declarations
@@ -188,9 +188,12 @@ HRESULT InitWindow( HINSTANCE hInstance, int nCmdShow )
     g_hInst = hInstance;
     RECT rc = { 0, 0, 1900, 1200 };
     AdjustWindowRect( &rc, WS_OVERLAPPEDWINDOW, FALSE );
-    g_hWnd = CreateWindow( L"TutorialWindowClass", L"Direct3D 11 Tutorial 6", WS_OVERLAPPEDWINDOW,
-                           CW_USEDEFAULT, CW_USEDEFAULT, rc.right - rc.left, rc.bottom - rc.top, nullptr, nullptr, hInstance,
-                           nullptr );
+
+    g_hWnd = CreateWindow( 
+		L"TutorialWindowClass", L"Direct3D 11 Tutorial 6", WS_OVERLAPPEDWINDOW,
+		CW_USEDEFAULT, CW_USEDEFAULT, rc.right - rc.left, rc.bottom - rc.top,
+		nullptr, nullptr, hInstance, nullptr );
+
     if( !g_hWnd )
         return E_FAIL;
 
@@ -243,36 +246,36 @@ BOOL UpdateAltitude( )
 {
 	int n = 0;
 	DWORD iX, iY;
+	char* bChanged = (char*)malloc(g_vCount);
+
+	if (bChanged == NULL) return FALSE;
 
 	n = 0;
-	for (iX = 0; iX<g_header.dx; iX++) for (iY = 0; iY<g_header.dy; iY++)
+	memset(bChanged, 0x00, g_vCount);
+	for (iX = 0; iX<g_header->dx; iX++) for (iY = 0; iY<g_header->dy; iY++)
 	{
-		g_vertices[n].Pos.y = g_alt[n]; // g_alt[iX*g_header.dy + iY];
+		if (g_vertices[n].Pos.y != g_alt[n] || 
+		   (g_vertices[n].Normal.x == 0.0 && g_vertices[n].Normal.y == 0.0 && g_vertices[n].Normal.x == 0.0 ))
+		{
+			g_vertices[n].Pos.y = g_alt[n];
+			bChanged[n] = 1;
+		}
 		n++;
 	}
 
 	n = 0;
 	BOOL bUpdateScreen = FALSE;
-	BOOL bUpdateVertex;
 
-	for (iX = 0; iX < g_header.dx - 1; iX++) for (iY = 0; iY < g_header.dy - 1; iY++)
+	for (iX = 0; iX < g_header->dx - 1; iX++) for (iY = 0; iY < g_header->dy - 1; iY++)
 	{
-		int a = g_header.dy * iX + iY;
+		int a = g_header->dy * iX + iY;
 		int b = a + 1;
-		int c = a + g_header.dy;
+		int c = a + g_header->dy;
 		int d = c + 1;
 		float l;
 		XMFLOAT3 V1, V2, P;
 
-		/*
-		bUpdateVertex = FALSE;
-		if (g_vertices[a].Pos.y != g_alt[a]) { g_vertices[a].Pos.y = g_alt[a]; bUpdateVertex = TRUE; }
-		if (g_vertices[b].Pos.y != g_alt[b]) { g_vertices[b].Pos.y = g_alt[b]; bUpdateVertex = TRUE; }
-		if (g_vertices[c].Pos.y != g_alt[c]) { g_vertices[c].Pos.y = g_alt[c]; bUpdateVertex = TRUE; }
-		if (g_vertices[d].Pos.y != g_alt[d]) { g_vertices[d].Pos.y = g_alt[d]; bUpdateVertex = TRUE; }
-		if (!bUpdateVertex) continue;
-		bUpdateScreen = TRUE;
-		*/
+		if (!bChanged[a] && !bChanged[b] && !bChanged[c] && !bChanged[d]) continue;
 
 #define CP(u,v)		u.y*v.z - u.z*v.y, u.z*v.x - u.x*v.z, u.x*v.y - u.y*v.x
 #define DP(u,v)		(u.x*v.x + u.y*v.y + u.z*v.z)
@@ -295,9 +298,11 @@ BOOL UpdateAltitude( )
 		P.y = P.y / l;
 		P.z = P.z / l;
 		g_vertices[a].Normal = P;
-		if (iX == g_header.dx - 1) g_vertices[c].Normal = P;
-		if (iY == g_header.dy - 1) g_vertices[b].Normal = P;
+		if (iX == g_header->dx - 1) g_vertices[c].Normal = P;
+		if (iY == g_header->dy - 1) g_vertices[b].Normal = P;
 	}
+
+	free(bChanged);
 
 	return bUpdateScreen;
 }
@@ -305,28 +310,65 @@ BOOL UpdateAltitude( )
 HRESULT LoadAltitudeFile( )
 {
 	static HANDLE hFile = INVALID_HANDLE_VALUE;
-	static DWORD cbAlt = 0;
 	DWORD iX, iY;
 	int n = 0;
 
-	hFile = CreateFile(g_szAltDataFile, FILE_READ_ACCESS, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
-	if (hFile == INVALID_HANDLE_VALUE)
+	HANDLE hMapFile;
+
+	hMapFile = OpenFileMapping(
+		FILE_MAP_ALL_ACCESS,     // read/write access
+		FALSE,                   // do not inherit the name
+		L"CncAltSimulationData");// name of mapping object
+
+	if (hMapFile != NULL)
 	{
-		return S_FALSE;
+		DWORD cbFileSize;
+
+		g_header = (header_t*)MapViewOfFile(hMapFile, // handle to map object
+			FILE_MAP_ALL_ACCESS,  // read/write permission
+			0,
+			0,
+			sizeof(header_t));
+
+		if (g_header)
+		{
+			cbFileSize = g_header->cbAlt + sizeof(header_t);
+			UnmapViewOfFile(g_header);
+
+			g_header = (header_t*)MapViewOfFile(hMapFile, // handle to map object
+				FILE_MAP_ALL_ACCESS,  // read/write permission
+				0,
+				0,
+				cbFileSize);
+
+			g_alt = (float*)(g_header + 1);
+		}
 	}
-	
-	ReadFile(hFile, &g_header, sizeof(header_t), NULL, NULL);
+	else
+	{
+		hFile = CreateFile(g_szAltDataFile, FILE_READ_ACCESS, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
+		if (hFile == INVALID_HANDLE_VALUE)
+		{
+			return S_FALSE;
+		}
 
-	cbAlt = g_header.dx * g_header.dy * sizeof(float);
+		ReadFile(hFile, &g_header, sizeof(header_t), NULL, NULL);
 
-	if (g_alt) free(g_alt);
-	g_alt = (float*)malloc(cbAlt);
+		if (g_header->cbAlt != g_header->dx * g_header->dy * sizeof(float))
+		{
+			CloseHandle(hFile);
+			return S_FALSE;
+		}
 
-	ReadFile(hFile, g_alt, cbAlt, NULL, NULL);
-	CloseHandle(hFile);
+		if (g_alt) free(g_alt);
+		g_alt = (float*)malloc(g_header->cbAlt);
 
-	int iXsz = g_header.dx;			// 1 + Xsz / resolution;
-	int iYsz = g_header.dy;			// 1 + Ysz / resolution;
+		ReadFile(hFile, g_alt, g_header->cbAlt, NULL, NULL);
+		CloseHandle(hFile);
+	}
+
+	int iXsz = g_header->dx;			// 1 + Xsz / resolution;
+	int iYsz = g_header->dy;			// 1 + Ysz / resolution;
 
 	// Number of g_vertices is same as points in file
 	g_vCount = iXsz * iYsz;
@@ -339,11 +381,11 @@ HRESULT LoadAltitudeFile( )
 		indices = (DWORD*)malloc(g_iCount * sizeof(DWORD));
 
 		n = 0;
-		for (iX = 0; iX < g_header.dx - 1; iX++) for (iY = 0; iY < g_header.dy - 1; iY++)
+		for (iX = 0; iX < g_header->dx - 1; iX++) for (iY = 0; iY < g_header->dy - 1; iY++)
 		{
-			int a = g_header.dy * iX + iY;
+			int a = g_header->dy * iX + iY;
 			int b = a + 1;
-			int c = a + g_header.dy;
+			int c = a + g_header->dy;
 			int d = c + 1;
 
 			if (((iX + iY) & 1) == 0)
@@ -369,17 +411,18 @@ HRESULT LoadAltitudeFile( )
 		}
 
 		n = 0;
-		float Xsz = (g_header.dx - 1) * g_header.res; // 6.0f;
-		float Ysz = (g_header.dy - 1) * g_header.res; // 5.0f;
+		float Xsz = (g_header->dx - 1) * g_header->res; // 6.0f;
+		float Ysz = (g_header->dy - 1) * g_header->res; // 5.0f;
 		float Xoffset = -(Xsz / 2.0f);
 		float Yoffset = -(Ysz / 2.0f);
 		float x, z;
 
-		for (iX = 0; iX < g_header.dx; iX++) for (iY = 0; iY < g_header.dy; iY++)
+		for (iX = 0; iX < g_header->dx; iX++) for (iY = 0; iY < g_header->dy; iY++)
 		{
-			x = Xoffset + iX * g_header.res;
-			z = Yoffset + iY * g_header.res;
-			g_vertices[n].Pos = XMFLOAT3(x, 0, z);
+			x = Xoffset + iX * g_header->res;
+			z = Yoffset + iY * g_header->res;
+			g_vertices[n].Pos = XMFLOAT3(x, 0.0f, z);
+			g_vertices[n].Normal = XMFLOAT3(0.0, 0.0, 0.0);
 			n++;
 		}
 	}
@@ -389,160 +432,6 @@ HRESULT LoadAltitudeFile( )
 	return S_OK;
 }
 
-
-/*
-HRESULT LoadAltitudeFile()
-{
-	static HANDLE hFile = INVALID_HANDLE_VALUE;
-	static DWORD cbAlt;
-	static float* alt = NULL;
-	static header_t h;
-	DWORD iX, iY;
-	int n = 0;
-	
-	if (hFile == INVALID_HANDLE_VALUE)
-	{
-		hFile = CreateFile(g_szAltDataFile, FILE_READ_ACCESS, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
-		if (hFile == INVALID_HANDLE_VALUE)
-		{
-			return S_FALSE;
-		}
-		ReadFile(hFile, &h, sizeof(h), NULL, NULL);
-		cbAlt = h.dx * h.dy * sizeof(float);
-		alt = (float*)malloc(cbAlt);
-
-		int iXsz = h.dx;			// 1 + Xsz / resolution;
-		int iYsz = h.dy;			// 1 + Ysz / resolution;
-
-		// Number of g_vertices is same as points in file
-		g_vCount = iXsz * iYsz;
-		g_vertices = (SimpleVertex*)malloc(g_vCount * sizeof(SimpleVertex));
-
-		// Number of squares, 2 triangles per squares, 3 points per triangle
-		g_iCount = (iXsz - 1) * (iYsz - 1) * 2 * 3;       
-		indices = (DWORD*)malloc(g_iCount * sizeof(DWORD));
-
-		n = 0;
-		for (iX = 0; iX < h.dx - 1; iX++) for (iY = 0; iY < h.dy - 1; iY++)
-		{
-			int a = h.dy * iX + iY;
-			int b = a + 1;
-			int c = a + h.dy;
-			int d = c + 1;
-
-			if (((iX + iY) & 1) == 0)
-			{
-				indices[n++] = a;
-				indices[n++] = b;
-				indices[n++] = d;
-
-				indices[n++] = a;
-				indices[n++] = d;
-				indices[n++] = c;
-			}
-			else
-			{
-				indices[n++] = a;
-				indices[n++] = b;
-				indices[n++] = c;
-
-				indices[n++] = b;
-				indices[n++] = d;
-				indices[n++] = c;
-			}
-		}
-
-		n = 0;
-		float Xsz = (h.dx - 1) * h.res; // 6.0f;
-		float Ysz = (h.dy - 1) * h.res; // 5.0f;
-		float Xoffset = -(Xsz / 2.0f);
-		float Yoffset = -(Ysz / 2.0f);
-		float x,z;
-
-		for (iX = 0; iX<h.dx; iX++) for (iY = 0; iY<h.dy; iY++)
-		{
-			x = Xoffset + iX * h.res;
-			z = Yoffset + iY * h.res;
-			g_vertices[n].Pos = XMFLOAT3(x, 0, z);
-			n++;
-		}
-	}
-	else
-	{
-		SetFilePointer(hFile, sizeof(h), NULL, FILE_BEGIN);
-	}
-	
-	ReadFile(hFile, alt, cbAlt, NULL, NULL);
-
-	n = 0;
-	for (iX = 0; iX<h.dx; iX++) for (iY = 0; iY<h.dy; iY++)
-	{
-		g_vertices[n++].Pos.y = alt[iX*h.dy + iY];
-	}
-
-	n = 0;
-	for (iX = 0; iX < h.dx - 1; iX++) for (iY = 0; iY < h.dy - 1; iY++)
-	{
-		int a = h.dy * iX + iY;
-		int b = a + 1;
-		int c = a + h.dy;
-		int d = c + 1;
-		float l;
-		XMFLOAT3 V1, V2, P;
-
-#define CP(u,v)		u.y*v.z - u.z*v.y, u.z*v.x - u.x*v.z, u.x*v.y - u.y*v.x
-#define DP(u,v)		(u.x*v.x + u.y*v.y + u.z*v.z)
-#define LENGTH(u)	sqrt(DP(u,u))
-#define V(i,j)		g_vertices[i].Pos.x - g_vertices[j].Pos.x, g_vertices[i].Pos.y - g_vertices[j].Pos.y, g_vertices[i].Pos.z - g_vertices[j].Pos.z
-
-		if (((iX + iY) & 1) == 0)
-		{
-			V1 = XMFLOAT3(V(a, d));
-			V2 = XMFLOAT3(V(a, c));
-		}
-		else
-		{
-			V1 = XMFLOAT3(V(a, b));
-			V2 = XMFLOAT3(V(a, c));
-		}
-		P = XMFLOAT3(CP(V1, V2));
-		l = LENGTH(P);
-		P.x = P.x / l;
-		P.y = P.y / l;
-		P.z = P.z / l;
-		g_vertices[a].Normal = P;
-		if (iX == h.dx - 1) g_vertices[c].Normal = P;
-		if (iY == h.dy - 1) g_vertices[b].Normal = P;
-	}
-
-	//CloseHandle(hFile);
-
-	return S_OK;
-}
-*/
-
-
-DWORD UpdateVerticesThread(LPVOID pParam)
-{
-	// SimpleVertex *g_vertices = (SimpleVertex*)pParam;
-
-	while (1)
-	{
-		Sleep(250);
-		
-		UpdateAltitude();
-		
-		D3D11_MAPPED_SUBRESOURCE resource;
-		WaitForSingleObject(g_hRender, INFINITE);
-		g_pImmediateContext->Map(g_pVertexBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &resource);
-		memcpy(resource.pData, g_vertices, sizeof(SimpleVertex) * g_vCount);
-		g_pImmediateContext->Unmap(g_pVertexBuffer, 0);
-		ReleaseMutex(g_hRender);
-
-		PostMessage(g_hWnd, WM_USER, 1, 0);
-	}
-	return 0;
-}
 
 //--------------------------------------------------------------------------------------
 // Create Direct3D device and swap chain
@@ -1002,7 +891,9 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam 
 			{
 				D3D11_MAPPED_SUBRESOURCE resource;
 
-				LoadAltitudeFile();
+				//LoadAltitudeFile();
+
+				UpdateAltitude();
 
 				g_pImmediateContext->Map(g_pVertexBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &resource);
 				memcpy(resource.pData, g_vertices, sizeof(SimpleVertex) * g_vCount);

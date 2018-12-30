@@ -68,7 +68,6 @@ UINT ComplexShapeGetSet(BOOL get, HWND hWnd)
 
 #define MAX_BUF 100000
 
-#define NEAR_ZERO		0.00001f
 #define SMALL_OVELAP	(1/128.0f)
 #define SMALLEST_RADIUS	( g_Params.toolRadius + SMALL_OVELAP )
 

@@ -301,12 +301,20 @@ ATOM MyRegisterClass(HINSTANCE hInstance)
 //
 BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 {
-   hInst = hInstance; // Store instance handle in our global variable
+	RECT rc;
+	int x, y;
 
-   hMainWindow = CreateWindow(szWindowClass, szTitle, WS_OVERLAPPEDWINDOW,
-	   0, 0, 800, 600, NULL, NULL, hInstance, NULL);
+	hInst = hInstance; // Store instance handle in our global variable
+
+	GetWindowRect(GetDesktopWindow(), &rc);
+	x = (rc.right - rc.left) - (rc.bottom - rc.top);
+	y = x * 2 / 3;
+	AdjustWindowRect(&rc, WS_OVERLAPPEDWINDOW & ~WS_THICKFRAME, FALSE);
+
+   hMainWindow = CreateWindow(szWindowClass, szTitle, WS_OVERLAPPEDWINDOW & ~WS_THICKFRAME,
+	   0, 0, x, y, NULL, NULL, hInstance, NULL);
       //CW_USEDEFAULT, 0, CW_USEDEFAULT, 0, NULL, NULL, hInstance, NULL);
-
+  
    if (!hMainWindow)
    {
       return FALSE;
@@ -314,7 +322,7 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 
    ShowWindow(hMainWindow, nCmdShow);
    UpdateWindow(hMainWindow);
-
+   //SetWindowPos(hMainWindow, NULL, 0, 0, 0, 0, SWP_SHOWWINDOW | SWP_NOSIZE | SWP_NOZORDER | SWP_DRAWFRAME);
    return TRUE;
 }
 
@@ -432,6 +440,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			break;
 		case IDM_BASIC_SHAPE:
 			BasicShapes(hWnd);
+			break;
+		case IDM_BITMAP_SHAPE:
+			BitmapShapes(hWnd);
 			break;
 		case IDM_COMPLEX_SHAPE:
 			ComplexShapes(hWnd);

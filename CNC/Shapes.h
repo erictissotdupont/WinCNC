@@ -2,6 +2,7 @@
 
 void BasicShapes(HWND hWnd);
 void ComplexShapes(HWND hWnd);
+void BitmapShapes(HWND hWnd);
 
 typedef struct {
 	float radius;
@@ -31,4 +32,5 @@ void ShapeInitToolInfo(tGeneralToolInfo *pToolInfo);
 
 UINT ShapeGetSetFloat(HWND hWnd, UINT id, BOOL get, float* val);
 UINT ShapeGetSetBool(HWND hWnd, UINT id, BOOL get, int* val);
+UINT ShapeGetSetString(HWND hWnd, UINT id, BOOL get, WCHAR* str, int cbStr);
 UINT ShapeGetSetTool(HWND hWnd, BOOL get, tGeneralToolInfo *pToolInfo);

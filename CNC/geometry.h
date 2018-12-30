@@ -4,7 +4,7 @@
 
 #define PI           3.14159265359
 #define IPM_TO_IPMS  60000
-#define NEAR_ZERO    0.000000001
+#define NEAR_ZERO    0.00000001
 
 typedef struct _t3DPoint {
   double x;

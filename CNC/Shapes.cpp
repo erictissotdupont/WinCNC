@@ -45,6 +45,22 @@ UINT ShapeGetSetBool(HWND hWnd, UINT id, BOOL get, int* val)
 	return 0;
 }
 
+UINT ShapeGetSetString(HWND hWnd, UINT id, BOOL get, WCHAR* str, int cbStr )
+{
+	HWND hItem;
+	hItem = GetDlgItem(hWnd, id);
+	if (get)
+	{
+		GetWindowText(hItem, str, cbStr);
+	}
+	else
+	{
+		SetWindowText(hItem, str);
+	}
+	return 0;
+
+}
+
 UINT ShapeGetSetTool(HWND hWnd, BOOL get, tGeneralToolInfo *pToolInfo )
 {
 	HWND hItem;

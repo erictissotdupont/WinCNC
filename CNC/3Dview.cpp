@@ -22,27 +22,6 @@ t2DPoint vuZ = { 0, -100 };
 extern t3DPoint g_displayPos;
 extern int g_debug[4];
 
-void MoveTo3D(HDC hdc, t3DPoint p)
-{
-	int x,y;
-	x = O.x + (LONG)(p.x * vuX.x + p.y * vuY.x + p.z * vuZ.x);
-	y = O.y + (LONG)(p.x * vuX.y + p.y * vuY.y + p.z * vuZ.y);
-	MoveToEx(hdc, x, y, NULL);
-}
-
-void LineTo3D(HDC hdc, t3DPoint p)
-{
-	int x, y;
-	x = O.x + (LONG)(p.x * vuX.x + p.y * vuY.x + p.z * vuZ.x);
-	y = O.y + (LONG)(p.x * vuX.y + p.y * vuY.y + p.z * vuZ.y);
-	LineTo(hdc, x, y);
-}
-
-const t3DPoint   O3D = { 0, 0, 0 };
-const t3DPoint vu3DX = { 1, 0, 0 };
-const t3DPoint vu3DY = { 0, 1, 0 };
-const t3DPoint vu3DZ = { 0, 0, 1 };
-
 #define VIEW_MARGIN			10
 #define VIEW_STATUS_FONT	L"Arial"
 #define VIEW_POSITION_FONT	L"Courier New"
@@ -177,15 +156,14 @@ typedef struct
 	DWORD cbAlt;
 } header_t;
 
+
 float g_res;
 float *g_alt = NULL;
-header_t g_header;
+header_t *g_header = NULL;
 DWORD g_cbAlt = 0;
 DWORD countX,countY;
 WCHAR g_szAltFileName[MAX_PATH];
 HANDLE g_hFileChangeEvent = INVALID_HANDLE_VALUE;
-
-#define MAX_TOOL_SHAPE	1000
 
 typedef struct {
 	int dx;
@@ -235,7 +213,7 @@ void saveAltitude(WCHAR* szFilePath)
 	if (hFile != INVALID_HANDLE_VALUE)
 	{
 		DWORD dwWritten;
-		WriteFile(hFile, &g_header, sizeof(header_t), &dwWritten, NULL);
+		WriteFile(hFile, g_header, sizeof(header_t), &dwWritten, NULL);
 		WriteFile(hFile, g_alt, g_cbAlt, &dwWritten, NULL);
 		CloseHandle(hFile);
 		SetEvent(g_hFileChangeEvent);
@@ -254,47 +232,78 @@ void resetBlockSurface()
 			g_alt[x*countY + y] = (float)(g_MetaData.blockZ - g_MetaData.offsetZ);
 		}
 
-		saveAltitude(g_szAltFileName);
+		// Set the 4 edges of the array to the zero offset so that the edges of
+		// the block will be rendered. There is a small vertical line artifact 
+		// when the tool crosses the edge of the block but it's acceptable.
+		for (DWORD x = 0; x < countX; x++)
+		{
+			g_alt[x*countY + countY - 1] = (float)-g_MetaData.offsetZ;
+			g_alt[x*countY] = (float)-g_MetaData.offsetZ;
+		}
+		for (DWORD y = 0; y < countY; y++)
+		{
+			g_alt[y] = (float)-g_MetaData.offsetZ;
+			g_alt[(countX - 1)*countY + y] = (float)-g_MetaData.offsetZ;
+		}
+
+		SetEvent(g_hFileChangeEvent);
 	}
 }
 
 void init3DView( float res )
 {
+	HANDLE hMapFile;
+	LPCTSTR pBuf;
+	DWORD cbFileSize;
+
 	g_res = res;
 
 	countX = 1 + (DWORD)(g_MetaData.blockX / res);
 	countY = 1 + (DWORD)(g_MetaData.blockY / res);
 
 	g_cbAlt = sizeof(float) * countX * countY;
+	cbFileSize = sizeof(header_t) + g_cbAlt;
 
-	g_header.id = 0x00010002;
-	g_header.dx = countX;
-	g_header.dy = countY;
-	g_header.res = g_res;
-	g_header.cbAlt = g_cbAlt;
+	hMapFile = CreateFileMapping(
+		INVALID_HANDLE_VALUE,       // use paging file
+		NULL,                       // default security
+		PAGE_READWRITE,             // read/write access
+		0,                          // maximum object size (high-order DWORD)
+		cbFileSize,					// maximum object size (low-order DWORD)
+		L"CncAltSimulationData");   // name of mapping object
 
-	if (g_alt) free(g_alt);
-	g_alt = (float*)malloc(g_cbAlt);
-
-	// Set the height of the block for all the vertexes on the surface
-	for (DWORD x = 0; x < countX; x++) for (DWORD y = 0; y < countY; y++)
+	if (hMapFile != NULL)
 	{
-		g_alt[x*countY + y] = (float)(g_MetaData.blockZ - g_MetaData.offsetZ);
+		g_header = (header_t*)MapViewOfFile(hMapFile,   // handle to map object
+			FILE_MAP_ALL_ACCESS, // read/write permission
+			0,
+			0,
+			cbFileSize);
+
+		if (g_header == NULL)
+		{
+			g_header = (header_t*)malloc(sizeof(header_t));
+			g_alt = (float*)malloc(g_cbAlt);
+			CloseHandle(hMapFile);
+		}
+		else
+		{
+			g_alt = (float*)(g_header + 1);
+		}
 	}
 
-	// Set the 4 edges of the array to the zero offset so that the edges of
-	// the block will be rendered. There is a small vertical line artifact 
-	// when the tool crosses the edge of the block but it's acceptable.
-	for (DWORD x = 0; x < countX; x++)
-	{
-		g_alt[x*countY + countY - 1] = (float)-g_MetaData.offsetZ;
-		g_alt[x*countY] = (float)-g_MetaData.offsetZ;
-	}
-	for (DWORD y = 0; y < countY; y++)
-	{
-		g_alt[y] = (float)-g_MetaData.offsetZ;
-		g_alt[(countX - 1)*countY + y] = (float)-g_MetaData.offsetZ;
-	}
+	//CopyMemory((PVOID)pBuf, szMsg, (_tcslen(szMsg) * sizeof(TCHAR)));
+	//_getch();
+	//UnmapViewOfFile(pBuf);
+	//CloseHandle(hMapFile);
+
+	g_header->id = 0x00010002;
+	g_header->dx = countX;
+	g_header->dy = countY;
+	g_header->res = g_res;
+	g_header->cbAlt = g_cbAlt;
+
+	resetBlockSurface( );
 
 	// Fill a matrix that approximates the points the tool will remove over
 	// the surface. This is an optimization to avoid calculating all the points
@@ -330,10 +339,8 @@ void update3DView()
 {
 	if (g_alt)
 	{
-		saveAltitude(g_szAltFileName);
+		SetEvent(g_hFileChangeEvent);
 	}
-	// This launches the 3D viewer window
-	// startViewer(g_szAltFileName);
 }
 
 inline void toolAt(long x, long y, float z)
