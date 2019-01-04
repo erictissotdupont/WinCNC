@@ -390,12 +390,16 @@ void OnSetSimulationMode(HWND hWnd)
 	// PIECE OF 7x5n 0.5in thick with the tool starting flush at 1,1 inch
 	// ofset for the corner (tool always starts at 0,0)
 	g_MetaData.blockX = 5;
-	g_MetaData.blockY = 3;
+	g_MetaData.blockY = 5;
 	g_MetaData.blockZ = 0.5;
 	g_MetaData.offsetX = -0.5;
 	g_MetaData.offsetY = -0.5;
 	g_MetaData.offsetZ = 0.5;	// Make it same as blockZ to when tool starts flush with top of block
-	g_MetaData.toolRadius = 0.125;
+
+	//g_MetaData.toolRadius = 0.125;	// 1/4
+	g_MetaData.toolRadius = 0.0625;		// 1/8
+	//g_MetaData.toolRadius = 0.03125;	// 1/16
+
 	g_MetaData.toolHeight = 1.0;
 	g_MetaData.gotWhatTool = 1;
 	g_MetaData.gotWhatStart = 1;

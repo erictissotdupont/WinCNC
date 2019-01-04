@@ -17,6 +17,11 @@ typedef struct _t2DPoint {
 	double y;
 } t2DPoint;
 
+typedef struct _t2DintPoint {
+	int x;
+	int y;
+} t2DintPoint;
+
 double absOf( double n );
 double maxOf3( double a, double b, double c );
 double absMaxOf3( double a, double b, double c );
@@ -29,3 +34,4 @@ double distance3D( t3DPoint A, t3DPoint B );
 double angleVector( double U1, double U2, double V1, double V2 );
 double dotProduct( double U1, double U2, double V1, double V2 );
 void rotateInXYPlane( t3DPoint* P, t3DPoint C, double a );
+void rotate2Dvector(t2DPoint* P, double a);

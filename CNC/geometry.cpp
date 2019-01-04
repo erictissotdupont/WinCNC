@@ -90,3 +90,10 @@ void rotateInXYPlane( t3DPoint* P, t3DPoint C, double a )
   P->x = P->x + C.x;
   P->y = P->y + C.y;
 }
+
+void rotate2Dvector(t2DPoint* P, double a)
+{
+	// Rotate
+	P->x = P->x*cos(a) - P->y*sin(a);
+	P->y = P->x*sin(a) + P->y*cos(a);
+}
