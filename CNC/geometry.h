@@ -31,6 +31,7 @@ double minOf2( double a, double b );
 double vector3DLength( t3DPoint V );
 double vectorLength( double U1, double U2 );
 double distance3D( t3DPoint A, t3DPoint B );
+double distance2D( t2DPoint A, t2DPoint B );
 double angleVector( double U1, double U2, double V1, double V2 );
 double dotProduct( double U1, double U2, double V1, double V2 );
 void rotateInXYPlane( t3DPoint* P, t3DPoint C, double a );

@@ -253,7 +253,6 @@ void resetBlockSurface()
 void init3DView( float res )
 {
 	HANDLE hMapFile;
-	LPCTSTR pBuf;
 	DWORD cbFileSize;
 
 	g_res = res;
@@ -291,11 +290,6 @@ void init3DView( float res )
 			g_alt = (float*)(g_header + 1);
 		}
 	}
-
-	//CopyMemory((PVOID)pBuf, szMsg, (_tcslen(szMsg) * sizeof(TCHAR)));
-	//_getch();
-	//UnmapViewOfFile(pBuf);
-	//CloseHandle(hMapFile);
 
 	g_header->id = 0x00010002;
 	g_header->dx = countX;
@@ -399,8 +393,8 @@ tStatus buildPath(t3DPoint P, long x, long y, long z, long d, long s)
 			PostMessage(hMainWindow, WM_UPDATE_POSITION, 0, 0);
 			prevTime = current;
 		}
-
-		Sleep(1);
+		// Slow down a bit
+		if( d && (( n % 5 ) == 1 )) Sleep(1);
 	}
 	p = P;
 

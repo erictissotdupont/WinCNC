@@ -62,6 +62,12 @@ double distance3D( t3DPoint A, t3DPoint B )
   return vector3DLength( V ); 
 }
 
+double distance2D(t2DPoint A, t2DPoint B)
+{
+	return vectorLength( A.x - B.x, A.y - B.y );
+
+}
+
 double angleVector( double U1, double U2, double V1, double V2 )
 {
   double a,b,r;

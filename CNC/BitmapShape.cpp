@@ -136,7 +136,7 @@ typedef enum {
 	resultEdgeContact = 2,
 } toolPosResult_t;
 
-toolPosResult_t TestToolPosition(BITMAP* bm, int x, int y, t2DintPoint* pTool, int nTool, t2DintPoint* pEdge, int nEdge, float* tangeant)
+toolPosResult_t TestToolPosition(BITMAP* bm, int x, int y, t2DintPoint* pTool, int nTool, t2DintPoint* pEdge, int nEdge, double* tangeant)
 {
 	float sX = 0.0;
 	float sY = 0.0;
@@ -157,7 +157,7 @@ toolPosResult_t TestToolPosition(BITMAP* bm, int x, int y, t2DintPoint* pTool, i
 	}
 	if (tCount)
 	{
-		float a;
+		double a;
 		if (sX != 0.0)
 		{
 			a = atan(sY / sX);
@@ -189,222 +189,324 @@ toolPosResult_t TestToolPosition(BITMAP* bm, int x, int y, t2DintPoint* pTool, i
 	}
 }
 
-// 1/2 degree angle
-#define SMALL_CLOCKWISE				((2.0*PI)/360)
-#define SMALL_COUNTER_CLOCKWISE		(-SMALL_CLOCKWISE)
+#define SMALL_ANGLE	(PI/180)		// One degree
+
+typedef enum {
+	fillRows,
+	topRow,
+	fillColumns,
+	rightColumn
+} tFillState;
 
 BOOL BitmapProcess(HWND hWnd)
 {
 	BITMAP  bm;
 	HANDLE hBitmap;
-	float res;
+	int iX, iY;
+	int toolRadiusInPixels;
+	int maxToolCnt, toolPtCnt;
+	t2DintPoint *tool;
+	int maxEdgeCnt, edgePtCnt;
+	t2DintPoint *edge;
+	t2DPoint curPos;
+	t2DPoint contactPos;
+	t2DPoint V;
+	t2DPoint C;
+	double res, a, step;
+	int iContact;
+	char cmd[MAX_STR];
+	BOOL bCarving, bDone;
+	tFillState fillState;
 
-	hBitmap = LoadImage( 
-		NULL, 
-		g_BmParams.szFilePath, 
-		IMAGE_BITMAP, 
-		0, 0, 
+	hBitmap = LoadImage(
+		NULL,
+		g_BmParams.szFilePath,
+		IMAGE_BITMAP,
+		0, 0,
 		LR_CREATEDIBSECTION | LR_LOADFROMFILE | LR_DEFAULTSIZE | LR_MONOCHROME);
 
 	// Get the color depth of the DIBSection
 	GetObject(hBitmap, sizeof(BITMAP), &bm);
 
+	// Calculate the size of one pixel
 	res = g_BmParams.X / bm.bmWidth;
 
-	int iX, iY;
-	int toolRadiusInPixels = (int)(g_BmParams.tool.radius / res);
+	// Build the array of points that compose the tool and the edge of the tool.
+	toolRadiusInPixels = (int)(g_BmParams.tool.radius / res);
 
-	int toolPtCnt = 0;
-	int maxToolCnt = PI * (toolRadiusInPixels + 1) * (toolRadiusInPixels + 1);
-	t2DintPoint *tool = (t2DintPoint*)malloc(maxToolCnt * sizeof(t2DintPoint));
+	// Estimate the # of points in the tool is the surface of the circle
+	maxToolCnt = (int)(PI * (toolRadiusInPixels + 1) * (toolRadiusInPixels + 1));
+	tool = (t2DintPoint*)malloc(maxToolCnt * sizeof(t2DintPoint));
 
-	int edgePtCnt = 0;
-	int maxEdgeCnt = 4 * PI * (toolRadiusInPixels + 2);
-	t2DintPoint *edge = (t2DintPoint*)malloc(maxEdgeCnt * sizeof(t2DintPoint));
+	// Estimate that the # of points in the edge twice the length of the circle
+	maxEdgeCnt = (int)(4 * PI * (toolRadiusInPixels + 2));
+	edge = (t2DintPoint*)malloc(maxEdgeCnt * sizeof(t2DintPoint));
 
-
-	for ( iX = 0; iX <= toolRadiusInPixels+1; iX++)
-	for ( iY = 0; iY <= toolRadiusInPixels+1; iY++)
+	toolPtCnt = 0;
+	edgePtCnt = 0;
+	for ( iX = 0; iX <= toolRadiusInPixels+2; iX++)
+	for ( iY = 0; iY <= toolRadiusInPixels+2; iY++)
 	{
-		float d = sqrt((iX*iX) + (iY*iY));
+		double d = sqrt((iX*iX) + (iY*iY));
+		// Points which are within the tool
 		if ( d <= toolRadiusInPixels)
 		{
 			AddPoint(iX, iY, tool, &toolPtCnt, maxToolCnt);
 		}
+		// Points which are within a ring around the tool. Make
+		// this 2 pixels thick so that shapes must cross this area
+		// before touching the tool itself
 		else if( d < (toolRadiusInPixels + 2))
 		{
 			AddPoint(iX, iY, edge, &edgePtCnt, maxEdgeCnt);
 		}
 	}
 
-#define SMALL_ANGLE	(PI/180)
-
-	float X, Y;
-	float Xc, Yc;
-	t2DPoint V;
-	float a;
-	// Set the distance for each movement. Do no go less than res * 2 or the contour
-	// algorithm may get stuck in an infinite loop. Res is the size of one pixel.
-	float step = res * 5;
-	int iContact;
-	char cmd[MAX_STR];
-	BOOL bCarving = FALSE;
-	BOOL bDone = FALSE;
-
-	X = g_BmParams.tool.radius;
-	Y = g_BmParams.tool.radius;
-	
-	V.x = step;
-	V.y = 0.0;
+	// -----------------------------
+	// START OF BITMAP SHAPE CARVING
+	// -----------------------------
 
 	sprintf_s(cmd, MAX_STR, "G91 F%d %s\r\n", 
 		g_BmParams.tool.cutSpeed, 
 		g_BmParams.tool.motorControl ? "M3 G4 P1" : "");
-
 	doGcode(cmd);
+
+	// Travel at safe altitude
 	doGcode("G0 Z0.4\r\n");
-	update3DView();
 
 	//--------------------------------------------------------
+	// This first carves the inside of the shape in a series
+	// of horizontal and vertical passses.
+
+	// Move to first location to be tested
+	curPos.x = g_BmParams.tool.radius;
+	curPos.y = g_BmParams.tool.radius;
+	sprintf_s(cmd, sizeof(cmd), "G0 X%f Y%f\r\n", curPos.x, curPos.y );
+	doGcode(cmd);
+	update3DView();
 
 	bDone = FALSE;
+	bCarving = FALSE;
+	C = { 0.0 , 0.0 };
+
+	// Start horizontally
+	V = { res, 0.0 };
+	fillState = fillRows;
+
+	// Carve in 1/2 tool radius slices minus a small bit to
+	// avoid hitting the material dead on (not sure if it does
+	// anything but it won't hurt).
+	step = g_BmParams.tool.radius - SMALL_OVELAP;
+
 	while (!bDone)
 	{
-		if (X > (g_BmParams.X - g_BmParams.tool.radius))
+		// Have we reached an edge ?
+		if((curPos.x > (g_BmParams.X - g_BmParams.tool.radius)) ||
+		   (curPos.y > (g_BmParams.Y - g_BmParams.tool.radius)))
 		{
-			doGcode("G0 Z0.5\r\n");
-			sprintf_s(cmd, sizeof(cmd), "G1 X%f Y%f\r\n", 
-				g_BmParams.tool.radius - X, 
-				g_BmParams.tool.radius * 2 - SMALL_OVELAP);
+			// Back off
+			C.x -= V.x;
+			C.y -= V.y;
+			curPos.x -= V.x;
+			curPos.y -= V.y;
 
-			doGcode(cmd);
-			bCarving = FALSE;
-
-			X = g_BmParams.tool.radius;
-			Y += g_BmParams.tool.radius * 2 - SMALL_OVELAP;
-
-			if (Y > g_BmParams.Y - g_BmParams.tool.radius)
+			if (bCarving )
 			{
-				bDone = TRUE;
-				continue;
-			}
-		}
-
-		iX = X / res;
-		iY = Y / res;
-
-		switch (TestToolPosition(&bm, iX, iY, tool, toolPtCnt, edge, edgePtCnt, &a))
-		{
-		case resultToolOverlap:
-			if (bCarving)
-			{
-				// We ran straight into the shape. Back off amd reduce step by half
-				X -= V.x;
-				Y -= V.y;
-				V.x = V.x / 2;
-				V.y = V.y / 2;
-			}
-			else
-			{
-				sprintf_s(cmd, sizeof(cmd), "G1 X%f Y%f\r\n", V.x, V.y);
-				doGcode(cmd);
-				update3DView();
-				Sleep(1);
-
-				X += V.x;
-				Y += V.y;
-			}
-			break;
-
-		case resultEdgeContact:
-	
-			sprintf_s(cmd, sizeof(cmd), "G1 X%f Y%f\r\n", V.x, V.y);
-			doGcode(cmd);
-
-			if (bCarving)
-			{
+				if (C.x != 0.0 || C.y != 0.0)
+				{
+					sprintf_s(cmd, sizeof(cmd), "G1 X%f Y%f\r\n", C.x, C.y );
+					doGcode(cmd);
+					C = { 0.0,0.0 };
+				}
 				doGcode("G0 Z0.5\r\n");
 				bCarving = FALSE;
 			}
-			update3DView();
-			Sleep(1);
+			else
+			{
+				if (C.x != 0.0 || C.y != 0.0)
+				{
+					sprintf_s(cmd, sizeof(cmd), "G0 X%f Y%f\r\n", C.x, C.y );
+					doGcode(cmd);
+					C = { 0.0,0.0 };
+				}
+			}
 
-			X += V.x;
-			Y += V.y;
-			break;
+			switch (fillState)
+			{
+			case fillRows :
+				if (curPos.y + step > g_BmParams.Y - g_BmParams.tool.radius)
+				{
+					step = g_BmParams.Y - g_BmParams.tool.radius - curPos.y;
+					fillState = topRow;
+				}
 
-		case resultNoOverlap:
+				sprintf_s(cmd, sizeof(cmd), "G0 X%f Y%f\r\n",
+					g_BmParams.tool.radius - curPos.x,
+					step);
+				doGcode(cmd);
+
+				curPos.x = g_BmParams.tool.radius;
+				curPos.y += step;
+
+				update3DView();
+				break;
+
+			case fillColumns :		
+				// Commented out to go straight to filling the 
+				//if (curPos.x + step >= g_BmParams.X - g_BmParams.tool.radius)
+				{
+					step = g_BmParams.X - g_BmParams.tool.radius - curPos.x;
+					fillState = rightColumn;
+				}
+
+				sprintf_s(cmd, sizeof(cmd), "G0 X%f Y%f\r\n",
+					step,
+					g_BmParams.tool.radius - curPos.y);
+				doGcode(cmd);
+
+				curPos.x += step;
+				curPos.y = g_BmParams.tool.radius;				
+
+				update3DView();
+				break;
+
+			case topRow :
+			case rightColumn :
+				// Bring the tool back to the origin...
+				if (bCarving)
+				{
+					// ... at a safe altitude if needed
+					doGcode("G0 Z0.5\r\n");
+					bCarving = FALSE;
+				}
+				sprintf_s(cmd, sizeof(cmd), "G0 X%f Y%f\r\n", -curPos.x, -curPos.y);
+				doGcode(cmd);
+
+				if (fillState == topRow)
+				{
+					fillState = fillColumns;
+					curPos.x = g_BmParams.tool.radius;
+					curPos.y = g_BmParams.tool.radius;
+					V = { 0.0 , res };
+					sprintf_s(cmd, sizeof(cmd), "G0 X%f Y%f\r\n", curPos.x, curPos.y);
+					doGcode(cmd);
+				}
+				else
+				{
+					bDone = TRUE;
+					continue;
+				}
+
+				update3DView();
+				break;
+			}
+		}
+
+		// Convert the current position in pixels
+		iX = (int)(curPos.x / res);
+		iY = (int)(curPos.y / res);
+
+		switch (TestToolPosition(&bm, iX, iY, tool, toolPtCnt, edge, edgePtCnt, &a))
+		{
+		case resultNoOverlap :
 			if (!bCarving)
 			{
+				if (C.x != 0.0 || C.y != 0.0)
+				{
+					sprintf_s(cmd, sizeof(cmd), "G0 X%f Y%f\r\n", C.x, C.y );
+					doGcode(cmd);
+					C = { 0.0, 0.0 };
+				}
 				doGcode("G1 Z-0.5\r\n");
+				update3DView();
 				bCarving = TRUE;
 			}
-			V.x = res;
-			V.y = 0;
-			X += V.x;
-			Y += V.y;
-			sprintf_s(cmd, sizeof(cmd), "G1 X%f Y%f\r\n", V.x, V.y);
-			doGcode(cmd);
-			update3DView();
-			Sleep(1);
+			C.x += V.x;
+			C.y += V.y;
+			curPos.x += V.x;
+			curPos.y += V.y;
+			break;
+
+		case resultEdgeContact :
+		case resultToolOverlap :
+			if (bCarving)
+			{
+				// Back off to avoid denting the shape
+				C.x -= V.x;
+				C.y -= V.y;
+				curPos.x -= V.x;
+				curPos.y -= V.y;
+				// Execute the commited move
+				if (C.x != 0.0 || C.y != 0.0 )
+				{
+					sprintf_s(cmd, sizeof(cmd), "G1 X%f Y%f\r\n", C.x, C.y);
+					doGcode(cmd);
+					C = { 0.0, 0.0 };
+				}
+				// Rise the tool to stop carving
+				doGcode("G0 Z0.5\r\n");
+				update3DView();
+				bCarving = FALSE;
+			}
+			C.x += V.x;
+			C.y += V.y;
+			curPos.x += V.x;
+			curPos.y += V.y;
 			break;
 		}
 	}
 
-	// Bring the tool back to the origin
-	if (bCarving)
-	{
-		// At a safe altitude if needed
-		doGcode("G0 Z0.5\r\n");
-		bCarving = FALSE;
-	}
-	sprintf_s(cmd, sizeof(cmd), "G0 X%f Y%f\r\n", -X, -Y );
-	doGcode(cmd);
-	Sleep(1);
-
 	//--------------------------------------------------------
-
-	// Now look for the first contact with the edge of the
-	// surface starting in the bottom left corner.
+	// Next follow contour of the surface to smoothen the
+	// edges. Surface can be either convexe of concave.
+	
+	// First, look for a contact point with the edge of the
+	// surface by scanning the surface in horizontal passes.
+	// It doesn't really matter where this starts.
 	iContact = 0;
-	X = g_BmParams.tool.radius;
-	Y = g_BmParams.tool.radius;
+	curPos.x = g_BmParams.tool.radius;
+	curPos.y = g_BmParams.tool.radius;
 	bDone = FALSE;
+
+	// Set the distance for each movement. Do no go less than res * 2 or the contour
+	// algorithm may get stuck in an infinite loop. Res is the size of one pixel.
+	step = res * 5;
+	// Start by scanning horizontally
+	V = { step, 0.0 };
 
 	while( !bDone )
 	{
-		if (X > (g_BmParams.X - g_BmParams.tool.radius))
+		// Test the boundaries
+		if (curPos.x > (g_BmParams.X - g_BmParams.tool.radius))
 		{
-			X = g_BmParams.tool.radius;
-			Y += g_BmParams.tool.radius * 2 - SMALL_OVELAP;
-			if (Y > g_BmParams.Y - g_BmParams.tool.radius)
+			curPos.x = g_BmParams.tool.radius;
+			curPos.y += g_BmParams.tool.radius * 2 - SMALL_OVELAP;
+			if (curPos.y > g_BmParams.Y - g_BmParams.tool.radius)
 			{
 				// Done. Found no contact... no shape. Weird
 				break;
 			}
 		}
-
-		iX = X / res;
-		iY = Y / res;
+		
+		// Convert the current position in pixels
+		iX = (int)(curPos.x / res);
+		iY = (int)(curPos.y / res);
 
 		switch (TestToolPosition(&bm, iX, iY, tool, toolPtCnt, edge, edgePtCnt, &a))
 		{
-		case resultEdgeContact:
-			
-			// Is it the first contact ?
+		case resultEdgeContact:			
+			// Is it the first edge contact of the tool with the surface?
 			if (iContact++ == 0)
 			{
-				// Save the position of the contact point so that
-				// we can determine when the tool as returned.
-				Xc = X;
-				Yc = Y;
-				// Bring the tool where the first contact point
-				// is. Right now it's at 0,0.
-				sprintf_s(cmd, sizeof(cmd), "G0 X%f Y%f\r\n", X, Y );
+				// Save the position of the contact point so that we can
+				// determine when the tool as returned.
+				contactPos = curPos;
+				// Bring the tool where the first contact point is. Right
+				// now it's at 0,0.
+				sprintf_s(cmd, sizeof(cmd), "G0 X%f Y%f\r\n", curPos.x, curPos.y );
 				doGcode(cmd);
-				// Start carving
+				// Lower the tool to start carving
 				doGcode("G1 Z-0.5\r\n");
-				Sleep(1);
 			}
 			else
 			{
@@ -412,23 +514,20 @@ BOOL BitmapProcess(HWND hWnd)
 				// to the average direction (angle 'a')
 				sprintf_s(cmd, sizeof(cmd), "G1 X%f Y%f\r\n", V.x, V.y);
 				doGcode(cmd);
-				update3DView();
-				Sleep(1);
 			}
 
 			// Don't check immediately if we're back at the first contact
 			// point because if we backoff, the test will succeed immediately.
 			if (iContact > 2)
 			{
-				if (vectorLength(X - Xc, Y - Yc) < step)
+				if ( distance2D( curPos, contactPos ) < step)
 				{
 					// We're done. First, go back to safe altitude
 					doGcode("G0 Z0.5\r\n");
 					// Bring the tool back to the origin
-					sprintf_s(cmd, sizeof(cmd), "G0 X%f Y%f\r\n", -X, -Y);
+					sprintf_s(cmd, sizeof(cmd), "G0 X%f Y%f\r\n", -curPos.x, -curPos.y );
 					doGcode(cmd);
-					Sleep(1);
-
+					
 					bDone = TRUE;
 					continue;
 				}
@@ -439,30 +538,30 @@ BOOL BitmapProcess(HWND hWnd)
 			a += (PI / 2.0);
 			V.x = cos(a) * step;
 			V.y = sin(a) * step;
-			X += V.x;
-			Y += V.y;			
+			curPos.x += V.x;
+			curPos.y += V.y;
+
+			update3DView();
 			break;
 
 		case resultToolOverlap:
-			// Back off
-			X -= V.x;
-			Y -= V.y;
 			if (iContact)
 			{
+				// Back off
+				curPos.x -= V.x;
+				curPos.y -= V.y;
 				// Try with a different angle
 				a += SMALL_ANGLE;
 				V.x = cos(a) * step;
 				V.y = sin(a) * step;
-				X += V.x;
-				Y += V.y;
+				curPos.x += V.x;
+				curPos.y += V.y;
 			}
 			else
 			{
-				// We ran into the shape. Reduce the step and try again
-				V.x = V.x / 2;
-				V.y = V.y / 2;
-				X += V.x;
-				Y += V.y;
+				// Still looking for the first contact
+				curPos.x += V.x;
+				curPos.y += V.y;
 			}
 			break;
 
@@ -470,20 +569,20 @@ BOOL BitmapProcess(HWND hWnd)
 			if ( iContact == 0 )
 			{
 				// Still looking for the first contact
-				X += V.x;
-				Y += V.y;
+				curPos.x += V.x;
+				curPos.y += V.y;
 			}
 			else
 			{
 				// Back off
-				X -= V.x;
-				Y -= V.y;
+				curPos.x -= V.x;
+				curPos.y -= V.y;
 				// Try with a different angle
 				a -= SMALL_ANGLE;
 				V.x = cos(a) * step;
 				V.y = sin(a) * step;
-				X += V.x;
-				Y += V.y;
+				curPos.x += V.x;
+				curPos.y += V.y;
 			}
 			break;
 		}
@@ -491,19 +590,12 @@ BOOL BitmapProcess(HWND hWnd)
 
 	// Return to zero altitude, turn OFF spindle
 	doGcode("G0 Z-0.4 M0\r\n");
+	update3DView();
 	
-/*
-	int a, b, c, d, e, f;
-	
-	a = GetPixel(&bm, 312, 265);
-	b = GetPixel(&bm, 98, 488);
-	c = GetPixel(&bm, 353, 54);
-	d = GetPixel(&bm, 423, 441);
-	e = GetPixel(&bm, 429, 441);
-	f = GetPixel(&bm, 355, 482);
+	DeleteObject(hBitmap);
+	free(tool);
+	free(edge);
 
-	Sleep(1);
-*/
 	return TRUE;
 }
 
@@ -556,6 +648,7 @@ BOOL CALLBACK BitmapShapesProc(HWND hWnd,
 			switch (LOWORD(wParam))
 			{
 			case IDC_CARVE:
+				BitmapShapeGetSet(TRUE, hWnd);
 				BitmapProcess(hWnd);
 				break;
 			case IDC_EXECUTE:
