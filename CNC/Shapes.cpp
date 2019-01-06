@@ -7,9 +7,10 @@ void ShapeInitToolInfo(tGeneralToolInfo *pToolInfo)
 {
 	pToolInfo->radius = 0.125f;
 	pToolInfo->maxDepth = 0.75f;
-	pToolInfo->cutSpeed = 20.0f;
+	pToolInfo->cutSpeed = 20;
 	pToolInfo->cutDepth = 0.125f;
 	pToolInfo->motorControl = 1;
+	pToolInfo->safeTravel = 0.5f;
 }
 
 UINT ShapeGetSetFloat(HWND hWnd, UINT id, BOOL get, float* val)
@@ -58,7 +59,26 @@ UINT ShapeGetSetString(HWND hWnd, UINT id, BOOL get, WCHAR* str, int cbStr )
 		SetWindowText(hItem, str);
 	}
 	return 0;
+}
 
+UINT ShapeGetSetRadio(HWND hWnd, UINT id, int btnCnt, BOOL get, int* val )
+{
+	if (get)
+	{
+		for (int i = 0; i < btnCnt; i++)
+		{
+			if (IsDlgButtonChecked(hWnd, id + i) == BST_CHECKED)
+			{
+				*val = i;
+				break;
+			}
+		}
+	}
+	else
+	{
+		CheckRadioButton(hWnd, id, id + btnCnt, id + *val);
+	}
+	return 0;
 }
 
 UINT ShapeGetSetTool(HWND hWnd, BOOL get, tGeneralToolInfo *pToolInfo )
@@ -125,6 +145,7 @@ UINT ShapeGetSetTool(HWND hWnd, BOOL get, tGeneralToolInfo *pToolInfo )
 	ShapeGetSetFloat(hWnd, IDC_CUT_DEPTH, get, &pToolInfo->cutDepth);
 	ShapeGetSetFloat(hWnd, IDC_MAX_TOOL_DEPTH, get, &pToolInfo->maxDepth);
 	ShapeGetSetBool(hWnd, IDC_MOTOR, get, &pToolInfo->motorControl);
+	ShapeGetSetFloat(hWnd, IDC_SAFE_TRAVEL, get, &pToolInfo->safeTravel);
 
 	return 0;
 }
