@@ -122,32 +122,87 @@ BOOL GetPixel(BITMAP* bm, int x, int y)
 	return (*pt & (0x80 >> (x % 8))) == 0;
 }
 
-void RemovePoint(BITMAP* bm, int x, int y )
-{
-	// Out of boundary, ignore
-	if (x < 0 || y < 0 || x >= bm->bmWidth || y >= bm->bmHeight) return;
+BITMAP* g_bm;
 
+void RemovePointRecursive( unsigned short x, unsigned short y )
+{
+	unsigned char* pt;
+	// Out of boundary, ignore
+	if (x < 0 || y < 0 || x >= g_bm->bmWidth || y >= g_bm->bmHeight) return;
+	pt = (unsigned char*)g_bm->bmBits + (y * g_bm->bmWidthBytes) + (x / 8);
 	// If pixel is white (bit is set), fill it with black
-	if (!GetPixel(bm, x, y))
+	if ((*pt & (0x80 >> (x % 8))) != 0 )
 	{
-		unsigned char* pt;
-		pt = (unsigned char*)bm->bmBits + (y * bm->bmWidthBytes) + (x / 8);
 		// Clear the bit to make the pixel back
 		*pt &= ~(0x80 >> (x % 8));
-
 		// Recursively remove all the points around this pixel
-		RemovePoint(bm, x, y + 1);
-		RemovePoint(bm, x + 1, y);
-		RemovePoint(bm, x, y - 1);
-		RemovePoint(bm, x - 1, y);
+		RemovePointRecursive( x, y + 1);
+		RemovePointRecursive( x + 1, y);
+		RemovePointRecursive( x, y - 1);
+		RemovePointRecursive( x - 1, y);
 	}
 }
 
 DWORD CleanBitmapThread(PVOID pParam)
 {
 	tCleanBmInfo* pInfo = (tCleanBmInfo*)pParam;
-	RemovePoint(pInfo->bm, pInfo->x, pInfo->y);
+	g_bm = pInfo->bm;
+	RemovePointRecursive( pInfo->x, pInfo->y);
 	return 0;
+}
+
+typedef struct {
+	unsigned long x : 16;
+	unsigned long y : 16;
+} tSmall2DPoint;
+
+#define PUSH(X,Y) \
+	{ queue[Qin].x = X; queue[Qin].y = Y; Qin++; if (Qin >= Qsize) Qin = 0; }
+
+#define POP(X,Y) \
+	{ X = queue[Qout].x; Y = queue[Qout].y; Qout++; if (Qout >= Qsize) Qout = 0; }
+
+void CleanBitmap( BITMAP* bm, int x, int y )
+{
+	unsigned char* pt;
+	tSmall2DPoint* queue;
+	int Qin, Qout;
+	int Qsize;
+
+	// Only store point coordinates in a 16bit int
+	if ((bm->bmWidth > 65535) || bm->bmHeight > 65535) return;
+
+	Qin = 0;
+	Qout = 0;
+	Qsize = bm->bmHeight * bm->bmWidth;
+	// Allocate a queue to hold at least 3x the # of points in the bitmap
+	// This algorithm is quite inefficent because it will test the same points
+	// multiple times but at least it won't blow up the stack.
+	// This works with 2x but 3x is safer.
+	queue = (tSmall2DPoint*)malloc( Qsize * sizeof(tSmall2DPoint) * 3 );
+	if (!queue) return;
+
+	// Add node to the end of Q.
+	PUSH(x, y);
+	while (Qin != Qout)
+	{
+		// Get node at the start of the Q
+		POP(x, y);
+		// Test if it's within the bitmap
+		if (x < 0 || y < 0 || x >= bm->bmWidth || y >= bm->bmHeight) continue;
+		// Test if color
+		pt = (unsigned char*)bm->bmBits + (y * bm->bmWidthBytes) + (x / 8);
+		if ((*pt & (0x80 >> (x % 8))) != 0)
+		{
+			// If white, clear the bit to make the pixel back
+			*pt &= ~(0x80 >> (x % 8));
+			PUSH(x + 1, y);
+			PUSH(x, y + 1);
+			PUSH(x - 1, y);
+			PUSH(x, y - 1);
+		}
+	}
+	free(queue);
 }
 
 
@@ -665,6 +720,7 @@ BOOL BitmapProcess(HWND hWnd)
 			// of the next surface in the image.
 			if (iContact)
 			{
+				/*
 				DWORD dwThreadId;
 				tCleanBmInfo cleanBitmapInfo;
 				HANDLE hThread;
@@ -680,15 +736,18 @@ BOOL BitmapProcess(HWND hWnd)
 					// Looks like this could use an optimization.
 					// https://en.wikipedia.org/wiki/Flood_fill
 					//
-					1024 * 1024 * 100, 
+					1024 * 1024 * 60,
 					(LPTHREAD_START_ROUTINE)CleanBitmapThread, 
 					(PVOID)&cleanBitmapInfo, 
 					0, 
 					&dwThreadId);
 
 				WaitForSingleObject(hThread, INFINITE);
-
 				CloseHandle(hThread);
+				*/
+				iX = (int)(contactPos.x / res);
+				iY = (int)(contactPos.y / res);
+				CleanBitmap(&bm, iX, iY);
 			}
 
 		} while (iContact);
@@ -768,12 +827,6 @@ BOOL CALLBACK BitmapShapesProc(HWND hWnd,
 				resetBlockSurface();
 				break;
 			case IDOK:
-				/*
-				if (!GetDlgItemText(hwndDlg, ID_ITEMNAME, szItemName, 80))
-				*szItemName = 0;
-
-				// Fall through.
-				*/
 			case IDCANCEL:
 				EndDialog(hWnd, wParam);
 				return TRUE;
