@@ -3,6 +3,11 @@
 #include "LCD.h"
 #include "UART.h"
 
+// Board : Metro M0 Express
+// Setup : https://learn.adafruit.com/adafruit-metro-m0-express-designed-for-circuitpython/using-with-arduino-ide
+// Datasheet : adafruit-metro-m0-express-designed-for-circuitpython.pdf
+//             SAMD21-Family-DataSheet-DS40001882D.pdf
+
 void setup( ) 
 {
   LCD_Init( );
@@ -25,4 +30,3 @@ void loop( )
   // Scan the keyboard 
   LCD_ButtonTask( );
 }
-

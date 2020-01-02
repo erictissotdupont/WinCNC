@@ -6,6 +6,7 @@
 
 #include <wchar.h>
 #include <mmsystem.h>
+#include <psapi.h>
 
 DWORD pathSteps;
 DWORD maxPathSteps;
@@ -156,12 +157,10 @@ typedef struct
 	DWORD cbAlt;
 } header_t;
 
-
-float g_res;
+double g_res;
 float *g_alt = NULL;
 header_t *g_header = NULL;
-DWORD g_cbAlt = 0;
-DWORD countX,countY;
+
 WCHAR g_szAltFileName[MAX_PATH];
 HANDLE g_hFileChangeEvent = INVALID_HANDLE_VALUE;
 
@@ -169,19 +168,38 @@ typedef struct {
 	int dx;
 	int dy;
 } g_toolShape_t;
-
 g_toolShape_t* g_toolShape = NULL;
-
 DWORD iToolPoints = 0;
 
-//
-// TODO : Find the path dynamically instead of hardcoded.
-//
-void startViewer(const WCHAR* szFilePath)
+#define VIEWER_EXE_NAME	L"Viewer.exe"
+
+bool start3DViewer( )
 {
 	STARTUPINFO si;
 	PROCESS_INFORMATION pi;
-	
+	WCHAR szFileName[MAX_PATH];
+	WCHAR *pt;
+	DWORD pathLen;
+
+	// GetProcessImageFileNameW returns the device form of the path \\device\\volumexxx
+	// which isn't supported by CreateProcess( ) (it wants the drive letter)
+	//pathLen = GetProcessImageFileNameW(GetCurrentProcess(), szFileName, MAX_PATH);
+
+	pathLen = GetModuleFileNameW(NULL, szFileName, MAX_PATH);
+	if(pathLen == 0)
+	{
+		return false;
+	}
+	pt = szFileName + pathLen;
+	while (*pt != L'\\' && pt >= szFileName) pt--;
+	pt++;
+	*pt = 0;
+
+	// This to make sure Viewer.exe finds the file Viewer.fx
+	SetCurrentDirectoryW(szFileName);
+
+	wcscpy_s(pt, MAX_PATH - (pt - szFileName), VIEWER_EXE_NAME );
+
 	memset(&pi, 0x00, sizeof(pi));
 	memset(&si, 0x00, sizeof(si));
 	si.cb = sizeof(STARTUPINFO);
@@ -189,43 +207,31 @@ void startViewer(const WCHAR* szFilePath)
 
 	g_hFileChangeEvent = CreateEvent(NULL, FALSE, FALSE, L"Local\\AltFileChangeEvent");
 
-	// This to make sure Viewer.exe finds the file Viewer.fx
-	SetCurrentDirectory(L"C:\\Users\\Eric\\Documents\\GitHub\\WinCnc\\Viewer");
-
 	WCHAR cmdLine[MAX_PATH];
-	wcscpy_s(cmdLine, MAX_PATH, L"Viewer.exe ");
-	wcscat_s(cmdLine, MAX_PATH, szFilePath);
+	wcscpy_s(cmdLine, MAX_PATH, VIEWER_EXE_NAME);
 
-	if (!CreateProcess(L"C:\\Users\\Eric\\Documents\\GitHub\\WinCnc\\Debug\\Viewer.exe", cmdLine, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi))
+	if (!CreateProcess(szFileName, cmdLine, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi))
 	{
 		WCHAR msg[MAX_PATH + 80];
-		wsprintf(msg, L"Unable to open viewer. Reason %d.\r\n", GetLastError());
+		wsprintf(msg, L"Unable to open 3D viewer.\r\n%s\r\nReason %d.\r\n", szFileName, GetLastError());
 		MessageBox(NULL, msg, L"CNC", MB_OK);
+		return false;
 	}
 	CloseHandle(pi.hProcess);
 	CloseHandle(pi.hThread);
+	return true;
 }
 
-void saveAltitude(WCHAR* szFilePath)
-{
-	HANDLE hFile;
-	hFile = CreateFile(szFilePath, GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, 0, NULL);
-	if (hFile != INVALID_HANDLE_VALUE)
-	{
-		DWORD dwWritten;
-		WriteFile(hFile, g_header, sizeof(header_t), &dwWritten, NULL);
-		WriteFile(hFile, g_alt, g_cbAlt, &dwWritten, NULL);
-		CloseHandle(hFile);
-		SetEvent(g_hFileChangeEvent);
-	}
-}
 
 extern tMetaData g_MetaData;
 
 void resetBlockSurface()
 {
-	if (g_alt)
+	if (g_alt && g_header)
 	{
+		DWORD countX = g_header->dx;
+		DWORD countY = g_header->dy;
+
 		// Set the height of the block for all the vertexes on the surface
 		for (DWORD x = 0; x < countX; x++) for (DWORD y = 0; y < countY; y++)
 		{
@@ -250,60 +256,80 @@ void resetBlockSurface()
 	}
 }
 
-void init3DView( float res )
+// 24MB is enough for 24x24in at 0.001 resolution (float)
+#define SIM_MAX_SIZE_BYTES		(96*1024*1024)
+#define SIM_RESOLUTION_IN		0.005f	// 0.127mm
+
+bool init3DView(double x, double y)
 {
 	HANDLE hMapFile;
-	DWORD cbFileSize;
+	DWORD countX, countY;
 
-	g_res = res;
+	g_res = SIM_RESOLUTION_IN;
 
-	countX = 1 + (DWORD)(g_MetaData.blockX / res);
-	countY = 1 + (DWORD)(g_MetaData.blockY / res);
+	// Calculate the size of the altitude matrix
+	countX = 1 + (DWORD)(x / g_res);
+	countY = 1 + (DWORD)(y / g_res);
 
-	g_cbAlt = sizeof(float) * countX * countY;
-	cbFileSize = sizeof(header_t) + g_cbAlt;
-
-	hMapFile = CreateFileMapping(
-		INVALID_HANDLE_VALUE,       // use paging file
-		NULL,                       // default security
-		PAGE_READWRITE,             // read/write access
-		0,                          // maximum object size (high-order DWORD)
-		cbFileSize,					// maximum object size (low-order DWORD)
-		L"CncAltSimulationData");   // name of mapping object
-
-	if (hMapFile != NULL)
+	// Check that it's not too big (max size is abitrary)
+	if((countX * countY * sizeof(float)) > SIM_MAX_SIZE_BYTES )
 	{
-		g_header = (header_t*)MapViewOfFile(hMapFile,   // handle to map object
-			FILE_MAP_ALL_ACCESS, // read/write permission
-			0,
-			0,
-			cbFileSize);
+		return false;
+	}
 
-		if (g_header == NULL)
+	// First time, create the mapped memory
+	if (g_header == NULL)
+	{
+		DWORD cbFileSize = SIM_MAX_SIZE_BYTES + sizeof(header_t);
+
+		hMapFile = CreateFileMapping(
+			INVALID_HANDLE_VALUE,       // use paging file
+			NULL,                       // default security
+			PAGE_READWRITE,             // read/write access
+			0,                          // maximum object size (high-order DWORD)
+			cbFileSize,					// maximum object size (low-order DWORD)
+			L"CncAltSimulationData");   // name of mapping object
+
+		if (hMapFile == NULL)
 		{
-			g_header = (header_t*)malloc(sizeof(header_t));
-			g_alt = (float*)malloc(g_cbAlt);
-			CloseHandle(hMapFile);
+			return false;
 		}
 		else
 		{
-			g_alt = (float*)(g_header + 1);
+			g_header = (header_t*)MapViewOfFile(hMapFile,   // handle to map object
+				FILE_MAP_ALL_ACCESS, // read/write permission
+				0,
+				0,
+				cbFileSize);
+			if (g_header == NULL)
+			{
+				return false;
+			}
+			else
+			{
+				g_alt = (float*)(g_header + 1);
+			}
 		}
 	}
-
+	
 	g_header->id = 0x00010002;
 	g_header->dx = countX;
 	g_header->dy = countY;
-	g_header->res = g_res;
-	g_header->cbAlt = g_cbAlt;
+	g_header->res = (float)g_res;
+	g_header->cbAlt = SIM_MAX_SIZE_BYTES;
 
 	resetBlockSurface( );
 
+	return true;
+}
+
+void initToolShape(double radius)
+{
 	// Fill a matrix that approximates the points the tool will remove over
 	// the surface. This is an optimization to avoid calculating all the points
 	// contained within the tool for every position of the tool motion.
 	//
-	int iRtool = (int)(g_MetaData.toolRadius / res) + 1;
+	int iRtool = (int)(radius / g_res) + 1;
 
 	iToolPoints = 0;
 	if (g_toolShape) free(g_toolShape);
@@ -311,8 +337,8 @@ void init3DView( float res )
 
 	for (int i = 0; i < iRtool; i++) for (int j = 0; j < iRtool; j++)
 	{
-		float x = i*res;
-		float y = j*res;
+		double x = i*g_res;
+		double y = j*g_res;
 		if (sqrt(x*x + y*y) <= g_MetaData.toolRadius)
 		{
 			g_toolShape[iToolPoints].dx = i;
@@ -320,13 +346,6 @@ void init3DView( float res )
 			iToolPoints++;
 		}
 	}
-
-	wcscpy_s(g_szAltFileName, MAX_PATH, L"C:\\windows\\temp\\simAltitude.dat");
-
-	saveAltitude(g_szAltFileName);
-
-	// This launches the 3D viewer window
-	startViewer(g_szAltFileName);
 }
 
 void update3DView()
@@ -339,9 +358,9 @@ void update3DView()
 
 inline void toolAt(long x, long y, float z)
 {
-	if (x >= 0 && y >= 0 && x<(long)countX && y<(long)countY)
+	if (x >= 0 && y >= 0 && x<(long)g_header->dx && y<(long)g_header->dy)
 	{
-		float* point = &g_alt[x * countY + y];
+		float* point = &g_alt[x * g_header->dy + y];
 		if (*point > z)
 		{
 			*point = z;

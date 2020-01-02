@@ -4,7 +4,7 @@
 
 #include "LCD.h"
 
-extern HardwareSerial Serial1;
+extern Uart Serial1;
 extern int g_debug[MAX_DEBUG];
 extern unsigned int g_error;
 // To know the current position
@@ -268,6 +268,10 @@ bool UART_Task( )
         pt = NULL;
         g_CRCerror = 0;
         state = COMM_CONNECTED;
+      }
+      else if( c == '\n' )
+      {
+        // Ignore
       }
       else
       {
