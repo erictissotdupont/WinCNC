@@ -84,7 +84,7 @@ try:
 except IOError:
   try:
     # This is for Raspbery Pi 3 Model B
-    t=serial.Serial('/dev/ttyS0',500000,timeout=10)
+    t=serial.Serial('/dev/ttyS0',460800,timeout=10)
     print 'HW is Raspberry Pi 3'
     t.flushOutput()
     t.flushInput()
@@ -120,7 +120,7 @@ while 1:
       # This a request to send agreagated response from ATMega to the host
       try:
         conn.send(rsp)
-	print 'Sent to host :', rsp
+	# print 'Sent to host :', rsp
         rsp=''
       except socket.error, msg:
         print 'Socket error sending to host.'

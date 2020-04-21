@@ -79,8 +79,11 @@ XMMATRIX                g_World;
 XMMATRIX                g_View;
 XMMATRIX                g_Projection;
 
-float					g_tZ = 0.0f;
-float					g_tY = 0.0f;
+float					g_rotX = 0.0f;
+float					g_rotY = 0.0f;
+
+float					g_transX = 0.0f;
+float					g_transY = 0.0f;
 
 DWORD					g_iXsz = 0;
 DWORD					g_iYsz = 0;
@@ -503,12 +506,6 @@ HRESULT InitDevice()
 	// Initialize the world matrices
 	g_World = XMMatrixIdentity();
 
-	// Initialize the view matrix
-	XMVECTOR Eye = XMVectorSet(0.0f, 5.0f, -5.0f, 0.0f);
-	XMVECTOR At = XMVectorSet(0.0f, 0.0f, 0.0f, 0.0f);
-	XMVECTOR Up = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
-	g_View = XMMatrixLookAtLH(Eye, At, Up);
-
 	// Initialize the projection matrix
 	g_Projection = XMMatrixPerspectiveFovLH(XM_PIDIV4, width / (FLOAT)height, 0.01f, 100.0f);
 
@@ -814,10 +811,14 @@ HRESULT UpdateSurface( )
 void Render()
 {
 	// Rotate cube around the origin
-	g_World = XMMatrixRotationY( g_tY );
-	
-	//g_View = XMMatrixRotationY(g_tY);
+	g_World = XMMatrixMultiply(XMMatrixRotationY(g_rotY), XMMatrixRotationX(g_rotX));
 
+	// Initialize the view matrix
+	XMVECTOR Eye = XMVectorSet(0.0f, 5.0f+g_transX, -5.0f, 0.0f);
+	XMVECTOR At = XMVectorSet(0.0f, 0.0f, 0.0f, 0.0f);
+	XMVECTOR Up = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
+	g_View = XMMatrixLookAtLH(Eye, At, Up);
+	
 	float l1 = 0.2;
 	float l2 = 0.5;
 
@@ -834,7 +835,7 @@ void Render()
 	};
 
 	// Rotate the second light around the origin
-	XMMATRIX mRotate = XMMatrixRotationY(g_tY);
+	XMMATRIX mRotate = XMMatrixRotationY(g_rotY);
 	XMVECTOR vLightDir = XMLoadFloat4(&vLightDirs[1]);
 	vLightDir = XMVector3Transform(vLightDir, mRotate);
 	XMStoreFloat4(&vLightDirs[1], vLightDir);
@@ -876,23 +877,22 @@ void Render()
 	//
 	// Render each light
 	//
-	/*
+#if 0	
 	for( int m = 0; m < 2; m++ )
 	{
-	XMMATRIX mLight = XMMatrixTranslationFromVector( 5.0f * XMLoadFloat4( &vLightDirs[m] ) );
-	XMMATRIX mLightScale = XMMatrixScaling( 0.2f, 0.2f, 0.2f );
-	mLight = mLightScale * mLight;
+		XMMATRIX mLight = XMMatrixTranslationFromVector( 5.0f * XMLoadFloat4( &vLightDirs[m] ) );
+		XMMATRIX mLightScale = XMMatrixScaling( 0.2f, 0.2f, 0.2f );
+		mLight = mLightScale * mLight;
 
-	// Update the world variable to reflect the current light
-	cb1.mWorld = XMMatrixTranspose( mLight );
-	cb1.vOutputColor = vLightColors[m];
-	g_pImmediateContext->UpdateSubresource( g_pConstantBuffer, 0, nullptr, &cb1, 0, 0 );
+		// Update the world variable to reflect the current light
+		cb1.mWorld = XMMatrixTranspose( mLight );
+		cb1.vOutputColor = vLightColors[m];
+		g_pImmediateContext->UpdateSubresource( g_pConstantBuffer, 0, nullptr, &cb1, 0, 0 );
 
-	g_pImmediateContext->PSSetShader( g_pPixelShaderSolid, nullptr, 0 );
-	g_pImmediateContext->DrawIndexed( g_iCount, 0, 0);
+		g_pImmediateContext->PSSetShader( g_pPixelShaderSolid, nullptr, 0 );
+		g_pImmediateContext->DrawIndexed( g_iCount, 0, 0);
 	}
-	*/
-
+#endif
 	//
 	// Present our back buffer to our front buffer
 	//
@@ -931,6 +931,7 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam 
 {
     PAINTSTRUCT ps;
     HDC hdc;
+	bool bShiftDown, bCtrlDown;
 
     switch( message )
     {
@@ -942,24 +943,30 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam 
 			break;
 
 		case WM_KEYDOWN:
+			bShiftDown = GetKeyState(VK_SHIFT) & 0x8000;
+			bCtrlDown = GetKeyState(VK_CONTROL) & 0x8000;
 			switch (wParam)
 			{
 			case VK_LEFT:
-				g_tY += 0.1;
+				if (bShiftDown)
+					g_transX += 0.1;
+				else					
+					g_rotY += 0.1;
 				Render();
 				break;
 			case VK_RIGHT:
-				g_tY -= 0.1;
+				if (bShiftDown)
+					g_transX -= 0.1;
+				else
+					g_rotY -= 0.1;
 				Render();
 				break;
 			case VK_UP:
-				g_index = g_index += 3;
-				if (g_index >= g_iCount) g_index = 0;
+				g_rotX += 0.1;
 				Render();
 				break;
 			case VK_DOWN:
-				if (g_index == 0) g_index = g_iCount;
-				g_index = g_index -= 3;
+				g_rotX -= 0.1;
 				Render();
 				break;
 			}

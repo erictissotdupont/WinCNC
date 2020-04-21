@@ -242,11 +242,9 @@ int APIENTRY _tWinMain(_In_ HINSTANCE hInstance,
 	// Error of 0.32% (too far) = 0.0004393
 	initAxis(0, 0.0004389); // X
 	
-	//initAxis(0, 0.0003937);  // Z axis new machine
-
 	initAxis(1, 0.0004389); // Y
 
-	initAxis(2, 0.0003125); // Z - 1/4 step - 400 steps - 0.5in per turn
+	initAxis(2, 0.0003925); // Z - 1/4 step - 400 steps - 0.5in per turn
 	
 	// Main message loop:
 	while (GetMessage(&msg, NULL, 0, 0))
@@ -356,7 +354,7 @@ void OnKey(int key)
 	}
 }
 
-void OnRunGCode(HWND hWnd)
+void OnRunGCode(HWND hWnd,BOOL bDebug)
 {
 	WCHAR szFile[MAX_PATH];       // buffer for file name
 	OPENFILENAME ofn;
@@ -379,7 +377,7 @@ void OnRunGCode(HWND hWnd)
 
 	if (GetOpenFileName(&ofn))
 	{
-		ParseGCodeFile( hWnd, szFile, doGcode );
+		ParseGCodeFile( hWnd, szFile, doGcode, bDebug );
 	}
 }
 
@@ -441,7 +439,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		switch (wmId)
 		{
 		case IDM_RUN_GCODE:
-			OnRunGCode(hWnd);
+			OnRunGCode(hWnd,FALSE);
+			break;
+		case IDM_DEBUG_GCODE:
+			OnRunGCode(hWnd, TRUE);
 			break;
 		case IDM_SIMULATE_GCODE:
 			OnSetSimulationMode(hWnd);

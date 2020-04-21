@@ -7,51 +7,56 @@
 unsigned int g_error;
 int g_debug[MAX_DEBUG];
 
-#define RAMP_TIME     400000L
-#define MIN_SPEED     60L
-#define MAX_SPEED     360L
-#define IMP_TO_NS     24000L
+#define RAMP_SHIFT    20 // 19=524ms
+#define RAMP_TIME     (1L << RAMP_SHIFT)
+#define MIN_SPEED     30L
+#define MAX_SPEED     500L
 
-#define MIN_STEP      ( IMP_TO_NS / MIN_SPEED )
-#define MAX_STEP      ( IMP_TO_NS / MAX_SPEED )
+// Speed is in inch by minute, hence the 30M micro seconds
+#define SPEED_TO_HALF_STEP( s ) ( 30000000L / ( stepByInch * s ))
 
-#define AVG_STEP      (( MIN_STEP + MAX_STEP ) / 2 )
-#define STEP_RANGE    ( MIN_STEP - MAX_STEP )
-#define STEP_ACC      (( 256 * STEP_RANGE ) / (( RAMP_TIME / AVG_STEP ) - 1 ))
+// Calculate the ramp for G0 accel / decel phases 
+#define HALF_STEP_FROM_RAMP( t ) ( minSpeedHalfStep - ((( minSpeedHalfStep - maxSpeedHalfStep ) * t ) >> RAMP_SHIFT))
 
-#define MAX_BACKSTEPS 2000
+#define MAX_BACKSTEPS  2000
 
 // Instantiation and configuration of the stepper motor controlers.
-// (StepPin, DirPin, EndPin, Direction)
-//
-Motor X( 13, 12, A5,  1, ERROR_LIMIT_X );  // 13, 12, A5, 1
-Motor Y( 11, 10, A4,  1, ERROR_LIMIT_Y );  // 11, 10, A4, 1
-Motor Z(  3,  2, A3,  1, ERROR_LIMIT_Z );  //  3,  2, A3, 1
+//-----------------------------------------------------------------
+//      Step,Dir,End,Swap,    LimitFlag,      StepByInch
+Motor X ( 11, 10, -1,  1, ERROR_LIMIT_X, 1.0f/X_AXIS_RES );
+Motor Y ( 13, 12, -1,  1, ERROR_LIMIT_Y, 1.0f/Y_AXIS_RES );
+Motor ZL( A3, A2, -1,  1, ERROR_LIMIT_Z, 1.0f/Z_AXIS_RES );
+Motor ZR( A5, A4, -1,  1, ERROR_LIMIT_Z, 1.0f/Z_AXIS_RES );
 
 unsigned long g_tSpent;     // Tracks time since last move to calculated accurate step delay
                             // Also used in LCD.cpp to track time spent updating the LCD.
 
+unsigned long g_MoveStart;  // Time when the current move was started (uS)
 
-Motor::Motor( int sp, int dp, int ep, int s, unsigned int lf )
+
+Motor::Motor( int sp, int dp, int ep, int rd, unsigned int lf, unsigned long sbi )
 {
   stepPin = sp;
   dirPin = dp;
   endPin = ep;
-  swap = s;
+  reverseDir = rd;
   limitFlag = lf;
+  stepByInch = sbi;
+  minSpeedHalfStep = SPEED_TO_HALF_STEP( MIN_SPEED );
+  maxSpeedHalfStep = SPEED_TO_HALF_STEP( MAX_SPEED );
 }
 
 void Motor::Reset( )
 {
   curPos = 0;
   curDir = 0;
-  toggle = 0;
   moveLength = 0;
   moveStep = 0;
   moveDuration = 0;
+  toggle = 0;
 
   pinMode( stepPin, OUTPUT );
-  digitalWrite(stepPin, LOW );
+  digitalWrite(stepPin, HIGH );
   pinMode( dirPin, OUTPUT );
   digitalWrite(dirPin, LOW );
   if( endPin >= 0 ) {
@@ -61,77 +66,85 @@ void Motor::Reset( )
 
 bool Motor::IsAtTheEnd( )
 {
-  return(( digitalRead( endPin ) == HIGH ) ? true : false );
+  if( endPin >= 0 ) 
+    return(( digitalRead( endPin ) == HIGH ) ? true : false );
+  else
+    return false;
 }
 
 void Motor::SetDirection( int d )
 {
-  curDir = d;
-  digitalWrite( dirPin, d < 0 ? LOW : HIGH );
+  if( !reverseDir )
+  {
+    digitalWrite( dirPin, d < 0 ? LOW : HIGH );
+  }
+  else
+  {
+    digitalWrite( dirPin, d < 0 ? HIGH : LOW );
+  }
+  
+  if( curDir != d )
+  {
+    curDir = d;
+    // Give some time for the controller to capture the new
+    // direction pin level. Otherwise the next move may
+    // step in the wrong direction for its first steps.
+    delayMicroseconds( 100 );
+  }
 }
 
 long Motor::InitMove( long s, long t )
 {
   long ret = -1;
-  int d = swap;
+  int d = 1;
   
   // Backward direction
-  if( s < 0 ) { 
-    d = -swap;
+  if( s < 0 ) 
+  { 
+    d = -1;
     s = -s; 
   }
   
   moveStep = 0;
   moveLength = s;
   moveDuration = t;
+  toggle = 0;
   
   if( s > 0 )
   {
-    // Are we changing direction
-    if( curDir != d )
-    {
-      SetDirection( d );
-      if( toggle )
-      { 
-        // Very important. This is to avoid missing a step when changing direction
-        // when the stepper PIN is high. Toggle in order to make sure the motor
-        // controler does not miss a step. 
-        digitalWrite( stepPin, LOW );
-        delay( 1 );
-        digitalWrite( stepPin, HIGH );
-        delay( 1 );
-      }
-      else delay( 2 );
-    }    
+    SetDirection( d );
     // Linear motion (G1)
     if( moveDuration )
     {
-      stepDuration = t / s;
+      // Divide the step duration by half because the ::Move( )
+      // function is called for every half period
+      halfStepDuration = t / ( moveLength * 2 );
     }
     // Rapid positionning (G0)
     else
     {
-      stepDecrement = 0; 
-      stepDuration = IMP_TO_NS / MIN_SPEED;
-      decelDist = moveLength;      
+      halfStepDuration = minSpeedHalfStep;
+      decelDist = moveLength;
+      decelStart = 0;
     }
   }
   else 
   {
-    stepDuration = -1;
     // Return negative value to indicate no motion
-    decelDist = 0;    
+    halfStepDuration = -1;
   }
-  return stepDuration;
+  
+  return halfStepDuration;
 }
 
 long Motor::Move( )
 {
+
+#if 0
   // Test the end of rail sensor
   while( digitalRead( endPin ) == HIGH )
   {
     long bs = MAX_BACKSTEPS;
-
     // Check if this is not a glitch on the switch caused by
     // vibrations
     delay( 1 );
@@ -140,7 +153,7 @@ long Motor::Move( )
     if( digitalRead( endPin ) == LOW ) break;
     delay( 10 );
     if( digitalRead( endPin ) == LOW ) break;
- 
+
     // Wait for 200ms
     delay( 200 );
     // Reverse the direction    
@@ -166,45 +179,74 @@ long Motor::Move( )
     g_error |= limitFlag;
     // Reset the move distance to force the stopping
     moveLength = 0;
+    digitalWrite( stepPin, LOW );
     return -1;
   }
-  
-  curPos = curPos + curDir;
-  if( toggle )
+#endif
+
+  if( !toggle )
   {
-    toggle = 0;
-    digitalWrite( stepPin, LOW );
-  }
-  else
-  {
+    // First half. Set the step signal high
     toggle = 1;
     digitalWrite( stepPin, HIGH );
   }
-  
-  // Move is complete. Return negarive value to indicate this.
-  if( ++moveStep >= moveLength ) return -1;
-  
-  // Rapid positioning motion (G0)
-  if( moveDuration == 0 )
+  else
   {
-    if( moveStep > decelDist )
+    // Second half. Set the step signal low
+    toggle = 0;
+    digitalWrite( stepPin, LOW );
+    // Count the step and update the position
+    moveStep++;
+    curPos = curPos + curDir;
+  }
+
+  // Move is complete.
+  if( moveStep >= moveLength )
+  {
+    // Return negative value to indicate this.
+    halfStepDuration = -1;
+  }
+  // Zero duration means rapid positioning motion (G0).
+  else if( moveDuration == 0 )
+  {
+    // Time since movement started
+    long t = micros( ) - g_MoveStart;
+    
+    // Deceleration phase
+    if( moveStep >= decelDist )
     {
-      // Deceleration phase
-      stepDecrement += STEP_ACC;
-      stepDuration += (stepDecrement >> 8);
-      stepDecrement &= 0xFF;
+      if( decelStart == 0 )
+      {
+        // Capture the time when the deceleration started
+        decelStart = t;
+      }
+      // Time spent decelerating 
+      t = t - decelStart;
+      if( t < decelTime )
+      {
+        // Expected time decelerating
+        t = decelTime - t;
+      }
+      else
+      {
+        t = 0;
+      }
+      halfStepDuration = HALF_STEP_FROM_RAMP( t );
     }
-    else if( stepDuration > MAX_STEP )
+    // Acceleration phase
+    else if( t <= RAMP_TIME )
     {
-      // Acceleration phase
-      stepDecrement += STEP_ACC;
-      stepDuration -= (stepDecrement >> 8);
-      stepDecrement &= 0xFF;
-      decelDist = moveLength - moveStep;        
+      halfStepDuration = HALF_STEP_FROM_RAMP( t );
+      
+      // Save the distance and time when deceleration should end
+      // If the movement is so short that full speed can't be
+      // reached, the previous test will pass and deceleration
+      // will start before the movement has reached full speed.
+      decelDist = moveLength - moveStep;
+      decelTime = t; 
     }
   }
-  
-  return stepDuration; 
+  return halfStepDuration; 
 }
 
 long Motor::GetPos( )
@@ -234,19 +276,28 @@ void Motor_Move( long x, long y, long z, long d )
   // No movement means dwell (GCode "P")
   if( x==0 && y==0 && z==0 )
   {
-    // d is in microseconds
-    delay( d / 1000 );
+    if( d < 1000 )
+    {
+      delayMicroseconds( d );
+    }
+    else
+    {
+      delay( d / 1000 );
+    }
     return;
   }
+
+  // Capture when the motion started (in uS)
+  g_MoveStart = micros();
   
   // This calculates the interval between steps for each axis and returns the time
   // to wait until the first move needs to occur (-1 if no move necessary).
   tX = X.InitMove( x, d );
   tY = Y.InitMove( y, d );
-  tZ = Z.InitMove( z, d ); 
+  tZ = ZL.InitMove( z, d );
+       ZR.InitMove( z, d );
   
 #ifdef TEST_TIME
-  long start = micros();
   g_debug[2] = start-g_tSpent;
 #endif
   
@@ -312,7 +363,7 @@ void Motor_Move( long x, long y, long z, long d )
     g_tSpent = micros();
     if( tX == 0 ) tX = X.Move( );
     if( tY == 0 ) tY = Y.Move( );    
-    if( tZ == 0 ) tZ = Z.Move( );
+    if( tZ == 0 ) { tZ = ZL.Move( ); ZR.Move( ); }
     
   } while(( tX > 0 ) || ( tY > 0 ) || ( tZ > 0 ));
   
@@ -334,6 +385,6 @@ void Motor_Init( )
   
   X.Reset( );
   Y.Reset( );
-  Z.Reset( );
+  ZL.Reset( );
+  ZR.Reset( );
 }
-

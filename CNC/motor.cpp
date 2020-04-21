@@ -6,9 +6,9 @@
 #include "keyboard.h"
 #include "socket.h"
 
-#define MAX_CMD_IN_PIPE	  1024 // 1 second
-#define TIMEPIPESIZE	  (MAX_CMD_IN_PIPE/16)
-#define POLL_RATE		  30 // ms
+#define MAX_DURATION_IN_PIPE	  1000 // 1 second
+#define TIMEPIPESIZE			  256
+#define POLL_RATE				  30 // ms
 
 #define COMMAND_RESET_ORIGIN   "O\n"
 #define COMMAND_CLEAR_ERROR    "C\n"
@@ -60,7 +60,7 @@ void getDistanceInPipe(long* x, long* y, long* z)
 
 bool isPipeAvailable(int cmdLen)
 {
-	if (getDurationOfCommandsInPipe() > MAX_CMD_IN_PIPE) return false;
+	if (getDurationOfCommandsInPipe() > MAX_DURATION_IN_PIPE) return false;
 	
 	// Add function to check if the out buffer is full
 
@@ -316,13 +316,13 @@ tStatus doMove( void(*posAtStep)(t3DPoint*,int,int,void*), int stepCount, double
 			int timeout = 10000 / POLL_RATE;
 			unsigned long pipeDuration;
 			unsigned long pipeCount;
-			while (((((pipeDuration = getDurationOfCommandsInPipe( )) > MAX_CMD_IN_PIPE) ||
+			while (((((pipeDuration = getDurationOfCommandsInPipe( )) > MAX_DURATION_IN_PIPE) ||
 				     ((pipeCount = getCountOfCommandsInPipe( )) >= TIMEPIPESIZE))) && timeout >= 0 )
 			{
 				Sleep(POLL_RATE);
 				timeout--;
 			}
-			if (timeout <= 0)
+			if (timeout < 0)
 			{
 				return retBufferBusyTimeout;
 			}

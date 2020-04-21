@@ -22,3 +22,5 @@ https://www.raspberrypi.org/downloads/noobs/
 
 7) Run:sudo nano .bashrc
    Add line at the end: python \home\pi\server.py &
+
+8) Change the default password. Current password : makeaguess

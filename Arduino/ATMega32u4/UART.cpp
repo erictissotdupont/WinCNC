@@ -4,13 +4,15 @@
 
 #include "LCD.h"
 
-extern Uart Serial1;
+//extern HardwareSerial Serial1;
+//extern Uart Serial1;
+
 extern int g_debug[MAX_DEBUG];
 extern unsigned int g_error;
 // To know the current position
 extern Motor X;
 extern Motor Y;
-extern Motor Z;
+extern Motor ZL;
 
 // FIFO to store the command received. This buffer ensure that when
 // the AR9331 doesn't fill the buffer for a few milliseconds the
@@ -66,9 +68,14 @@ inline uint8_t crc8( uint8_t* pdata, unsigned int nbytes, uint8_t crc )
 
 void UART_Init( )
 {
-  Serial1.begin(500000);
+  Serial1.begin(460800);
   g_fifoIn = 0;
   g_fifoOut = 0;
+
+  Serial1.print ("RST" );
+
+  pinMode( 13, OUTPUT );
+  digitalWrite( 13, 0 );
 }
 
 inline unsigned int fifoCount( )
@@ -86,7 +93,7 @@ inline void UART_SendStatus( )
   Serial1.write( 'Y' );
   Serial1.print( Y.GetPos( ));
   Serial1.write( 'Z' );
-  Serial1.print( Z.GetPos( ));
+  Serial1.print( ZL.GetPos( ));
   Serial1.write( 'S' );
   Serial1.print( g_error );
   Serial1.write( '\n' );
@@ -94,7 +101,7 @@ inline void UART_SendStatus( )
 
 bool UART_Task( )
 {
-  static int sign = 0;
+  static long sign = 0;
   static long *pt = NULL;
   static tCommState state = COMM_IDLE;
   static long receivedCRC;
@@ -102,11 +109,11 @@ bool UART_Task( )
   static bool bInCRC = false;
   char c;
 
-  c = Serial1.read( );
-
   // Buffer not empty
-  if( c != -1 )
+  while( Serial1.available( ))
   {
+    c = Serial1.read( );
+        
     if( state == COMM_IN_FRAME )
     {
       if( bInCRC == false )
@@ -152,6 +159,7 @@ bool UART_Task( )
           }
           else
           {
+    
             // Move the FIFO input index to the next slot.
             if( ++g_fifoIn > MAX_FIFO_MOVE ) g_fifoIn = 0;
   
@@ -297,7 +305,7 @@ void Motor_Task( )
     {
       digitalWrite(TOOL_ON_REPLAY, g_fifo[g_fifoOut].s ? HIGH : LOW);
     }
-
+        
     // Perform the move
     Motor_Move( 
       g_fifo[g_fifoOut].x,

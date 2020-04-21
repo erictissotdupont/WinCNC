@@ -15,9 +15,11 @@ typedef struct {
 	HANDLE hThread;
 	BOOL bStop;
 	BOOL bPause;
+	HANDLE hDebugStepEvent;
 } tParserJob;
 
 #define PROGRESS_RES 512
+#define HISTORY_DEPTH 3
 
 DWORD ParserThread(PVOID pParam)
 {
@@ -25,7 +27,16 @@ DWORD ParserThread(PVOID pParam)
 	char* pt = pJob->buffer;
 	char* eol;
 	int l = 0;
+	int cmdHistIdx = 0;
+	int cmdCount = 0;
+	char* cmdHistory[HISTORY_DEPTH];
+	char strStatus[1024];
 
+	for (int i = 0; i < HISTORY_DEPTH; i++)
+	{
+		cmdHistory[i] = (char*)malloc(MAX_PATH);
+		*cmdHistory[i] = 0;
+	}
 	pJob->status = retSuccess;
 
 	while (pt && !pJob->bStop)
@@ -43,12 +54,34 @@ DWORD ParserThread(PVOID pParam)
 		l = strlen(pt);
 		if (l > 0)
 		{
-			if ((pJob->status = pJob->cmd(pt)) != retSuccess) break;
+			cmdCount++;
+			cmdHistIdx++;
+			if (cmdHistIdx >= HISTORY_DEPTH)
+			{
+				cmdHistIdx = 0;
+			}
+			sprintf_s(cmdHistory[cmdHistIdx], MAX_PATH, "%d %s\r\n", cmdCount, pt);
+			//strcpy_s(cmdHistory[cmdHistIdx], MAX_PATH, pt);
+			strStatus[0] = 0;
+			for (int i = 0; i < HISTORY_DEPTH; i++)
+			{
+				int n = cmdHistIdx - i;
+				if (n < 0) n += HISTORY_DEPTH;
+				if (n >= HISTORY_DEPTH) n -= HISTORY_DEPTH;
+				strcat_s(strStatus, sizeof(strStatus), cmdHistory[n]);
+			}
 
 			if (pJob->hDialog)
 			{
-				PostMessage(pJob->hDialog, WM_UPDATE_PROGRESS, progress, (LPARAM)pt);
+				PostMessage(pJob->hDialog, WM_UPDATE_PROGRESS, progress, (LPARAM)strStatus);
 			}
+
+			if (pJob->hDebugStepEvent)
+			{
+				WaitForSingleObject(pJob->hDebugStepEvent, INFINITE);
+			}
+
+			if ((pJob->status = pJob->cmd(pt)) != retSuccess) break;
 		}
 		pt = eol;
 
@@ -97,6 +130,11 @@ void ParserOnPause(HWND hWnd)
 	SetWindowText(hItem, job.bPause ? L"RESUME" : L"PAUSE" );
 }
 
+void ParserOnStep(HWND hWnd)
+{
+	SetEvent(job.hDebugStepEvent);
+}
+
 BOOL CALLBACK FileParserProc(HWND hWnd,
 	UINT message,
 	WPARAM wParam,
@@ -120,6 +158,9 @@ BOOL CALLBACK FileParserProc(HWND hWnd,
 		{
 		case IDD_PAUSE:
 			ParserOnPause(hWnd);
+			break;
+		case IDD_STEP:
+			ParserOnStep(hWnd);
 			break;
 		case IDOK:
 			// Fall through.
@@ -177,7 +218,7 @@ WCHAR* GetCNCErrorString(tStatus status)
 	}
 }
 
-tStatus ParseBuffer( HWND hParent, char* pt, ULONG cbBuffer, tStatus(*cmd)(char*))
+tStatus ParseBuffer( HWND hParent, char* pt, ULONG cbBuffer, tStatus(*cmd)(char*), BOOL bDebug )
 {
 	DWORD dwThread;
 	job.buffer = pt;
@@ -185,7 +226,7 @@ tStatus ParseBuffer( HWND hParent, char* pt, ULONG cbBuffer, tStatus(*cmd)(char*
 	job.cmd = cmd;
 	job.hDialog = NULL;
 	job.bStop = false;
-
+	job.hDebugStepEvent = bDebug ? CreateEvent(NULL, FALSE, FALSE, NULL) : NULL;
 	memcpy_s(job.buffer, cbBuffer, pt, cbBuffer);
 
 	job.hThread = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)ParserThread, &job, 0, &dwThread);
@@ -204,7 +245,7 @@ tStatus ParseBuffer( HWND hParent, char* pt, ULONG cbBuffer, tStatus(*cmd)(char*
 	return job.status;
 }
 
-tStatus ParseGCodeFile( HWND hParent, LPWSTR szFileName, tStatus(*cmd)(char*))
+tStatus ParseGCodeFile( HWND hParent, LPWSTR szFileName, tStatus(*cmd)(char*), BOOL bDebug )
 {
 	HANDLE hFile;
 	char* buffer;
@@ -229,7 +270,7 @@ tStatus ParseGCodeFile( HWND hParent, LPWSTR szFileName, tStatus(*cmd)(char*))
 	ReadFile(hFile, buffer, fileSize, NULL, NULL);
 	buffer[fileSize] = 0;
 
-	ret = ParseBuffer(hParent, buffer, fileSize, cmd);
+	ret = ParseBuffer(hParent, buffer, fileSize, cmd, bDebug );
 
 	printf("Done.\n");
 	CloseHandle(hFile);

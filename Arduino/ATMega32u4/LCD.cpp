@@ -8,7 +8,7 @@
 // To get the current position 
 extern Motor X;
 extern Motor Y;
-extern Motor Z;
+extern Motor ZL;
 
 void LCD_Init( )
 {
@@ -229,7 +229,7 @@ void LCD_UpdateTask( unsigned long timeWeHave )
     case LCD_StatePrintX_Part1 :
       next[0] = 'X';
       next[7] = ' ';
-      FloatToStrPart1( next+1, X.GetPos( ) * X_AXIS_RES * 1000 );
+      FloatToStrPart1( next+1, X_AXIS_RES * (float) X.GetPos( ) * 1000.0f );
       state = LCD_StatePrintX_Part2;
       break;
     case LCD_StatePrintX_Part2 :
@@ -263,7 +263,7 @@ void LCD_UpdateTask( unsigned long timeWeHave )
     case LCD_StatePrintZ_Part1 :
       next[0] = 'Z';
       next[7] = ' ';
-      FloatToStrPart1( next+1, Z.GetPos( ) * Z_AXIS_RES * 1000 );
+      FloatToStrPart1( next+1, ZL.GetPos( ) * Z_AXIS_RES * 1000 );
       state = LCD_StatePrintZ_Part2;
       break;
     case LCD_StatePrintZ_Part2 :
@@ -552,4 +552,3 @@ void LCD_ButtonTask( )
   }
   prevButton = button;
 }
-

@@ -256,7 +256,7 @@ void resetBlockSurface()
 	}
 }
 
-// 24MB is enough for 24x24in at 0.001 resolution (float)
+// 96MB is enough for 24x24in at 0.005 resolution (float)
 #define SIM_MAX_SIZE_BYTES		(96*1024*1024)
 #define SIM_RESOLUTION_IN		0.005f	// 0.127mm
 

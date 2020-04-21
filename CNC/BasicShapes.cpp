@@ -29,6 +29,11 @@ typedef struct
 	int rectRounded;
 	float rectRadius;
 
+	// Hexagone
+	float hexRadius;
+	float hexDepth;
+	int hexFill;
+
 } tSimpleShapeParam;
 
 tSimpleShapeParam g_Params;
@@ -84,6 +89,10 @@ UINT BasicShapeGetSet(BOOL get, HWND hWnd )
 	ShapeGetSetBool(hWnd, IDC_RECT_EXTERNAL, get, &g_Params.rectExternal);
 	ShapeGetSetBool(hWnd, IDC_RECT_ROUNDED, get, &g_Params.rectRounded);
 
+	ShapeGetSetFloat(hWnd, IDC_HEX_RADIUS, get, &g_Params.hexRadius);
+	ShapeGetSetFloat(hWnd, IDC_HEX_DEPTH, get, &g_Params.hexDepth);
+	ShapeGetSetBool(hWnd, IDC_HEX_FILL, get, &g_Params.hexFill);
+
 	// Filling shape is only relevant when external dimensions are requested
 	EnableWindow(GetDlgItem(hWnd, IDC_CIRCLE_FILL), Button_GetCheck(GetDlgItem(hWnd, IDC_CIRCLE_EXTERNAL_RADIUS)));
 	EnableWindow(GetDlgItem(hWnd, IDC_RECT_FILL), Button_GetCheck(GetDlgItem(hWnd, IDC_RECT_EXTERNAL)));
@@ -109,6 +118,131 @@ G0 X - 4.625
 #define SMALL_OVELAP		(1/64.0f)
 #define SMALLEST_RADIUS		( g_Params.tool.radius + SMALL_OVELAP )
 #define SAFE_TRAVEL_HEIGHT	0.25f
+
+
+BOOL CarveHexagon(HWND hWnd)
+{
+	bool bDone = false;
+	char str[MAX_STR];
+	char* cmd;
+
+	// Can't use a tool so small
+	if (g_Params.tool.radius < SMALL_OVELAP * 2)
+	{
+		MessageBoxA(hWnd, "Tool is too small.", "Hexagon", MB_ICONERROR);
+		return FALSE;
+	}
+
+	// Can't carve a Hex smaller than the smallest radius
+	if (g_Params.hexRadius < SMALLEST_RADIUS )
+	{
+		MessageBoxA(hWnd, "Radius is too small.", "Hexagon", MB_ICONERROR);
+		return FALSE;
+	}
+
+	// Can't carve deeper than the tool max depth
+	if (g_Params.hexDepth > g_Params.tool.maxDepth)
+	{
+		MessageBoxA(hWnd, "Carving too deep.", "Hexagon", MB_ICONERROR);
+		return FALSE;
+	}
+
+	cmd = (char*)malloc(MAX_BUF);
+	if (cmd == NULL)
+	{
+		MessageBoxA(hWnd, "Failled to allocate buffer.", "Circle", MB_ICONERROR);
+		return FALSE;
+	}
+	memset(cmd, 0x00, MAX_BUF);
+
+	// -------------------------------------
+	// START OF GCODE GENERATION FOR HEXAGON
+	// -------------------------------------
+
+	// G91: Relative Motion
+	// Fxx : Carve speed
+	// M3 : Motor ON
+	// G4 P1 : Wait 1sec. for tool spindle to start
+	sprintf_s(str, MAX_STR, "G91 F%d %s\r\n", g_Params.tool.cutSpeed, g_Params.tool.motorControl ? "M3 G4 P1" : "");
+	strcat_s(cmd, MAX_BUF, str);
+
+	// Calculate the distance between concentric circles needed to fill
+	// the circle with a small overlap between each of them.
+	float R = g_Params.hexRadius - g_Params.tool.radius;
+
+	do
+	{
+		float a = R / 2;
+		float b = R * sqrt(3.0 / 4.0);
+		float Z = 0.0;
+
+		// Move from the center to the radius of the circle (3 o'clock)
+		sprintf_s(str, MAX_STR, "G0 Z%f\r\n", SAFE_TRAVEL_HEIGHT);
+		strcat_s(cmd, MAX_BUF, str);
+		sprintf_s(str, MAX_STR, "G0 X%f\r\n", R);
+		strcat_s(cmd, MAX_BUF, str);
+		sprintf_s(str, MAX_STR, "G1 Z%f\r\n", -SAFE_TRAVEL_HEIGHT);
+		strcat_s(cmd, MAX_BUF, str);
+
+		do
+		{
+			float dZ = g_Params.tool.cutDepth;
+			if (Z + dZ > g_Params.hexDepth)
+			{
+				dZ = g_Params.hexDepth - Z;
+				bDone = true;
+			}
+			Z += dZ;
+
+			sprintf_s(str, MAX_STR, "G1 X%f Y%f Z%f\r\n", -a, b, -dZ);
+			strcat_s(cmd, MAX_BUF, str);
+			sprintf_s(str, MAX_STR, "G1 X%f\r\n", -R);
+			strcat_s(cmd, MAX_BUF, str);
+			sprintf_s(str, MAX_STR, "G1 X%f Y%f\r\n", -a, -b);
+			strcat_s(cmd, MAX_BUF, str);
+			sprintf_s(str, MAX_STR, "G1 X%f Y%f\r\n", a, -b);
+			strcat_s(cmd, MAX_BUF, str);
+			sprintf_s(str, MAX_STR, "G1 X%f\r\n", R);
+			strcat_s(cmd, MAX_BUF, str);
+			sprintf_s(str, MAX_STR, "G1 X%f Y%f\r\n", a, b);
+			strcat_s(cmd, MAX_BUF, str);
+
+		} while (!bDone);
+
+		if (bDone)
+		{
+			// Do one more edge to flatten bottom
+			sprintf_s(str, MAX_STR, "G1 X%f Y%f\r\n", -a, b);
+			strcat_s(cmd, MAX_BUF, str);
+			// Come back to starting height
+			sprintf_s(str, MAX_STR, "G0 Z%f\r\n", Z + SAFE_TRAVEL_HEIGHT);
+			strcat_s(cmd, MAX_BUF, str);
+			// Move back to center
+			sprintf_s(str, MAX_STR, "G0 X%f Y%f\r\n", -a, -b);
+			strcat_s(cmd, MAX_BUF, str);
+			sprintf_s(str, MAX_STR, "G1 Z%f", -SAFE_TRAVEL_HEIGHT);
+			strcat_s(cmd, MAX_BUF, str);
+
+			Z = 0.0;
+
+			if( g_Params.hexFill )
+			{
+
+				// bDone = false;
+			}
+			// End the line and stop the motor if needed
+			strcat_s(cmd, MAX_BUF, bDone && g_Params.tool.motorControl ? " M0\r\n" : "\r\n");
+		}
+
+	} while (!bDone);
+
+	HWND hItem = GetDlgItem(hWnd, IDC_GCODE);
+	SetWindowTextA(hItem, cmd);
+	free(cmd);
+
+	return TRUE;
+}
+
 
 BOOL CarveCircle(HWND hWnd)
 {
@@ -675,7 +809,7 @@ void BasicShapeOneCommand(HWND hWnd)
 	if (cmd)
 	{
 		GetWindowTextA(hItem, cmd, l);
-		ParseBuffer(hWnd, cmd, l, doGcode);
+		ParseBuffer(hWnd, cmd, l, doGcode, FALSE );
 		free(cmd);
 	}
 }
@@ -748,6 +882,10 @@ BOOL CALLBACK BasicShapesProc(HWND hWnd,
 			case IDC_CARVE_RECT:
 				BasicShapeGetSet(TRUE, hWnd);
 				CarveRect(hWnd);
+				break;
+			case IDC_CARVE_HEX:
+				BasicShapeGetSet(TRUE, hWnd);
+				CarveHexagon(hWnd);
 				break;
 			case IDOK:
 				/*

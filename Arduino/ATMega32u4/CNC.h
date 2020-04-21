@@ -4,9 +4,9 @@
 
 #define TOOL_ON_REPLAY   A2
 
-#define X_AXIS_RES       0.0004389
-#define Y_AXIS_RES       0.0004389
-#define Z_AXIS_RES       0.0003125
+#define X_AXIS_RES       0.0004389f
+#define Y_AXIS_RES       0.0004389f
+#define Z_AXIS_RES       0.0003125f
 
 #define ERROR_LIMIT_X    0x0001
 #define ERROR_LIMIT_Y    0x0002
@@ -23,5 +23,3 @@
 // and places the average loop time in uS in debug A and number of loops of 
 // the last move in debug B status.
 //#define TEST_TIME
-
-

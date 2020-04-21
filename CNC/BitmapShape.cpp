@@ -222,7 +222,7 @@ void BitmapShapeExecute(HWND hWnd)
 	if (cmd)
 	{
 		GetWindowTextA(hItem, cmd, l);
-		ParseBuffer(hWnd, cmd, l, doGcode);
+		ParseBuffer(hWnd, cmd, l, doGcode, FALSE );
 		free(cmd);
 	}
 }
