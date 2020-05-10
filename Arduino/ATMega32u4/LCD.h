@@ -61,6 +61,14 @@ typedef enum {
 #define LCD_5x10DOTS            0x04
 #define LCD_5x8DOTS             0x00
 
+// flags for backlight control
+#define LCD_BACKLIGHT 0x08
+#define LCD_NOBACKLIGHT 0x00
+
+#define En B00000100  // Enable bit
+#define Rw B00000010  // Read/Write bit
+#define Rs B00000001  // Register select bit
+
 void LCD_setCursor_high(uint8_t, uint8_t); 
 void LCD_setCursor_low(uint8_t, uint8_t); 
 void LCD_setCursor(uint8_t, uint8_t); 

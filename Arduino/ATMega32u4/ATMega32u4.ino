@@ -11,7 +11,6 @@
 void setup( ) 
 {
   LCD_Init( );
-  LCD_Clear( );
   UART_Init( );
   Motor_Init( );
 }

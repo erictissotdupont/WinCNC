@@ -153,6 +153,8 @@ void OnCncStatus( HWND hWnd, char* str )
 	char* pt;
 	unsigned long gotWhat = 0;
 
+	x = y = z = s = 0;
+
 	pt = strchr(str, 'X');
 	if (pt) if (sscanf_s(pt + 1, "%d", &x) == 1) gotWhat |= 0x01;
 	pt = strchr(str, 'Y');
@@ -175,12 +177,13 @@ void OnCncStatus( HWND hWnd, char* str )
 	{
 		g_errorStatusFlags = s;
 	}
+
+	if (gotWhat & 0x01) g_actualX = x;
+	if (gotWhat & 0x02) g_actualY = y;
+	if (gotWhat & 0x04) g_actualZ = z;
 	
-	if (gotWhat & 0x07)
+	if (gotWhat & 0x07 == 0x07 )
 	{
-		g_actualX = x;
-		g_actualY = y;
-		g_actualZ = z;
 		stepToPos(x, y, z, &g_displayPos);
 	}
 

@@ -7,11 +7,11 @@
 unsigned int g_error;
 int g_debug[MAX_DEBUG];
 
-#define RAMP_SHIFT    20 // 19=524ms
+#define RAMP_SHIFT    19 // 19=524ms
 #define RAMP_TIME     (1L << RAMP_SHIFT)
 #define MIN_SPEED     30L
-#define MAX_SPEED     500L
-
+#define MAX_SPEED     250L
+#define NO_MOVE_TIME  0xFFFFFFFF
 // Speed is in inch by minute, hence the 30M micro seconds
 #define SPEED_TO_HALF_STEP( s ) ( 30000000L / ( stepByInch * s ))
 
@@ -23,16 +23,17 @@ int g_debug[MAX_DEBUG];
 // Instantiation and configuration of the stepper motor controlers.
 //-----------------------------------------------------------------
 //      Step,Dir,End,Swap,    LimitFlag,      StepByInch
-Motor X ( 11, 10, -1,  1, ERROR_LIMIT_X, 1.0f/X_AXIS_RES );
+Motor X ( 11, 10, -1,  0, ERROR_LIMIT_X, 1.0f/X_AXIS_RES );
 Motor Y ( 13, 12, -1,  1, ERROR_LIMIT_Y, 1.0f/Y_AXIS_RES );
 Motor ZL( A3, A2, -1,  1, ERROR_LIMIT_Z, 1.0f/Z_AXIS_RES );
 Motor ZR( A5, A4, -1,  1, ERROR_LIMIT_Z, 1.0f/Z_AXIS_RES );
 
-unsigned long g_tSpent;     // Tracks time since last move to calculated accurate step delay
-                            // Also used in LCD.cpp to track time spent updating the LCD.
-
 unsigned long g_MoveStart;  // Time when the current move was started (uS)
 
+// For debug purpose, measures the time spent sleeping
+unsigned long g_timeSleepingUs = 0;
+unsigned long g_missedStepCount = 0;
+long g_maxErrorAllowed;
 
 Motor::Motor( int sp, int dp, int ep, int rd, unsigned int lf, unsigned long sbi )
 {
@@ -54,6 +55,7 @@ void Motor::Reset( )
   moveStep = 0;
   moveDuration = 0;
   toggle = 0;
+  g_missedStepCount = 0;
 
   pinMode( stepPin, OUTPUT );
   digitalWrite(stepPin, HIGH );
@@ -93,7 +95,7 @@ void Motor::SetDirection( int d )
   }
 }
 
-long Motor::InitMove( long s, long t )
+unsigned long Motor::InitMove( long s, long t )
 {
   long ret = -1;
   int d = 1;
@@ -107,6 +109,7 @@ long Motor::InitMove( long s, long t )
   
   moveStep = 0;
   moveLength = s;
+  halfStepCount = s * 2;
   moveDuration = t;
   toggle = 0;
   
@@ -118,7 +121,9 @@ long Motor::InitMove( long s, long t )
     {
       // Divide the step duration by half because the ::Move( )
       // function is called for every half period
-      halfStepDuration = t / ( moveLength * 2 );
+      halfStepDuration = t / halfStepCount;
+      halfStepModulo = t % halfStepCount;
+      halfStepAcc = halfStepModulo;
     }
     // Rapid positionning (G0)
     else
@@ -130,14 +135,24 @@ long Motor::InitMove( long s, long t )
   }
   else 
   {
-    // Return negative value to indicate no motion
-    halfStepDuration = -1;
+    return NO_MOVE_TIME;
   }
-  
+  nextHalfStepTime = halfStepDuration;
   return halfStepDuration;
 }
 
-long Motor::Move( )
+inline unsigned long timeSinceMoveStarted( )
+{
+  unsigned long now = micros( );
+  // Calculate time since the start of the move
+  if( g_MoveStart <= now )
+    return( now - g_MoveStart );
+  else
+    // Rollover of the 32bit microsecond timer (every 71min)
+    return( NO_MOVE_TIME - g_MoveStart + now );
+}
+
+unsigned long Motor::Move( )
 {
 
 #if 0
@@ -184,6 +199,7 @@ long Motor::Move( )
   }
 #endif
 
+  // Toggle the step input of the controller
   if( !toggle )
   {
     // First half. Set the step signal high
@@ -203,14 +219,24 @@ long Motor::Move( )
   // Move is complete.
   if( moveStep >= moveLength )
   {
-    // Return negative value to indicate this.
-    halfStepDuration = -1;
+    return NO_MOVE_TIME;
+  }
+  // Movement with duration means linear motion (G1).
+  else if( moveDuration != 0 )
+  {
+    nextHalfStepTime += halfStepDuration;
+    halfStepAcc += halfStepModulo;
+    if( halfStepAcc >= halfStepCount )
+    {
+      halfStepAcc -= halfStepCount;
+      nextHalfStepTime++;
+    }
   }
   // Zero duration means rapid positioning motion (G0).
-  else if( moveDuration == 0 )
+  else
   {
     // Time since movement started
-    long t = micros( ) - g_MoveStart;
+    long t = timeSinceMoveStarted( );
     
     // Deceleration phase
     if( moveStep >= decelDist )
@@ -245,8 +271,9 @@ long Motor::Move( )
       decelDist = moveLength - moveStep;
       decelTime = t; 
     }
-  }
-  return halfStepDuration; 
+    nextHalfStepTime += halfStepDuration;
+  }  
+  return nextHalfStepTime; 
 }
 
 long Motor::GetPos( )
@@ -259,120 +286,170 @@ long Motor::FakeMove( long s )
   curPos += s;
 }
 
+inline void WaitTillItsTime( unsigned long timeToMove )
+{
+  long s;
+  static int count = 0;
+
+  // How much time until the move?
+  s = timeToMove - timeSinceMoveStarted( );
+
+  // Are we late?
+  if( s <= 0 )
+  {
+    // How badly (allowed error depends on how many directions are
+    // moving at the same time in this motion).
+    if( s < g_maxErrorAllowed ) g_missedStepCount++;
+    return;
+  }
+
+  // This is to calculate the CPU load
+  // (time spent doing background task and sleeping vs actual movement)
+  g_timeSleepingUs += s;
+  
+  // LCD and UART tasks are designed to never take longer than 25uS
+  // Verify this by running with "DISPLAY_TASK_TIME" enabled.
+  while( s > 30 )
+  {
+    // Alternate between LCD and UART
+    if( count++ & 1 )
+    {
+      // Refresh the LCD screen (if enough time)
+      // Most LCD refresh commands take 30uS or less
+      LCD_UpdateTask( s - 5 );
+    }
+    else
+    {
+      // Read from UART and decode (one char at a time)
+      // Except for the G10 (Reset) command, all the UART processing is done
+      // in less than 20uS
+      UART_Task( );
+    }
+    
+    // Check how much time left until the next movement
+    s = timeToMove - timeSinceMoveStarted( );
+  }
+
+  // Do we still need to wait for a (short) while?
+  if( s > 0 )
+  {
+    delayMicroseconds( s );
+  }
+  else
+  {
+    // Shouldnt be late here...
+    if( s < 0 ) g_missedStepCount++;
+  }
+}
+
+// Measures the Min/Max/Average of the Move( ) function
+//#define MEASURE_MOVE
+
 // Move the tool position by the specified # of steps for x,y,z directions.
 // Duration of the motion determines the speed. d is in microseconds
 void Motor_Move( long x, long y, long z, long d )
 {
-  long s;
-  unsigned int count = 0;
-  long tX,tY,tZ;
+#ifdef MEASURE_MOVE
+  long maxMoveTime = 0;
+  long minMoveTime = 10000;
+  long avgMoveTime = 0;
+  long moveCount = 0;
+#endif
+  unsigned long prev;
+  unsigned long tX,tY,tZ;
   
   // If in error state, dot not move
   if( g_error != 0 )
   {
     return;
   }
-  
-  // No movement means dwell (GCode "P")
-  if( x==0 && y==0 && z==0 )
-  {
-    if( d < 1000 )
-    {
-      delayMicroseconds( d );
-    }
-    else
-    {
-      delay( d / 1000 );
-    }
-    return;
-  }
 
   // Capture when the motion started (in uS)
   g_MoveStart = micros();
   
+  // No movement means dwell (GCode "P")
+  if( x==0 && y==0 && z==0 )
+  {
+    // Just wait...
+    WaitTillItsTime( d );
+    return;
+  }
+
+  // This is to verify that pulses to the motors are made with
+  // a reasonnable precision. The error allowed increases when
+  // the number of axis moving at the same time increases.
+  g_maxErrorAllowed = -3;
+  if( x ) g_maxErrorAllowed -= 5;
+  if( y ) g_maxErrorAllowed -= 5;
+  // Z is special because it moves 2 motors at the same time
+  if( z ) g_maxErrorAllowed -= 10;
+
   // This calculates the interval between steps for each axis and returns the time
-  // to wait until the first move needs to occur (-1 if no move necessary).
+  // to wait until the first move needs to occur (0 if no move necessary).
   tX = X.InitMove( x, d );
   tY = Y.InitMove( y, d );
   tZ = ZL.InitMove( z, d );
        ZR.InitMove( z, d );
-  
-#ifdef TEST_TIME
-  g_debug[2] = start-g_tSpent;
-#endif
-  
+
   do
   {
-    // Finds which of the non negative wait times is the shortest.
-    s = minOf3( tX, tY, tZ );
-              
-    // Remove the wait time from each axis. At least one should become zero.
-    tX = tX - s;
-    tY = tY - s;
-    tZ = tZ - s;
-    
-#ifdef TEST_TIME 
-    // This skip the delay and allow to mesure the processing time of the move
-    // routine (calculated at the end)
-    s = 0;
-#endif
- 
-    // If we have at least 150uS to wait, perform background
-    // update tasks
-    if( s > 150 )
+    // Check which axis is the next one to be stepped
+    if(( tX < tY ) && ( tX < tZ ))
     {
-      // Alternate between LCD and UART
-      if( count++ & 1 )
-      {
-        // Refresh the LCD screen (if enough time)
-        LCD_UpdateTask( s - 150 );
-      }
-      else
-      {
-        // Read from UART and decode (one char at a time)
-        UART_Task( );
-      }
-    }
-    
-    // Calculate how much time we spent processing since the last move pulse
-    g_tSpent = micros() - g_tSpent;
-    
-    // If we still have time to wait
-    if( s > g_tSpent )
-    {
-      s = s - g_tSpent;
-      // When sleeping more than 16388 uS, documentation says don't use delayMicroseconds.
-      if( s < 16000 )
-      {
-        if( s ) delayMicroseconds( s );
-      }
-      else 
-      {
-        delay( s / 1000 );
-        delayMicroseconds( s % 1000 );
-      }
-    }
-#ifndef TEST_TIME
-    // Counts how many times move was late for making a motor pulse
-    else g_debug[3]++;
+      // X is next move
+      WaitTillItsTime( tX );
+#ifdef MEASURE_MOVE
+      unsigned long t = micros( );
 #endif
-
-    // For each axis where the time to move has been reached, move.
-    // Save the duration to the next move or a negative value if the
-    // axis has eached the end position.
-    g_tSpent = micros();
-    if( tX == 0 ) tX = X.Move( );
-    if( tY == 0 ) tY = Y.Move( );    
-    if( tZ == 0 ) { tZ = ZL.Move( ); ZR.Move( ); }
-    
-  } while(( tX > 0 ) || ( tY > 0 ) || ( tZ > 0 ));
+      noInterrupts( );
+      prev = tX + 3;
+      tX = X.Move( );
+      if( tY < prev ) tY = Y.Move( );
+      if( tZ < prev ) { tZ = ZL.Move( ); ZR.Move( ); }
+      interrupts( );
+#ifdef MEASURE_MOVE
+      t = micros( ) - t;
+      if( t > maxMoveTime ) maxMoveTime = t;
+      if( t < minMoveTime ) minMoveTime = t;
+      avgMoveTime += t;
+      moveCount++;
+#endif
+    }
+    else if( tY < tZ )
+    {
+      // Y is next move
+      WaitTillItsTime( tY );
+      noInterrupts( );
+      prev = tY + 3;
+      tY = Y.Move( );
+      if( tX < prev ) tX = X.Move( );
+      if( tZ < prev ) { tZ = ZL.Move( ); ZR.Move( ); }
+      interrupts( );
+    }
+    else if( tZ != NO_MOVE_TIME )
+    {
+      // Z is next move
+      WaitTillItsTime( tZ );
+      noInterrupts( );
+      prev = tZ + 5;
+      tZ = ZL.Move( );
+      ZR.Move( );
+      if( tX < prev ) tX = X.Move( );
+      if( tY < prev ) tY = Y.Move( );
+      interrupts( ); 
+    }
+    else
+    {
+      // No movement, leave
+      break;
+    }
+  } while( 1 );
   
-#ifdef TEST_TIME
-  long finish = micros();
-  g_debug[0] = (finish-start)/count;
-  g_debug[1] = count;
+#ifdef MEASURE_MOVE
+  char str[10];
+  sprintf( str, "%d %d %d", minMoveTime, maxMoveTime, avgMoveTime / moveCount );
+  LCD_SetStatus( str, 0 );
 #endif
-
 }
 
 void Motor_Init( )

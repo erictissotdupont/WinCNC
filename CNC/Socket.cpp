@@ -297,7 +297,7 @@ DWORD senderThread(PVOID pParam)
 	msg[cnt] = 0;
 	if (strcmp(msg, "HLO\n") != 0) {
 		Sleep(100);
-		send(cnc, "D", 1, 0);
+		//send(cnc, "D", 1, 0);
 		return 1;
 	}
 

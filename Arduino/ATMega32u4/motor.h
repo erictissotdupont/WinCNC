@@ -3,8 +3,8 @@ public :
   Motor( int sp, int dp, int ep, int s, unsigned int lf, unsigned long sbi );
   void Reset( );
   void SetDirection( int d );
-  long InitMove( long s, long t );
-  long Move( );
+  unsigned long InitMove( long s, long t );
+  unsigned long Move( );
   long GetPos( );
   long FakeMove( long s );
   bool IsAtTheEnd( );  
@@ -21,9 +21,13 @@ private :
   
   long curDir;                // Current movement direction (+/- 1)
   unsigned long moveLength;   // Movement total length in steps
+  unsigned long halfStepCount;// moveLength * 2
   unsigned long moveStep;     // Steps performed in movement
   unsigned long moveDuration; // Expected total duration of the movement
   long halfStepDuration;      // Duration of a half step
+  long halfStepModulo;        // The remainder of the division
+  unsigned long nextHalfStepTime; // Time when the next half step should be made
+  long halfStepAcc;           // The fractional error accumulator
 
   // Rapid positionning (G0)
   //

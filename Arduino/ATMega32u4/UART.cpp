@@ -21,6 +21,7 @@ tMove g_fifo[MAX_FIFO_MOVE+1];
 int g_fifoIn;
 int g_fifoOut;
 int g_CRCerror = 0;
+unsigned long g_maxUARTtaskTime = 0;
 
 static const uint8_t crc8_table[256] = {
     0x00, 0xF7, 0xB9, 0x4E, 0x25, 0xD2, 0x9C, 0x6B,
@@ -72,8 +73,6 @@ void UART_Init( )
   g_fifoIn = 0;
   g_fifoOut = 0;
 
-  Serial1.print ("RST" );
-
   pinMode( 13, OUTPUT );
   digitalWrite( 13, 0 );
 }
@@ -86,17 +85,90 @@ inline unsigned int fifoCount( )
     return g_fifoIn - g_fifoOut + MAX_FIFO_MOVE + 1;
 }
 
-inline void UART_SendStatus( )
+#if 1
+
+void UART_Print( const char* str )
 {
-  Serial1.write( 'X' ); 
-  Serial1.print( X.GetPos( ));
-  Serial1.write( 'Y' );
-  Serial1.print( Y.GetPos( ));
-  Serial1.write( 'Z' );
-  Serial1.print( ZL.GetPos( ));
-  Serial1.write( 'S' );
-  Serial1.print( g_error );
-  Serial1.write( '\n' );
+  Serial1.write_noWait( (uint8_t*)str, strlen( str ));
+}
+
+#define DEC_TO_STR( pt, n, dec ) { *pt = '0' + (n / dec); pt++; n = n % dec; flag = 1; }
+
+void UART_Print( const char prefix, const long val )
+{
+  long n = val;
+  char str[16];
+  char *pt = str;
+  bool flag = 0;
+  *pt++ = prefix;
+  if( n < 0 ) { *pt++ = '-'; n = -n; }
+  if( flag || n > (100000000L - 1 )) DEC_TO_STR( pt, n, 100000000L );
+  if( flag || n > (10000000L - 1 )) DEC_TO_STR( pt, n, 10000000L );
+  if( flag || n > (1000000L - 1 )) DEC_TO_STR( pt, n, 1000000L );
+  if( flag || n > (100000L - 1 )) DEC_TO_STR( pt, n, 100000L );
+  if( flag || n > (10000L - 1 )) DEC_TO_STR( pt, n, 10000L );
+  if( flag || n > (1000L - 1 )) DEC_TO_STR( pt, n, 1000L );
+  if( flag || n > (100L - 1 )) DEC_TO_STR( pt, n, 100L );
+  if( flag || n > (10L - 1 )) DEC_TO_STR( pt, n, 10L );
+  *pt++ = '0' + n;
+  Serial1.write_noWait( (uint8_t*)str, pt - str );
+}
+
+void UART_Write( char c )
+{
+  Serial1.write_noWait( (uint8_t*)&c, 1 );
+}
+
+#else
+
+#define DEC_TO_STR( n, dec ) { Serial1.write( '0' + (n / dec)); n = n % dec; flag = 1; }
+
+void UART_Print( const char prefix, const long val )
+{
+  long n = val;
+  bool flag = 0;
+  Serial1.write( prefix );
+  if( n < 0 ) { Serial1.write('-'); n = -n; }
+  if( flag || n > (100000000L - 1 )) DEC_TO_STR( n, 100000000L );
+  if( flag || n > (10000000L - 1 )) DEC_TO_STR( n, 10000000L );
+  if( flag || n > (1000000L - 1 )) DEC_TO_STR( n, 1000000L );
+  if( flag || n > (100000L - 1 )) DEC_TO_STR( n, 100000L );
+  if( flag || n > (10000L - 1 )) DEC_TO_STR( n, 10000L );
+  if( flag || n > (1000L - 1 )) DEC_TO_STR( n, 1000L );
+  if( flag || n > (100L - 1 )) DEC_TO_STR( n, 100L );
+  if( flag || n > (10L - 1 )) DEC_TO_STR( n, 10L );
+  Serial1.write( '0' + n);
+}
+
+void UART_Print( const char* str )
+{
+  Serial1.print( str );
+}
+
+#define UART_Write( c ) Serial1.write( c )
+
+#endif
+
+void UART_SendStatus( int command )
+{
+  static int state = 0;
+  switch( state )
+  {
+    case 0 : 
+      if( command == 1 ) state = 1; 
+      if( command == 2 ) state = 5;
+      break;
+    case 1 : UART_Print( 'X', X.GetPos( ));state=2; break;
+    case 2 : UART_Print( 'Y', Y.GetPos( ));state=3; break;
+    case 3 : UART_Print( 'Z', ZL.GetPos( ));state=4; break;
+    case 4 : UART_Print( 'S', g_error );UART_Write( '\n' );state = 0;break;
+    case 5 : UART_Print( 'a', g_debug[0] );state=6;break;
+    case 6 : UART_Print( 'b', g_debug[1] );state=7;break;
+    case 7 : UART_Print( 'c', g_debug[2] );state=8;break;
+    case 8 : UART_Print( 'd', g_debug[3] );UART_Write( '\n' );state=0;break;
+    default :
+      state = 0;
+  }
 }
 
 bool UART_Task( )
@@ -108,9 +180,17 @@ bool UART_Task( )
   static uint8_t calculatedCRC;
   static bool bInCRC = false;
   char c;
+  bool ret = false;
 
-  // Buffer not empty
-  while( Serial1.available( ))
+#ifdef DISPLAY_TASK_TIME
+  unsigned long timeItTook = micros( );
+#endif 
+
+  // Flush out status
+  UART_SendStatus(0);
+
+  // Write any pending characters to the UART and return 'true' if RX buffer not empty
+  if( Serial1.write_noWait( NULL, 0 ))
   {
     c = Serial1.read( );
         
@@ -145,7 +225,7 @@ bool UART_Task( )
         if( g_error )
         {
           // Report the Error state to the host. Ignore the command.     
-          Serial1.write( 'E' );
+          UART_Write( 'E' );
         }
         else
         {
@@ -153,7 +233,7 @@ bool UART_Task( )
           if( bInCRC && ( calculatedCRC != receivedCRC ))
           {            
             // Report the CRC mismatch. Ignore the command.
-            Serial1.write( 'C' );
+            UART_Write( 'C' );
             // Count the error so that it can be displayed
             g_CRCerror++;
           }
@@ -166,7 +246,7 @@ bool UART_Task( )
             // Flow control : If the FIFO contains less than the MAX #
             // of commands send the ACK to the host to indicate that the
             // ATMEGA is ready to receive the next command. 
-            if( fifoCount( ) < MAX_FIFO_MOVE ) Serial1.write( 'O' );
+            if( fifoCount( ) < MAX_FIFO_MOVE ) UART_Write( 'O' );
           }
         }
         
@@ -203,14 +283,14 @@ bool UART_Task( )
       else if( c == 'O' )
       {
         Motor_Init( );
-        UART_SendStatus( );
+        UART_SendStatus(1);
       }
       // CLEAR
       // -----
       else if( c == 'C' )
       {
         g_error = 0;
-        UART_SendStatus( );
+        UART_SendStatus(1);
       }    
       // RESET
       // -----
@@ -222,19 +302,13 @@ bool UART_Task( )
       // --------
       else if( c == 'P' )
       {
-        UART_SendStatus( );
+        UART_SendStatus(1);
       }
       // DEBUG
       // -----
       else if( c == 'D' )
       {
-        int i;      
-        for( i=0; i<MAX_DEBUG; i++ )
-        {      
-          Serial1.write( 'a' + i );
-          Serial1.print( g_debug[i] );
-        }     
-        Serial1.write( '\n' );
+        UART_SendStatus(2);
       }
       else if ( c == '\n' )
       {
@@ -262,7 +336,7 @@ bool UART_Task( )
     {
       if( c == 'T' )
       {
-        Serial1.print( "HLO\n" );
+        UART_Print( "HLO\n" );
         g_fifoIn = 0;
         g_fifoOut = 0;
         g_fifo[g_fifoIn].x = 0;
@@ -287,10 +361,19 @@ bool UART_Task( )
       }
     }
     // The UART buffer was not empty
-    return true;
+    ret = true;
   }
+
+#ifdef DISPLAY_TASK_TIME
+  timeItTook = micros( ) - timeItTook;
+  if( g_maxUARTtaskTime < timeItTook )
+  {
+    g_maxUARTtaskTime = timeItTook;
+  }
+#endif
+  
   // The UART buffer was empty
-  return false;
+  return ret;
 }
 
 void Motor_Task( )
@@ -315,7 +398,7 @@ void Motor_Task( )
 
     // If the FIFO was full, send the ACK to the AR9331 so that
     // the next command is sent.
-    if( fifoCount( ) == MAX_FIFO_MOVE ) Serial1.write( 'O' );
+    if( fifoCount( ) == MAX_FIFO_MOVE ) UART_Write( 'O' );
     
     // Move the FIFO out index to the next slot
     if( ++g_fifoOut > MAX_FIFO_MOVE ) g_fifoOut = 0;
