@@ -12,7 +12,7 @@ extern unsigned int g_error;
 // To know the current position
 extern Motor X;
 extern Motor Y;
-extern Motor ZL;
+extern DualMotor Z;
 
 // FIFO to store the command received. This buffer ensure that when
 // the AR9331 doesn't fill the buffer for a few milliseconds the
@@ -160,7 +160,7 @@ void UART_SendStatus( int command )
       break;
     case 1 : UART_Print( 'X', X.GetPos( ));state=2; break;
     case 2 : UART_Print( 'Y', Y.GetPos( ));state=3; break;
-    case 3 : UART_Print( 'Z', ZL.GetPos( ));state=4; break;
+    case 3 : UART_Print( 'Z', Z.GetPos( ));state=4; break;
     case 4 : UART_Print( 'S', g_error );UART_Write( '\n' );state = 0;break;
     case 5 : UART_Print( 'a', g_debug[0] );state=6;break;
     case 6 : UART_Print( 'b', g_debug[1] );state=7;break;

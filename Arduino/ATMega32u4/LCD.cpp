@@ -27,8 +27,7 @@ void LCD_SetCursor( uint8_t col, uint8_t row);
 // To get the current position 
 extern Motor X;
 extern Motor Y;
-extern Motor ZL;
-extern Motor ZR;
+extern DualMotor Z;
 
 extern unsigned long g_timeSleepingUs;
 extern unsigned long g_maxUARTtaskTime;
@@ -304,7 +303,7 @@ typedef enum {
   LCD_StateMax
 } LCD_State;
 
-void LCD_UpdateTask( unsigned long timeWeHave )
+void LCD_UpdateTask( )
 {
   static LCD_State state = LCD_StateInit;
   static char line1[LCD_LINE_LENGTH+1];
@@ -312,7 +311,6 @@ void LCD_UpdateTask( unsigned long timeWeHave )
   static char line3[LCD_LINE_LENGTH+1];
   static char line4[LCD_LINE_LENGTH+1];  
   static char next[LCD_LINE_LENGTH+1];
-
   static float pos;
   static char* prev;
   static int col;
@@ -321,243 +319,239 @@ void LCD_UpdateTask( unsigned long timeWeHave )
   static long l;
   static int CPUload;
   static unsigned long lastRefreshTime = 0;
-  unsigned long timeItTook = micros( );
   static unsigned int maxTimeForState[LCD_StateMax];
+  unsigned long timeItTook = micros( );
 
-#ifdef DISPLAY_TASK_TIME
-  if( timeWeHave > maxTimeForState[ state ] || state == 0 )
-#endif
+  LCD_State curState = state;
+  switch( state )
   {
-    LCD_State curState = state;
-    switch( state )
+  case LCD_StateInit :
+    memset( maxTimeForState, 0, sizeof( maxTimeForState ));    
+    memset( line1, 0, sizeof( line1 ));
+    memset( line2, 0, sizeof( line2 ));
+    memset( line3, 0, sizeof( line3 ));
+    memset( line4, 0, sizeof( line4 )); 
+    memset( next, 0, sizeof( next ));
+    state = LCD_StatePrintX_Part1;
+    break;
+  
+  // --------------------------- X / Y ------------------------------
+  // X-99.999e Y-99.999e
+  // 01234567890123456789
+  //      
+  case LCD_StatePrintX_Part1 :
+    next[0] = 'X';
+    next[9] = ' ';
+    pos = X_AXIS_RES * 1000.0f * (float) X.GetPos( );
+    state = LCD_StatePrintX_Part2;
+    break;
+  case LCD_StatePrintX_Part2 :
+    FloatToStrPart1( next+1, pos );
+    state = LCD_StatePrintX_Part3;
+    break;
+  case LCD_StatePrintX_Part3 :
+    FloatToStrPart2( );    
+    state = LCD_StatePrintX_Part4;
+    break;
+  case LCD_StatePrintX_Part4 :
+    FloatToStrPart3( );
+    next[8] = X.IsAtTheEnd( ) ? 'e' : ' ';
+    state = LCD_StatePrintY_Part1;
+    break;      
+  case LCD_StatePrintY_Part1 :
+    next[10] = 'Y';
+    next[19] = ' ';
+    pos = Y_AXIS_RES * 1000.0f * (float)Y.GetPos( );
+    state = LCD_StatePrintY_Part2;
+    break;      
+  case LCD_StatePrintY_Part2 :
+    FloatToStrPart1( next+11, pos );
+    state = LCD_StatePrintY_Part3;
+    break;
+  case LCD_StatePrintY_Part3 :
+    FloatToStrPart2( );
+    state = LCD_StatePrintY_Part4;
+    break;      
+  case LCD_StatePrintY_Part4 :
+    FloatToStrPart3( );
+    next[18] = Y.IsAtTheEnd( ) ? 'e' : ' ';
+    col = 0;
+    row = 0;
+    prev = line1;
+    state = LCD_StateStartUpdate;
+    break;
+  // ----------------------------- Z --------------------------------  
+  case LCD_StatePrintZ_Part1 :
+    pos = Z_AXIS_RES * 1000.0f * (float)Z.GetPos( );
+    next[0] = 'Z';
+    next[9] = ' ';
+    state = LCD_StatePrintZ_Part2;
+    break;
+  case LCD_StatePrintZ_Part2 :
+    FloatToStrPart1( next+1, pos );
+    state = LCD_StatePrintZ_Part3;
+    break;     
+  case LCD_StatePrintZ_Part3 :
+    FloatToStrPart2( );
+    state = LCD_StatePrintZ_Part4;
+    break;
+  case LCD_StatePrintZ_Part4 :
+    FloatToStrPart3( );
+    next[8] = Z.IsAtTheEnd( ) ? 'e' : ' ';
+    state = LCD_StatePrintDebugStr;
+    break;      
+  case LCD_StatePrintDebugStr :
+    memcpy( next+10, StatusString, sizeof(StatusString));
+    col = 0;
+    row = 1;
+    prev = line2;
+    state = LCD_StateStartUpdate;
+    break;
+
+  case LCD_StateWriteTaskDuration :
     {
-    case LCD_StateInit :
-      memset( maxTimeForState, 0, sizeof( maxTimeForState ));    
-      memset( line1, 0, sizeof( line1 ));
-      memset( line2, 0, sizeof( line2 ));
-      memset( line3, 0, sizeof( line3 ));
-      memset( line4, 0, sizeof( line4 )); 
-      memset( next, 0, sizeof( next ));
-      state = LCD_StatePrintX_Part1;
-      break;
+      int slowState = 0;
+      int slowTime = 0;
+      int fastState = 0;
+      int fastTime = 1000;
+      
+      for( i=1; i<LCD_StateMax; i++ )
+      {
+        // Find the slowest state (ignore this state)
+        if( maxTimeForState[ i ] > slowTime && i != LCD_StateWriteTaskDuration )
+        {
+          slowState = i;
+          slowTime = maxTimeForState[ i ];
+        }
+        // Find the fastest
+        if( maxTimeForState[ i ] < slowTime )
+        {
+          fastState = i;
+          fastTime = maxTimeForState[ i ];
+        }
+      }
+      memcpy( next, line3, LCD_LINE_LENGTH );
+      i = sprintf( next, "%d:%d %d:%d U:%d", slowState, slowTime, fastState, fastTime, g_maxUARTtaskTime );
+      // Fill the rest of the line with sp
+      if( i>0 && i < LCD_LINE_LENGTH ) memset( &next[i], ' ', LCD_LINE_LENGTH - i );
+      col = 0;
+      row = 2;
+      prev = line3;
+      state = LCD_StateStartUpdate;
+    }      
+    break;
     
-    // --------------------------- X / Y ------------------------------
-    // X-99.999e Y-99.999e
-    // 01234567890123456789
-    //      
-    case LCD_StatePrintX_Part1 :
-      next[0] = 'X';
-      next[9] = ' ';
-      pos = X_AXIS_RES * 1000.0f * (float) X.GetPos( );
-      state = LCD_StatePrintX_Part2;
-      break;
-    case LCD_StatePrintX_Part2 :
-      FloatToStrPart1( next+1, pos );
-      state = LCD_StatePrintX_Part3;
-      break;
-    case LCD_StatePrintX_Part3 :
-      FloatToStrPart2( );    
-      state = LCD_StatePrintX_Part4;
-      break;
-    case LCD_StatePrintX_Part4 :
-      FloatToStrPart3( );
-      next[8] = X.IsAtTheEnd( ) ? 'e' : ' ';
-      state = LCD_StatePrintY_Part1;
-      break;      
-    case LCD_StatePrintY_Part1 :
-      next[10] = 'Y';
-      next[19] = ' ';
-      pos = Y_AXIS_RES * 1000.0f * (float)Y.GetPos( );
-      state = LCD_StatePrintY_Part2;
-      break;      
-    case LCD_StatePrintY_Part2 :
-      FloatToStrPart1( next+11, pos );
-      state = LCD_StatePrintY_Part3;
-      break;
-    case LCD_StatePrintY_Part3 :
-      FloatToStrPart2( );
-      state = LCD_StatePrintY_Part4;
-      break;      
-    case LCD_StatePrintY_Part4 :
-      FloatToStrPart3( );
-      next[18] = Y.IsAtTheEnd( ) ? 'e' : ' ';
-      col = 0;
-      row = 0;
-      prev = line1;
-      state = LCD_StateStartUpdate;
-      break;
-    // ----------------------------- Z --------------------------------  
-    case LCD_StatePrintZ_Part1 :
-      pos = Z_AXIS_RES * 1000.0f * (float)ZL.GetPos( );
-      next[0] = 'Z';
-      next[9] = ' ';
-      state = LCD_StatePrintZ_Part2;
-      break;
-    case LCD_StatePrintZ_Part2 :
-      FloatToStrPart1( next+1, pos );
-      state = LCD_StatePrintZ_Part3;
-      break;     
-    case LCD_StatePrintZ_Part3 :
-      FloatToStrPart2( );
-      state = LCD_StatePrintZ_Part4;
-      break;
-    case LCD_StatePrintZ_Part4 :
-      FloatToStrPart3( );
-      next[8] = (ZL.IsAtTheEnd( ) || ZR.IsAtTheEnd( )) ? 'e' : ' ';
-      state = LCD_StatePrintDebugStr;
-      break;      
-    case LCD_StatePrintDebugStr :
-      memcpy( next+10, StatusString, sizeof(StatusString));
-      col = 0;
-      row = 1;
-      prev = line2;
-      state = LCD_StateStartUpdate;
-      break;
-
-    case LCD_StateWriteTaskDuration :
-      {
-        int slowState = 0;
-        int slowTime = 0;
-        int fastState = 0;
-        int fastTime = 1000;
-        
-        for( i=1; i<LCD_StateMax; i++ )
-        {
-          // Find the slowest state (ignore this state)
-          if( maxTimeForState[ i ] > slowTime && i != LCD_StateWriteTaskDuration )
-          {
-            slowState = i;
-            slowTime = maxTimeForState[ i ];
-          }
-          // Find the fastest
-          if( maxTimeForState[ i ] < slowTime )
-          {
-            fastState = i;
-            fastTime = maxTimeForState[ i ];
-          }
-        }
-        memcpy( next, line3, LCD_LINE_LENGTH );
-        i = sprintf( next, "%d:%d %d:%d U:%d", slowState, slowTime, fastState, fastTime, g_maxUARTtaskTime );
-        // Fill the rest of the line with sp
-        if( i>0 && i < LCD_LINE_LENGTH ) memset( &next[i], ' ', LCD_LINE_LENGTH - i );
-        col = 0;
-        row = 2;
-        prev = line3;
-        state = LCD_StateStartUpdate;
-      }      
-      break;
-      
-    // --------------------------- STATUS ----------------------------        
-    case LCD_StatePrintStatusPart1 :
-      if( timeItTook > lastRefreshTime + 1000000 )
-      { 
-        CPUload = 100 - ( 100 * g_timeSleepingUs ) / ( timeItTook - lastRefreshTime );
-        lastRefreshTime = timeItTook;
-        g_timeSleepingUs = 0;         
-      }
-      state = LCD_StatePrintStatusPart2;
-      break;
-    case LCD_StatePrintStatusPart2 :
-      fixedPoint = g_missedStepCount;
-      memset( next, 0, LCD_LINE_LENGTH - 8 );
-      charPointer = next + (LCD_LINE_LENGTH - 8);
-      DEC_TO_STR( charPointer, fixedPoint, 1000 );
-      state = LCD_StatePrintStatusPart3;
-      break;
-    case LCD_StatePrintStatusPart3 :
-      DEC_TO_STR( charPointer, fixedPoint, 100 );
-      DEC_TO_STR( charPointer, fixedPoint, 10 );
-      *charPointer++ = '0' + fixedPoint;
-      state = LCD_StatePrintStatusPart4;
-      break;
-    case LCD_StatePrintStatusPart4:
-      *charPointer++ = ' ';       
-      if( CPUload > 9 )
-      {
-        DEC_TO_STR( charPointer, CPUload, 10 );
-      }
-      else *charPointer++ = ' ';          
-      *charPointer++ = '0' + CPUload;
-      *charPointer = '%';
-      col = 0;
-      row = 3;
-      prev = line4;
-      state = LCD_StateStartUpdate;
-      break;
-
-    // --------------------------- UPDATE ----------------------------  
-    case LCD_StateStartUpdate :
-      while( prev[col] == next[col] )
-      {
-        col++;
-        if( col >= LCD_LINE_LENGTH ) 
-        {
-          state = LCD_StateTransmitI2Cdata;
-          break;
-        }
-      }
-      if( state == LCD_StateStartUpdate )
-      {
-        state = LCD_StateSetCursor;
-      }
-      break;
-
-    case LCD_StateSetCursor :
-      LCD_SetCursor( col, row );
-      state = LCD_StateWrite;
-      break;
-
-    case LCD_StateWrite :
-      if( prev[col] != next[col] )
-      {
-        LCD_Write( next[col] );
-        prev[col] = next[col];
-        col++;
-        if( col >= LCD_LINE_LENGTH )
-        {
-          state = LCD_StateTransmitI2Cdata;
-          break;
-        }
-      }
-      else 
-      {
-        state = LCD_StateStartUpdate;
-      }
-      break;
-      
-    case LCD_StateTransmitI2Cdata :
-      if( Wire.transmitNoWait( LCD_I2C_ADDRESS, NULL, 0 ) == 0 )
-      {
-        switch( row )
-        {
-        case 0 :
-          state = LCD_StatePrintZ_Part1;
-          break;
-        case 1 :
-#if defined(DISPLAY_TASK_TIME)
-          state = LCD_StateWriteTaskDuration;
-#else
-          state = LCD_StatePrintStatusPart1;
-#endif
-          break;
-        case 2 :
-          state = LCD_StatePrintStatusPart1;
-          break;
-        default :
-          state = LCD_StatePrintX_Part1;
-          break;
-        }
-      }
-      break;
+  // --------------------------- STATUS ----------------------------        
+  case LCD_StatePrintStatusPart1 :
+    if( timeItTook > lastRefreshTime + 1000000 )
+    { 
+      CPUload = 100 - ( 100 * g_timeSleepingUs ) / ( timeItTook - lastRefreshTime );
+      lastRefreshTime = timeItTook;
+      g_timeSleepingUs = 0;         
     }
-#ifdef DISPLAY_TASK_TIME      
-    timeItTook = micros() - timeItTook;
-    if( timeItTook > maxTimeForState[ curState ] ) 
+    state = LCD_StatePrintStatusPart2;
+    break;
+  case LCD_StatePrintStatusPart2 :
+    fixedPoint = g_missedStepCount;
+    memset( next, 0, LCD_LINE_LENGTH - 8 );
+    charPointer = next + (LCD_LINE_LENGTH - 8);
+    DEC_TO_STR( charPointer, fixedPoint, 1000 );
+    state = LCD_StatePrintStatusPart3;
+    break;
+  case LCD_StatePrintStatusPart3 :
+    DEC_TO_STR( charPointer, fixedPoint, 100 );
+    DEC_TO_STR( charPointer, fixedPoint, 10 );
+    *charPointer++ = '0' + fixedPoint;
+    state = LCD_StatePrintStatusPart4;
+    break;
+  case LCD_StatePrintStatusPart4:
+    *charPointer++ = ' ';
+    if( CPUload > 99 ) CPUload = 99;    
+    if( CPUload > 9 )
     {
-      maxTimeForState[ curState ] = timeItTook;
+      DEC_TO_STR( charPointer, CPUload, 10 );
     }
+    else *charPointer++ = ' ';          
+    *charPointer++ = '0' + CPUload;
+    *charPointer = '%';
+    col = 0;
+    row = 3;
+    prev = line4;
+    state = LCD_StateStartUpdate;
+    break;
+
+  // --------------------------- UPDATE ----------------------------  
+  case LCD_StateStartUpdate :
+    while( prev[col] == next[col] )
+    {
+      col++;
+      if( col >= LCD_LINE_LENGTH ) 
+      {
+        state = LCD_StateTransmitI2Cdata;
+        break;
+      }
+    }
+    if( state == LCD_StateStartUpdate )
+    {
+      state = LCD_StateSetCursor;
+    }
+    break;
+
+  case LCD_StateSetCursor :
+    LCD_SetCursor( col, row );
+    state = LCD_StateWrite;
+    break;
+
+  case LCD_StateWrite :
+    if( prev[col] != next[col] )
+    {
+      LCD_Write( next[col] );
+      prev[col] = next[col];
+      col++;
+      if( col >= LCD_LINE_LENGTH )
+      {
+        state = LCD_StateTransmitI2Cdata;
+        break;
+      }
+    }
+    else 
+    {
+      state = LCD_StateStartUpdate;
+    }
+    break;
+    
+  case LCD_StateTransmitI2Cdata :
+    if( Wire.transmitNoWait( LCD_I2C_ADDRESS, NULL, 0 ) == 0 )
+    {
+      switch( row )
+      {
+      case 0 :
+        state = LCD_StatePrintZ_Part1;
+        break;
+      case 1 :
+#if defined(DISPLAY_TASK_TIME)
+        state = LCD_StateWriteTaskDuration;
+#else
+        state = LCD_StatePrintStatusPart1;
 #endif
+        break;
+      case 2 :
+        state = LCD_StatePrintStatusPart1;
+        break;
+      default :
+        state = LCD_StatePrintX_Part1;
+        break;
+      }
+    }
+    break;
   }
+#ifdef DISPLAY_TASK_TIME      
+  timeItTook = micros() - timeItTook;
+  if( timeItTook > maxTimeForState[ curState ] ) 
+  {
+    maxTimeForState[ curState ] = timeItTook;
+  }
+#endif
 }
 
 void LCD_SetStatus( const char *str, int offset )

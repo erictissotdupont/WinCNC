@@ -9,42 +9,65 @@ int g_debug[MAX_DEBUG];
 
 #define RAMP_SHIFT    19 // 19=524ms
 #define RAMP_TIME     (1L << RAMP_SHIFT)
-#define MIN_SPEED     30L
+#define MIN_SPEED     15L
 #define MAX_SPEED     250L
 #define NO_MOVE_TIME  0xFFFFFFFF
-// Speed is in inch by minute, hence the 30M micro seconds
-#define SPEED_TO_HALF_STEP( s ) ( 30000000L / ( stepByInch * s ))
+// Speed is in inch by minute, hence the 60M micro seconds
+#define SPEED_TO_STEP( sbi, s ) ( 60000000L / ( sbi * s ))
 
 // Calculate the ramp for G0 accel / decel phases 
-#define HALF_STEP_FROM_RAMP( t ) ( minSpeedHalfStep - ((( minSpeedHalfStep - maxSpeedHalfStep ) * t ) >> RAMP_SHIFT))
+#define STEP_FROM_RAMP( Min, Max, t ) ( Min - ((( Min - Max ) * t ) >> RAMP_SHIFT))
 
 #define MAX_BACKSTEPS  2000
 
 // Instantiation and configuration of the stepper motor controlers.
 //-----------------------------------------------------------------
-//      Step,Dir,End,Swap,    LimitFlag,      StepByInch
-Motor X ( 11, 10, -1,  0, ERROR_LIMIT_X, 1.0f/X_AXIS_RES );
-Motor Y ( 13, 12, -1,  1, ERROR_LIMIT_Y, 1.0f/Y_AXIS_RES );
-Motor ZL( A3, A2, -1,  1, ERROR_LIMIT_Z, 1.0f/Z_AXIS_RES );
-Motor ZR( A5, A4, -1,  1, ERROR_LIMIT_Z, 1.0f/Z_AXIS_RES );
+//           Step,Dir,End,Swap,    LimitFlag,      StepByInch
+Motor     X ( 11, 10, -1,  0, ERROR_LIMIT_X, 1.0f/X_AXIS_RES );
+Motor     Y ( 13, 12, -1,  1, ERROR_LIMIT_Y, 1.0f/Y_AXIS_RES );
+DualMotor Z ( A3, A2, -1,
+              A5, A4, -1,  1, ERROR_LIMIT_Z | REDUCED_RAPID_POSITIONING_SPEED,
+                                             1.0f/Z_AXIS_RES );
+
+//Motor ZL( A3, A2, -1,  1, ERROR_LIMIT_Z, 1.0f/Z_AXIS_RES );
+//Motor ZR( A5, A4, -1,  1, ERROR_LIMIT_Z, 1.0f/Z_AXIS_RES );
 
 unsigned long g_MoveStart;  // Time when the current move was started (uS)
 
 // For debug purpose, measures the time spent sleeping
 unsigned long g_timeSleepingUs = 0;
 unsigned long g_missedStepCount = 0;
-long g_maxErrorAllowed;
 
-Motor::Motor( int sp, int dp, int ep, int rd, unsigned int lf, unsigned long sbi )
+Motor::Motor( int sp, int dp, int ep, int rd, unsigned long flags, unsigned long sbi )
 {
   stepPin = sp;
   dirPin = dp;
   endPin = ep;
   reverseDir = rd;
-  limitFlag = lf;
+  limitFlag = flags & ERROR_FLAG_MASK;
   stepByInch = sbi;
-  minSpeedHalfStep = SPEED_TO_HALF_STEP( MIN_SPEED );
-  maxSpeedHalfStep = SPEED_TO_HALF_STEP( MAX_SPEED );
+  if(( flags & REDUCED_RAPID_POSITIONING_SPEED ) == 0 )
+  {
+    minSpeedStep = SPEED_TO_STEP( stepByInch, MIN_SPEED );
+    maxSpeedStep = SPEED_TO_STEP( stepByInch, MAX_SPEED );
+  }
+  else
+  {
+    minSpeedStep = SPEED_TO_STEP( stepByInch, MIN_SPEED / 2 );
+    maxSpeedStep = SPEED_TO_STEP( stepByInch, MAX_SPEED / 2 );
+  }
+
+  stepSetReg = digitalSetRegister( sp );
+  stepClrReg = digitalClrRegister( sp );
+  stepPinMask = digitalPinMask( sp );
+}
+
+DualMotor::DualMotor( int sp, int dp, int ep, int sp2, int dp2, int ep2, int s, unsigned long flags, unsigned long sbi )
+: Motor( sp, dp, ep, s, flags, sbi )
+{
+  stepPin2 = sp2;
+  dirPin2 = dp2;
+  endPin2 = ep2;
 }
 
 void Motor::Reset( )
@@ -54,16 +77,24 @@ void Motor::Reset( )
   moveLength = 0;
   moveStep = 0;
   moveDuration = 0;
-  toggle = 0;
   g_missedStepCount = 0;
 
   pinMode( stepPin, OUTPUT );
-  digitalWrite(stepPin, HIGH );
+  digitalWrite(stepPin, LOW );
   pinMode( dirPin, OUTPUT );
   digitalWrite(dirPin, LOW );
   if( endPin >= 0 ) {
     pinMode( endPin, INPUT );
   }
+}
+
+void DualMotor::Reset( )
+{
+  pinMode( stepPin2, OUTPUT );
+  digitalWrite(stepPin2, LOW );
+  pinMode( dirPin2, OUTPUT );
+  digitalWrite(dirPin2, LOW );
+  Motor::Reset( );
 }
 
 bool Motor::IsAtTheEnd( )
@@ -95,10 +126,27 @@ void Motor::SetDirection( int d )
   }
 }
 
+void DualMotor::SetDirection( int d )
+{
+  if( !reverseDir )
+  {
+    digitalWrite( dirPin2, d < 0 ? LOW : HIGH );
+  }
+  else
+  {
+    digitalWrite( dirPin2, d < 0 ? HIGH : LOW );
+  }
+  Motor::SetDirection( d );
+}
+
 unsigned long Motor::InitMove( long s, long t )
 {
   long ret = -1;
   int d = 1;
+
+  // The previous move might have left this pin HIGH
+  *stepClrReg = stepPinMask;
+  //digitalWrite( stepPin, LOW );
   
   // Backward direction
   if( s < 0 ) 
@@ -106,12 +154,13 @@ unsigned long Motor::InitMove( long s, long t )
     d = -1;
     s = -s; 
   }
+
+  // If we do not return "NO_MOVE_TIME" the move will
+  // occur no matter what.
   
-  moveStep = 0;
   moveLength = s;
-  halfStepCount = s * 2;
   moveDuration = t;
-  toggle = 0;
+  nextStepTime = 0;
   
   if( s > 0 )
   {
@@ -119,26 +168,27 @@ unsigned long Motor::InitMove( long s, long t )
     // Linear motion (G1)
     if( moveDuration )
     {
-      // Divide the step duration by half because the ::Move( )
-      // function is called for every half period
-      halfStepDuration = t / halfStepCount;
-      halfStepModulo = t % halfStepCount;
-      halfStepAcc = halfStepModulo;
+      // Calculate the step duration in uS with 32:32bit precision
+      stepDuration = t / moveLength;
+      stepModulo = t % moveLength;
+      stepAcc = 0;
     }
     // Rapid positionning (G0)
     else
     {
-      halfStepDuration = minSpeedHalfStep;
+      stepDuration = minSpeedStep;
       decelDist = moveLength;
       decelStart = 0;
     }
+    moveStep = 1;
   }
   else 
   {
+    moveStep = 0;
     return NO_MOVE_TIME;
   }
-  nextHalfStepTime = halfStepDuration;
-  return halfStepDuration;
+  currentStepTime = stepDuration;
+  return stepDuration;
 }
 
 inline unsigned long timeSinceMoveStarted( )
@@ -152,133 +202,252 @@ inline unsigned long timeSinceMoveStarted( )
     return( NO_MOVE_TIME - g_MoveStart + now );
 }
 
-unsigned long Motor::Move( )
+void Motor::PrepareNextStep( )
 {
-
-#if 0
-  // Test the end of rail sensor
-  while( digitalRead( endPin ) == HIGH )
-  {
-    long bs = MAX_BACKSTEPS;
-    // Check if this is not a glitch on the switch caused by
-    // vibrations
-    delay( 1 );
-    if( digitalRead( endPin ) == LOW ) break;
-    delay( 5 );
-    if( digitalRead( endPin ) == LOW ) break;
-    delay( 10 );
-    if( digitalRead( endPin ) == LOW ) break;
-
-    // Wait for 200ms
-    delay( 200 );
-    // Reverse the direction    
-    SetDirection( -curDir );
-    // And backout slowly
-    while( bs > 0 && digitalRead( endPin ) == HIGH )
+  // Have we prepared yet?
+  if( nextStepTime == 0 )
+  {        
+    // Move is complete.
+    if( moveStep >= moveLength )
     {
-      delay( 2 );
-      digitalWrite( stepPin, bs & 1 ? LOW : HIGH );
-      bs--;
+      curPos =  curPos + ( curDir * moveStep );
+      moveStep = 0;
+      nextStepTime = NO_MOVE_TIME;
     }
-    if( bs > 200 ) bs = 200;
-    while( bs > 0 )
+    // Movement with duration means linear motion (G1).
+    else if( moveDuration != 0 )
+    {      
+      stepAcc += stepModulo;
+      if( stepAcc >= moveLength )
+      {
+        stepAcc -= moveLength;
+        nextStepTime++;
+      }
+      nextStepTime = currentStepTime + stepDuration;
+      currentStepTime = nextStepTime;
+      moveStep++;
+    }
+    // Zero duration means rapid positioning motion (G0).
+    else
     {
-      delay( 2 );
-      digitalWrite( stepPin, bs & 1 ? LOW : HIGH );
-      bs--;
+      // Time since movement started
+      long t = timeSinceMoveStarted( );
+      
+      // Deceleration phase. Checking for deceleration first handles
+      // the case where the G0 movement is so short that there is not
+      // enough distance to reach full speed. As the acceleration phase
+      // increases the decelDistance, this deceleration will take over
+      // when the movement reaches mid point.
+      if( moveStep >= decelDist )
+      {
+        if( decelStart == 0 )
+        {
+          // Capture the time when the deceleration started
+          decelStart = t;
+        }
+        // Time spent decelerating 
+        t = t - decelStart;
+        if( t < decelTime )
+        {
+          // Expected time decelerating
+          t = decelTime - t;
+        }
+        else
+        {
+          t = 0;
+        }
+        stepDuration = STEP_FROM_RAMP( minSpeedStep, maxSpeedStep, t );
+      }
+      // Acceleration phase
+      else if( t <= RAMP_TIME )
+      {
+        stepDuration = STEP_FROM_RAMP( minSpeedStep, maxSpeedStep, t );
+        
+        // Save the distance and time when deceleration should end
+        // If the movement is so short that full speed can't be
+        // reached, the previous test will pass and deceleration
+        // will start before the movement has reached full speed.
+        decelDist = moveLength - moveStep;
+        decelTime = t;
+      }
+      // In the constant speed phase, just update the time for the
+      // next half step.
+      nextStepTime = currentStepTime + stepDuration;
+      currentStepTime = nextStepTime;
+      moveStep++;
     }
-    
-    // Turn OFF the tool
-    digitalWrite(TOOL_ON_REPLAY, LOW);
-    
-    g_error |= limitFlag;
-    // Reset the move distance to force the stopping
-    moveLength = 0;
-    digitalWrite( stepPin, LOW );
-    return -1;
+
+    // Make sure that the pulse lasts at least 5uS
+    delayMicroseconds( 1 );
+        
+    *stepClrReg = stepPinMask;
+    //digitalWrite( stepPin, LOW );
   }
+}
+
+void DualMotor::PrepareNextStep( )
+{
+  // Have we prepared yet?
+  if( nextStepTime == 0 )
+  {
+    digitalWrite( stepPin2, LOW );
+    Motor::PrepareNextStep( );
+  }
+}
+
+#ifdef MEASURE_MOVE
+long maxLateTime;
+long maxEarlyTime;
+long avgStepTime;
+long shortestStep;
+long avgStepCounter;
 #endif
 
-  // Toggle the step input of the controller
-  if( !toggle )
-  {
-    // First half. Set the step signal high
-    toggle = 1;
-    digitalWrite( stepPin, HIGH );
-  }
-  else
-  {
-    // Second half. Set the step signal low
-    toggle = 0;
-    digitalWrite( stepPin, LOW );
-    // Count the step and update the position
-    moveStep++;
-    curPos = curPos + curDir;
-  }
+inline void WaitTillItsTime( unsigned long t )
+{
+  long s;
+  int count = 0;
+  bool interruptsEnabled = false;
 
-  // Move is complete.
-  if( moveStep >= moveLength )
+  // First, disable interrupts so that the first time measurements can be
+  // accurate if it turns out that we're late or there is less than 10uS until
+  // the next time to move
+  noInterrupts( );
+  
+  do
   {
-    return NO_MOVE_TIME;
-  }
-  // Movement with duration means linear motion (G1).
-  else if( moveDuration != 0 )
-  {
-    nextHalfStepTime += halfStepDuration;
-    halfStepAcc += halfStepModulo;
-    if( halfStepAcc >= halfStepCount )
+    // How much time until the move?
+    s = t - timeSinceMoveStarted( );
+
+    // Are we late...?
+    if( s <= 0 )
     {
-      halfStepAcc -= halfStepCount;
-      nextHalfStepTime++;
+      break;
     }
-  }
-  // Zero duration means rapid positioning motion (G0).
-  else
-  {
-    // Time since movement started
-    long t = timeSinceMoveStarted( );
-    
-    // Deceleration phase
-    if( moveStep >= decelDist )
+    else if( s < 10 )
     {
-      if( decelStart == 0 )
+      // If we have less than 10uS, spin in a tight loop until
+      // it's time without interrupts enabled. Do not do this for much longer
+      // because UART bytes can come 20uS (500kbaud) appart. If we keep
+      // interrupts masked for longer we risk missing a byte from the RPi.
+      
+      // If we get here after spending time on the background tasks the
+      // interrupts will be enabled. Disabled them again so that the next
+      // time measurement is accurate.      
+      if( interruptsEnabled ) 
       {
-        // Capture the time when the deceleration started
-        decelStart = t;
+        interruptsEnabled = false;
+        noInterrupts( );
       }
-      // Time spent decelerating 
-      t = t - decelStart;
-      if( t < decelTime )
+      continue;
+    }
+    else if( s < 30 )
+    {
+      // If we have less than 30uS, just do the prepare next steps if we
+      // didn't get the chance to do it previously
+
+      // Re-enable interrupts first
+      if( !interruptsEnabled )
       {
-        // Expected time decelerating
-        t = decelTime - t;
+        interruptsEnabled = true;
+        interrupts( );
+      }
+
+      // More efficient check if this got done already or not
+      if( count == 0 )
+      { 
+        X.PrepareNextStep( );
+        Y.PrepareNextStep( );
+        Z.PrepareNextStep( );
+        count = 1;
+      }      
+      
+      delayMicroseconds( 1 );
+    }
+    else
+    {
+      // We have "plenty" of time. Perform background tasks such as processing
+      // the bytes received via the UART, refresh the LCD screen and prepare
+      // the next move times.
+      
+      if( !interruptsEnabled )
+      {
+        interruptsEnabled = true;
+        interrupts( );
+      }
+        
+      if( count == 0 )
+      {
+        // This is to calculate the CPU load. Only do this once.
+        // (time spent doing background task and sleeping vs actual movement)
+        g_timeSleepingUs += s;
+         
+        X.PrepareNextStep( );
+        Y.PrepareNextStep( );
+        Z.PrepareNextStep( );
       }
       else
-      {
-        t = 0;
+      {   
+        // Alternate between LCD and UART
+        if( count & 1 )
+        {
+          // Read from UART and decode (one char at a time)
+          // Except for the G10 (Reset) command, all the UART processing is done
+          // in less than 20uS
+          UART_Task( );
+        }
+        else
+        {
+          // Refresh the LCD screen (if enough time)
+          // Most LCD refresh commands take 30uS or less
+          LCD_UpdateTask( );       
+        }
       }
-      halfStepDuration = HALF_STEP_FROM_RAMP( t );
+      count++;
     }
-    // Acceleration phase
-    else if( t <= RAMP_TIME )
-    {
-      halfStepDuration = HALF_STEP_FROM_RAMP( t );
-      
-      // Save the distance and time when deceleration should end
-      // If the movement is so short that full speed can't be
-      // reached, the previous test will pass and deceleration
-      // will start before the movement has reached full speed.
-      decelDist = moveLength - moveStep;
-      decelTime = t; 
-    }
-    nextHalfStepTime += halfStepDuration;
-  }  
-  return nextHalfStepTime; 
+  } while( 1 );  
+}
+
+void Motor::Step( unsigned long& t )
+{
+#ifdef MEASURE_MOVE
+  long s = t - timeSinceMoveStarted( );
+#endif
+
+  //digitalWrite( stepPin, HIGH );
+  *stepSetReg = stepPinMask;
+
+  // re-enable interrupts as quickly as possible to avoid missing
+  // any data received by the UART
+  interrupts( );
+   
+  // In some rare occasions, the previous cycle didn't give enough
+  // time to prepare the next step time. In most cases this find
+  // that nextStepTime is not zero
+  if( nextStepTime == 0 )
+  {
+    PrepareNextStep( );
+  }
+  t = nextStepTime;
+  nextStepTime = 0;
+
+#ifdef MEASURE_MOVE
+  if( s < maxLateTime ) maxLateTime = s;
+  if( s > maxEarlyTime ) maxEarlyTime = s;
+  avgStepTime += s;
+  avgStepCounter++;
+#endif
+}
+
+void DualMotor::Step( unsigned long& t )
+{
+  digitalWrite( stepPin2, HIGH );
+  Motor::Step( t );
 }
 
 long Motor::GetPos( )
 {
-  return curPos;
+  return curPos + (curDir * moveStep);
 }
 
 long Motor::FakeMove( long s )
@@ -286,75 +455,10 @@ long Motor::FakeMove( long s )
   curPos += s;
 }
 
-inline void WaitTillItsTime( unsigned long timeToMove )
-{
-  long s;
-  static int count = 0;
-
-  // How much time until the move?
-  s = timeToMove - timeSinceMoveStarted( );
-
-  // Are we late?
-  if( s <= 0 )
-  {
-    // How badly (allowed error depends on how many directions are
-    // moving at the same time in this motion).
-    if( s < g_maxErrorAllowed ) g_missedStepCount++;
-    return;
-  }
-
-  // This is to calculate the CPU load
-  // (time spent doing background task and sleeping vs actual movement)
-  g_timeSleepingUs += s;
-  
-  // LCD and UART tasks are designed to never take longer than 25uS
-  // Verify this by running with "DISPLAY_TASK_TIME" enabled.
-  while( s > 30 )
-  {
-    // Alternate between LCD and UART
-    if( count++ & 1 )
-    {
-      // Refresh the LCD screen (if enough time)
-      // Most LCD refresh commands take 30uS or less
-      LCD_UpdateTask( s - 5 );
-    }
-    else
-    {
-      // Read from UART and decode (one char at a time)
-      // Except for the G10 (Reset) command, all the UART processing is done
-      // in less than 20uS
-      UART_Task( );
-    }
-    
-    // Check how much time left until the next movement
-    s = timeToMove - timeSinceMoveStarted( );
-  }
-
-  // Do we still need to wait for a (short) while?
-  if( s > 0 )
-  {
-    delayMicroseconds( s );
-  }
-  else
-  {
-    // Shouldnt be late here...
-    if( s < 0 ) g_missedStepCount++;
-  }
-}
-
-// Measures the Min/Max/Average of the Move( ) function
-//#define MEASURE_MOVE
-
 // Move the tool position by the specified # of steps for x,y,z directions.
 // Duration of the motion determines the speed. d is in microseconds
 void Motor_Move( long x, long y, long z, long d )
 {
-#ifdef MEASURE_MOVE
-  long maxMoveTime = 0;
-  long minMoveTime = 10000;
-  long avgMoveTime = 0;
-  long moveCount = 0;
-#endif
   unsigned long prev;
   unsigned long tX,tY,tZ;
   
@@ -366,6 +470,13 @@ void Motor_Move( long x, long y, long z, long d )
 
   // Capture when the motion started (in uS)
   g_MoveStart = micros();
+
+#ifdef MEASURE_MOVE
+  maxLateTime = 0;
+  maxEarlyTime = 0;
+  avgStepTime = 0;
+  avgStepCounter = 0;
+#endif
   
   // No movement means dwell (GCode "P")
   if( x==0 && y==0 && z==0 )
@@ -375,21 +486,11 @@ void Motor_Move( long x, long y, long z, long d )
     return;
   }
 
-  // This is to verify that pulses to the motors are made with
-  // a reasonnable precision. The error allowed increases when
-  // the number of axis moving at the same time increases.
-  g_maxErrorAllowed = -3;
-  if( x ) g_maxErrorAllowed -= 5;
-  if( y ) g_maxErrorAllowed -= 5;
-  // Z is special because it moves 2 motors at the same time
-  if( z ) g_maxErrorAllowed -= 10;
-
   // This calculates the interval between steps for each axis and returns the time
   // to wait until the first move needs to occur (0 if no move necessary).
   tX = X.InitMove( x, d );
   tY = Y.InitMove( y, d );
-  tZ = ZL.InitMove( z, d );
-       ZR.InitMove( z, d );
+  tZ = Z.InitMove( z, d );
 
   do
   {
@@ -398,58 +499,33 @@ void Motor_Move( long x, long y, long z, long d )
     {
       // X is next move
       WaitTillItsTime( tX );
-#ifdef MEASURE_MOVE
-      unsigned long t = micros( );
-#endif
-      noInterrupts( );
-      prev = tX + 3;
-      tX = X.Move( );
-      if( tY < prev ) tY = Y.Move( );
-      if( tZ < prev ) { tZ = ZL.Move( ); ZR.Move( ); }
-      interrupts( );
-#ifdef MEASURE_MOVE
-      t = micros( ) - t;
-      if( t > maxMoveTime ) maxMoveTime = t;
-      if( t < minMoveTime ) minMoveTime = t;
-      avgMoveTime += t;
-      moveCount++;
-#endif
+      X.Step( tX );
     }
     else if( tY < tZ )
     {
       // Y is next move
       WaitTillItsTime( tY );
-      noInterrupts( );
-      prev = tY + 3;
-      tY = Y.Move( );
-      if( tX < prev ) tX = X.Move( );
-      if( tZ < prev ) { tZ = ZL.Move( ); ZR.Move( ); }
-      interrupts( );
+      Y.Step( tY );
     }
     else if( tZ != NO_MOVE_TIME )
     {
       // Z is next move
       WaitTillItsTime( tZ );
-      noInterrupts( );
-      prev = tZ + 5;
-      tZ = ZL.Move( );
-      ZR.Move( );
-      if( tX < prev ) tX = X.Move( );
-      if( tY < prev ) tY = Y.Move( );
-      interrupts( ); 
+      Z.Step( tZ );
     }
     else
     {
-      // No movement, leave
+      // No more steps, move is done.
       break;
     }
   } while( 1 );
   
 #ifdef MEASURE_MOVE
   char str[10];
-  sprintf( str, "%d %d %d", minMoveTime, maxMoveTime, avgMoveTime / moveCount );
+  sprintf( str, "%d %d %d ", maxLateTime, maxEarlyTime, avgStepTime / avgStepCounter );
   LCD_SetStatus( str, 0 );
 #endif
+
 }
 
 void Motor_Init( )
@@ -462,6 +538,5 @@ void Motor_Init( )
   
   X.Reset( );
   Y.Reset( );
-  ZL.Reset( );
-  ZR.Reset( );
+  Z.Reset( );
 }

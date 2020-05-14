@@ -24,7 +24,7 @@ void loop( )
   Motor_Task( );
 
   // Refresh the LCD outside of the move loop
-  LCD_UpdateTask( 1000 );
+  LCD_UpdateTask( );
   
   // Scan the keyboard 
   LCD_ButtonTask( );

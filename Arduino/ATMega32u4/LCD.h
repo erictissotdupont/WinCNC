@@ -87,7 +87,7 @@ void LCD_write4bits(uint8_t);
 void LCD_write8bits(uint8_t);
 void LCD_pulseEnable();
 
-void LCD_UpdateTask( unsigned long timeWeHave );
+void LCD_UpdateTask( );
 
 void LCD_ButtonTask( );
 
