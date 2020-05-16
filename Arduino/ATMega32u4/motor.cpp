@@ -11,14 +11,13 @@ int g_debug[MAX_DEBUG];
 #define RAMP_TIME     (1L << RAMP_SHIFT)
 #define MIN_SPEED     15L
 #define MAX_SPEED     250L
-#define NO_MOVE_TIME  0xFFFFFFFF
+// Calculate the speed ramp for G0 accel / decel phases 
+#define STEP_FROM_RAMP( Min, Max, t ) ( Min - ((( Min - Max ) * t ) >> RAMP_SHIFT))
+
 // Speed is in inch by minute, hence the 60M micro seconds
 #define SPEED_TO_STEP( sbi, s ) ( 60000000L / ( sbi * s ))
 
-// Calculate the ramp for G0 accel / decel phases 
-#define STEP_FROM_RAMP( Min, Max, t ) ( Min - ((( Min - Max ) * t ) >> RAMP_SHIFT))
-
-#define MAX_BACKSTEPS  2000
+#define NO_STEP_TIME  0xFFFFFFFF
 
 // Instantiation and configuration of the stepper motor controlers.
 //-----------------------------------------------------------------
@@ -29,13 +28,14 @@ DualMotor Z ( A3, A2, -1,
               A5, A4, -1,  1, ERROR_LIMIT_Z | REDUCED_RAPID_POSITIONING_SPEED,
                                              1.0f/Z_AXIS_RES );
 
-//Motor ZL( A3, A2, -1,  1, ERROR_LIMIT_Z, 1.0f/Z_AXIS_RES );
-//Motor ZR( A5, A4, -1,  1, ERROR_LIMIT_Z, 1.0f/Z_AXIS_RES );
+
 
 unsigned long g_MoveStart;  // Time when the current move was started (uS)
 
-// For debug purpose, measures the time spent sleeping
-unsigned long g_timeSleepingUs = 0;
+// For debug purpose, measures the time spent on idle task to estimate the
+// CPU load of the system (displayed on LCD screen).
+unsigned long g_timeIdleUs = 0;
+
 unsigned long g_missedStepCount = 0;
 
 Motor::Motor( int sp, int dp, int ep, int rd, unsigned long flags, unsigned long sbi )
@@ -46,6 +46,7 @@ Motor::Motor( int sp, int dp, int ep, int rd, unsigned long flags, unsigned long
   reverseDir = rd;
   limitFlag = flags & ERROR_FLAG_MASK;
   stepByInch = sbi;
+  
   if(( flags & REDUCED_RAPID_POSITIONING_SPEED ) == 0 )
   {
     minSpeedStep = SPEED_TO_STEP( stepByInch, MIN_SPEED );
@@ -68,6 +69,10 @@ DualMotor::DualMotor( int sp, int dp, int ep, int sp2, int dp2, int ep2, int s, 
   stepPin2 = sp2;
   dirPin2 = dp2;
   endPin2 = ep2;
+
+  step2SetReg = digitalSetRegister( sp2 );
+  step2ClrReg = digitalClrRegister( sp2 );
+  step2PinMask = digitalPinMask( sp2 );
 }
 
 void Motor::Reset( )
@@ -77,7 +82,6 @@ void Motor::Reset( )
   moveLength = 0;
   moveStep = 0;
   moveDuration = 0;
-  g_missedStepCount = 0;
 
   pinMode( stepPin, OUTPUT );
   digitalWrite(stepPin, LOW );
@@ -155,7 +159,7 @@ unsigned long Motor::InitMove( long s, long t )
     s = -s; 
   }
 
-  // If we do not return "NO_MOVE_TIME" the move will
+  // If we do not return "NO_STEP_TIME" the move will
   // occur no matter what.
   
   moveLength = s;
@@ -185,7 +189,7 @@ unsigned long Motor::InitMove( long s, long t )
   else 
   {
     moveStep = 0;
-    return NO_MOVE_TIME;
+    return NO_STEP_TIME;
   }
   currentStepTime = stepDuration;
   return stepDuration;
@@ -199,7 +203,7 @@ inline unsigned long timeSinceMoveStarted( )
     return( now - g_MoveStart );
   else
     // Rollover of the 32bit microsecond timer (every 71min)
-    return( NO_MOVE_TIME - g_MoveStart + now );
+    return( NO_STEP_TIME - g_MoveStart + now );
 }
 
 void Motor::PrepareNextStep( )
@@ -212,7 +216,7 @@ void Motor::PrepareNextStep( )
     {
       curPos =  curPos + ( curDir * moveStep );
       moveStep = 0;
-      nextStepTime = NO_MOVE_TIME;
+      nextStepTime = NO_STEP_TIME;
     }
     // Movement with duration means linear motion (G1).
     else if( moveDuration != 0 )
@@ -277,11 +281,10 @@ void Motor::PrepareNextStep( )
       moveStep++;
     }
 
-    // Make sure that the pulse lasts at least 5uS
-    delayMicroseconds( 1 );
-        
+    // Clear the signal last to get the longest HIGH pulse possible
+    // TB6600HG datasheet requires minimum CLK pulse width of 2.2uS
+    // Withe the current code running on SAMD21, this pulse is 5uS.
     *stepClrReg = stepPinMask;
-    //digitalWrite( stepPin, LOW );
   }
 }
 
@@ -290,8 +293,10 @@ void DualMotor::PrepareNextStep( )
   // Have we prepared yet?
   if( nextStepTime == 0 )
   {
-    digitalWrite( stepPin2, LOW );
     Motor::PrepareNextStep( );
+    // Clear the pin last to make sure the pulse lasts for
+    // at least 
+    *step2ClrReg = step2PinMask;    
   }
 }
 
@@ -316,22 +321,27 @@ inline void WaitTillItsTime( unsigned long t )
   
   do
   {
-    // How much time until the move?
+    // How much time until the next step?
     s = t - timeSinceMoveStarted( );
 
     // Are we late...?
     if( s <= 0 )
     {
+      // ... then get out and step it already!
       break;
     }
     else if( s < 10 )
     {
-      // If we have less than 10uS, spin in a tight loop until
-      // it's time without interrupts enabled. Do not do this for much longer
-      // because UART bytes can come 20uS (500kbaud) appart. If we keep
-      // interrupts masked for longer we risk missing a byte from the RPi.
-      
-      // If we get here after spending time on the background tasks the
+      // If we have less than 10uS, spin in a tight loop until it's time
+      // without interrupts enabled to avoid jitter. Do not do this for 
+      // longer than 10uS because UART bytes can come 20uS (500kbaud) 
+      // appart. If interrupts are masked for longer UART may receive
+      // another byte before the ISR got the time to grab it.
+      // On the other hand, if this is too short, we have the risk of
+      // going into interrupt and miss the time. (7uS seem to be the
+      // threshold).
+         
+      // If we get here after spending time running the background tasks
       // interrupts will be enabled. Disabled them again so that the next
       // time measurement is accurate.      
       if( interruptsEnabled ) 
@@ -343,10 +353,10 @@ inline void WaitTillItsTime( unsigned long t )
     }
     else if( s < 30 )
     {
-      // If we have less than 30uS, just do the prepare next steps if we
+      // If we have less than 30uS, just "prepare" for next steps if we
       // didn't get the chance to do it previously
 
-      // Re-enable interrupts first
+      // Re-enable interrupts first since this is not time critical
       if( !interruptsEnabled )
       {
         interruptsEnabled = true;
@@ -360,9 +370,7 @@ inline void WaitTillItsTime( unsigned long t )
         Y.PrepareNextStep( );
         Z.PrepareNextStep( );
         count = 1;
-      }      
-      
-      delayMicroseconds( 1 );
+      }
     }
     else
     {
@@ -380,15 +388,16 @@ inline void WaitTillItsTime( unsigned long t )
       {
         // This is to calculate the CPU load. Only do this once.
         // (time spent doing background task and sleeping vs actual movement)
-        g_timeSleepingUs += s;
-         
+        g_timeIdleUs += s;
+
+        // Do this first and once only         
         X.PrepareNextStep( );
         Y.PrepareNextStep( );
         Z.PrepareNextStep( );
       }
       else
       {   
-        // Alternate between LCD and UART
+        // Alternate between UART and LCD tasks (UART first)
         if( count & 1 )
         {
           // Read from UART and decode (one char at a time)
@@ -417,18 +426,19 @@ void Motor::Step( unsigned long& t )
   //digitalWrite( stepPin, HIGH );
   *stepSetReg = stepPinMask;
 
-  // re-enable interrupts as quickly as possible to avoid missing
-  // any data received by the UART
+  // Interrupts get disabled when returning from WaitTillItsTime( )
+  // Turn them back ON now that we're out of the time critical section.
   interrupts( );
    
-  // In some rare occasions, the previous cycle didn't give enough
-  // time to prepare the next step time. In most cases this find
-  // that nextStepTime is not zero
+  // In some rare occasions (when all axis had to pulse with less than 30uS
+  // in between steps), this didn't give enough time to prepare the next step.
   if( nextStepTime == 0 )
   {
     PrepareNextStep( );
   }
+  // Return the next step time...
   t = nextStepTime;
+  // ... and clear the time so that it will be "prepared" as soon as there is time
   nextStepTime = 0;
 
 #ifdef MEASURE_MOVE
@@ -441,12 +451,16 @@ void Motor::Step( unsigned long& t )
 
 void DualMotor::Step( unsigned long& t )
 {
-  digitalWrite( stepPin2, HIGH );
+  //digitalWrite( stepPin2, HIGH );
+  *step2SetReg = step2PinMask;
   Motor::Step( t );
 }
 
 long Motor::GetPos( )
 {
+  // During a movement, curPos doesn't get updated until the
+  // end to same on the operations done in the time critical
+  // sections of the code. Add "moveStep" to account for that.
   return curPos + (curDir * moveStep);
 }
 
@@ -459,7 +473,6 @@ long Motor::FakeMove( long s )
 // Duration of the motion determines the speed. d is in microseconds
 void Motor_Move( long x, long y, long z, long d )
 {
-  unsigned long prev;
   unsigned long tX,tY,tZ;
   
   // If in error state, dot not move
@@ -468,7 +481,8 @@ void Motor_Move( long x, long y, long z, long d )
     return;
   }
 
-  // Capture when the motion started (in uS)
+  // Capture when the motion started (in uS). Do this as early as possible
+  // to avoid jitter in consecutive linear motion
   g_MoveStart = micros();
 
 #ifdef MEASURE_MOVE
@@ -487,7 +501,7 @@ void Motor_Move( long x, long y, long z, long d )
   }
 
   // This calculates the interval between steps for each axis and returns the time
-  // to wait until the first move needs to occur (0 if no move necessary).
+  // to the first step needs to occur ( NO_STEP_TIME if no move necessary).
   tX = X.InitMove( x, d );
   tY = Y.InitMove( y, d );
   tZ = Z.InitMove( z, d );
@@ -497,19 +511,19 @@ void Motor_Move( long x, long y, long z, long d )
     // Check which axis is the next one to be stepped
     if(( tX < tY ) && ( tX < tZ ))
     {
-      // X is next move
+      // X is next step
       WaitTillItsTime( tX );
       X.Step( tX );
     }
     else if( tY < tZ )
     {
-      // Y is next move
+      // Y is next step
       WaitTillItsTime( tY );
       Y.Step( tY );
     }
-    else if( tZ != NO_MOVE_TIME )
+    else if( tZ != NO_STEP_TIME )
     {
-      // Z is next move
+      // Z is next step
       WaitTillItsTime( tZ );
       Z.Step( tZ );
     }
@@ -531,6 +545,8 @@ void Motor_Move( long x, long y, long z, long d )
 void Motor_Init( )
 {
   g_error = 0;
+  g_missedStepCount = 0;
+  
   for( int i=0; i<MAX_DEBUG; i++ ) g_debug[i] = 0;
   
   pinMode(TOOL_ON_REPLAY, OUTPUT);

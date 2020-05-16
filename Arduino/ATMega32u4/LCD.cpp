@@ -29,7 +29,7 @@ extern Motor X;
 extern Motor Y;
 extern DualMotor Z;
 
-extern unsigned long g_timeSleepingUs;
+extern unsigned long g_timeIdleUs;
 extern unsigned long g_maxUARTtaskTime;
 extern unsigned long g_missedStepCount;
 
@@ -445,9 +445,9 @@ void LCD_UpdateTask( )
   case LCD_StatePrintStatusPart1 :
     if( timeItTook > lastRefreshTime + 1000000 )
     { 
-      CPUload = 100 - ( 100 * g_timeSleepingUs ) / ( timeItTook - lastRefreshTime );
+      CPUload = 100 - ( 100 * g_timeIdleUs ) / ( timeItTook - lastRefreshTime );
       lastRefreshTime = timeItTook;
-      g_timeSleepingUs = 0;         
+      g_timeIdleUs = 0;         
     }
     state = LCD_StatePrintStatusPart2;
     break;
@@ -701,7 +701,7 @@ void LCD_ButtonTask( )
 {
 
   delayMicroseconds( 2000 );
-  g_timeSleepingUs += 2000;
+  g_timeIdleUs += 2000;
   
   /*
   static unsigned long nextScanTime = 50;

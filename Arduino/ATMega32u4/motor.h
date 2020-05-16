@@ -5,7 +5,10 @@ class Motor {
 public : 
   Motor( int sp, int dp, int ep, int s, unsigned long flags, unsigned long sbi );
   void Reset( );
-  void SetDirection( int d );
+  
+  // This is virtual to make sure the derived class
+  // implementation gets called
+  virtual void SetDirection( int d );
   
   unsigned long InitMove( long s, long t );
   void PrepareNextStep( );
@@ -20,7 +23,7 @@ protected :
 
   REG_TYPE* stepSetReg;       // Register to SET step pin
   REG_TYPE* stepClrReg;       // Register to CLEAR the step pin
-  REG_TYPE stepPinMask;       // Mask to set or clear the step pin
+  REG_TYPE stepPinMask;       // Bit mask for the step pin
 
   int stepPin;                // GPIO for stepping
   int dirPin;                 // GPIO for direction
@@ -57,6 +60,10 @@ private:
   int stepPin2;
   int dirPin2;
   int endPin2;
+
+  REG_TYPE* step2SetReg;      // Register to SET step pin
+  REG_TYPE* step2ClrReg;      // Register to CLEAR the step pin
+  REG_TYPE step2PinMask;      // Bit mask for the step pin
 
 public:
   void PrepareNextStep( );
