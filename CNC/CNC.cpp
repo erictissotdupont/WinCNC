@@ -384,40 +384,6 @@ void OnRunGCode(HWND hWnd,BOOL bDebug)
 	}
 }
 
-void OnSetSimulationMode(HWND hWnd)
-{
-	// TODO : MAKE THIS DYNAMIC
-
-	// PIECE OF 7x5n 0.5in thick with the tool starting flush at 1,1 inch
-	// ofset for the corner (tool always starts at 0,0)
-	g_MetaData.blockX = 5;
-	g_MetaData.blockY = 5;
-	g_MetaData.blockZ = 1.5;
-	g_MetaData.offsetX = 1;
-	g_MetaData.offsetY = 1;
-	g_MetaData.offsetZ = 0;	// Make it same as blockZ to when tool starts flush with top of block
-
-	//g_MetaData.toolRadius = 0.125;	// 1/4
-	//g_MetaData.toolRadius = 0.0625;		// 1/8
-	g_MetaData.toolRadius = 0.03125;	// 1/16
-
-	g_MetaData.toolHeight = 1.0;
-	g_MetaData.gotWhatTool = 1;
-	g_MetaData.gotWhatStart = 1;
-	g_MetaData.gotWhatBlock = 1;
-
-	// This is to get the metadata from the G-Code file
-	//ParseGCodeFile(hWnd, szFile, preParse);
-
-	init3DView(g_MetaData.blockX, g_MetaData.blockY );
-	initToolShape(g_MetaData.toolRadius);
-
-	setSimulationMode(buildPath);
-
-	// This launches the 3D viewer window
-	start3DViewer( );
-}
-
 //
 //  FUNCTION: WndProc(HWND, UINT, WPARAM, LPARAM)
 //
@@ -448,7 +414,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			OnRunGCode(hWnd, TRUE);
 			break;
 		case IDM_SIMULATE_GCODE:
-			OnSetSimulationMode(hWnd);
+			Start3DSimulator(hWnd);
 			break;
 		case IDM_BASIC_SHAPE:
 			BasicShapes(hWnd);

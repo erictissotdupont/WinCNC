@@ -24,8 +24,8 @@ int g_debug[MAX_DEBUG];
 //           Step,Dir,End,Swap,    LimitFlag,      StepByInch
 Motor     X ( 11, 10, -1,  0, ERROR_LIMIT_X, 1.0f/X_AXIS_RES );
 Motor     Y ( 13, 12, -1,  1, ERROR_LIMIT_Y, 1.0f/Y_AXIS_RES );
-DualMotor Z ( A3, A2, -1,
-              A5, A4, -1,  1, ERROR_LIMIT_Z | REDUCED_RAPID_POSITIONING_SPEED,
+DualMotor Z (  7,  6, -1,
+               9,  8, -1,  1, ERROR_LIMIT_Z | REDUCED_RAPID_POSITIONING_SPEED,
                                              1.0f/Z_AXIS_RES );
 
 

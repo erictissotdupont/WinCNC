@@ -1,12 +1,15 @@
 #include "CNC.h"
+#include "resource.h"
 #include "geometry.h"
 #include "gcode.h"
 #include "socket.h"
 #include "motor.h"
+#include "Shapes.h"
 
 #include <wchar.h>
 #include <mmsystem.h>
 #include <psapi.h>
+#include <windowsx.h>
 
 DWORD pathSteps;
 DWORD maxPathSteps;
@@ -407,13 +410,13 @@ tStatus buildPath(t3DPoint P, long x, long y, long z, long d, long s)
 			}
 		}
 		DWORD current = timeGetTime();
-		if (current > prevTime + 50 )
+		if (current > prevTime + 50)
 		{
 			PostMessage(hMainWindow, WM_UPDATE_POSITION, 0, 0);
 			prevTime = current;
 		}
 		// Slow down a bit
-		if( d && (( n % 5 ) == 1 )) Sleep(1);
+		if (d && ((n % 5) == 1)) Sleep(1);
 	}
 	p = P;
 
@@ -436,9 +439,96 @@ tStatus buildPath(t3DPoint P, long x, long y, long z, long d, long s)
 
 	// Normal speed
 	//Sleep( d / 1000 );
-	
+
 	// 3x faster
 	//Sleep(d / 3000);
 
 	return retSuccess;
+}
+
+
+void _3DSettingsInit(HWND hWnd)
+{
+	int i;
+	HWND hItem;
+
+	hItem = GetDlgItem(hWnd, IDC_TOOL_SIZE);
+	for (i = 0; i < ITEM_CNT(TOOL_SIZES); i++) ComboBox_AddString(hItem, TOOL_SIZES[i].str);
+
+}
+
+
+
+BOOL CALLBACK _3DSettingsProc(HWND hWnd,
+	UINT message,
+	WPARAM wParam,
+	LPARAM lParam)
+{
+	HWND hDlg;
+
+	switch (message)
+	{
+	case WM_INITDIALOG:
+		_3DSettingsInit(hWnd);
+
+		//BitmapShapeGetSet(FALSE, hWnd);
+
+		// This is to capture the CTRL+A on the GCode edit box
+		//hDlg = GetDlgItem(hWnd, IDC_GCODE);
+		//g_oldBitmapDlgdProc = (WNDPROC)GetWindowLong(hDlg, GWL_WNDPROC);
+		//SetWindowLong(hDlg, GWL_WNDPROC, (LONG)BitmapInterceptWndProc);
+		return TRUE;
+		break;
+
+	case WM_CLOSE:
+		//BitmapShapeGetSet(TRUE, hWnd);
+		//BitmapShapeSave();
+		break;
+
+	case WM_COMMAND:
+		if (HIWORD(wParam) == BN_CLICKED)
+		{
+			switch (LOWORD(wParam))
+			{
+			case IDOK:
+			case IDCANCEL:
+				EndDialog(hWnd, wParam);
+				return TRUE;
+			}
+		}
+	}
+	return FALSE;
+}
+
+
+void Start3DSimulator(HWND hWnd)
+{
+	DialogBox(NULL,
+		MAKEINTRESOURCE(IDD_3D_SETTINGS),
+		hWnd,
+		(DLGPROC)_3DSettingsProc);
+
+	g_MetaData.blockX = 5;
+	g_MetaData.blockY = 5;
+	g_MetaData.blockZ = 0.5;
+	g_MetaData.offsetX = -1;
+	g_MetaData.offsetY = -1;
+	g_MetaData.offsetZ = 0.5;	// Make it same as blockZ to when tool starts flush with top of block
+
+	g_MetaData.toolRadius = 0.125;	// 1/4
+	g_MetaData.toolHeight = 0.5;
+	g_MetaData.gotWhatTool = 1;
+	g_MetaData.gotWhatStart = 1;
+	g_MetaData.gotWhatBlock = 1;
+
+	// This is to get the metadata from the G-Code file
+	//ParseGCodeFile(hWnd, szFile, preParse);
+
+	init3DView(g_MetaData.blockX, g_MetaData.blockY);
+	initToolShape(g_MetaData.toolRadius);
+
+	setSimulationMode(buildPath);
+
+	// This launches the 3D viewer window
+	start3DViewer();
 }

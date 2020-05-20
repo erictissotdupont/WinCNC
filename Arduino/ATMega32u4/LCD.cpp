@@ -39,6 +39,7 @@ void LCD_Init( )
   uint8_t cmd;
   uint8_t _displayfunction = LCD_4BITMODE | LCD_1LINE | LCD_2LINE | LCD_5x8DOTS;
   uint8_t _displaymode = LCD_ENTRYLEFT | LCD_ENTRYSHIFTDECREMENT;
+  //uint8_t _displaymode = LCD_ENTRYRIGHT | LCD_ENTRYSHIFTINCREMENT;
   uint8_t _displaycontrol = LCD_DISPLAYON | LCD_CURSOROFF | LCD_BLINKOFF;
 
   Wire.begin();
