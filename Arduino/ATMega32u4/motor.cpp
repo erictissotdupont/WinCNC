@@ -282,8 +282,9 @@ void Motor::PrepareNextStep( )
     }
 
     // Clear the signal last to get the longest HIGH pulse possible
-    // TB6600HG datasheet requires minimum CLK pulse width of 2.2uS
-    // Withe the current code running on SAMD21, this pulse is 5uS.
+    // TB67S109AFTG Toshiba datasheet requires minimum CLK pulse width
+    // 0.3uS (page 26). Withe the current code running on SAMD21, 
+    // this pulse is at least 3uS long.
     *stepClrReg = stepPinMask;
   }
 }
@@ -294,8 +295,7 @@ void DualMotor::PrepareNextStep( )
   if( nextStepTime == 0 )
   {
     Motor::PrepareNextStep( );
-    // Clear the pin last to make sure the pulse lasts for
-    // at least 
+    // Clear the pin last to make sure the pulse lasts for long enough
     *step2ClrReg = step2PinMask;    
   }
 }
@@ -315,8 +315,8 @@ inline void WaitTillItsTime( unsigned long t )
   bool interruptsEnabled = false;
 
   // First, disable interrupts so that the first time measurements can be
-  // accurate if it turns out that we're late or there is less than 10uS until
-  // the next time to move
+  // accurate if it turns out that we're late or there is less than 10uS
+  // until the next time to step.
   noInterrupts( );
   
   do
