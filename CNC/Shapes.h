@@ -35,4 +35,5 @@ UINT ShapeGetSetFloat(HWND hWnd, UINT id, BOOL get, float* val);
 UINT ShapeGetSetBool(HWND hWnd, UINT id, BOOL get, int* val);
 UINT ShapeGetSetString(HWND hWnd, UINT id, BOOL get, WCHAR* str, int cbStr);
 UINT ShapeGetSetRadio(HWND hWnd, UINT id, int btnCnt, BOOL get, int* val);
+UINT ShapeGetSetToolSize(HWND hWnd, UINT id, BOOL get, float* pRadius);
 UINT ShapeGetSetTool(HWND hWnd, BOOL get, tGeneralToolInfo *pToolInfo);

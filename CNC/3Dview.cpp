@@ -158,6 +158,8 @@ typedef struct
 	DWORD dy;
 	float res;
 	DWORD cbAlt;
+	float originX;
+	float originY;
 } header_t;
 
 double g_res;
@@ -263,10 +265,11 @@ void resetBlockSurface()
 #define SIM_MAX_SIZE_BYTES		(96*1024*1024)
 #define SIM_RESOLUTION_IN		0.005f	// 0.127mm
 
-bool init3DView(double x, double y)
+bool init3DView(float x, float y)
 {
 	HANDLE hMapFile;
 	DWORD countX, countY;
+	bool bAlreadyExists = false;
 
 	g_res = SIM_RESOLUTION_IN;
 
@@ -299,11 +302,14 @@ bool init3DView(double x, double y)
 		}
 		else
 		{
+			bAlreadyExists = GetLastError() == ERROR_ALREADY_EXISTS;
+
 			g_header = (header_t*)MapViewOfFile(hMapFile,   // handle to map object
 				FILE_MAP_ALL_ACCESS, // read/write permission
 				0,
 				0,
 				cbFileSize);
+
 			if (g_header == NULL)
 			{
 				return false;
@@ -314,15 +320,32 @@ bool init3DView(double x, double y)
 			}
 		}
 	}
-	
-	g_header->id = 0x00010002;
-	g_header->dx = countX;
-	g_header->dy = countY;
-	g_header->res = (float)g_res;
-	g_header->cbAlt = SIM_MAX_SIZE_BYTES;
 
-	resetBlockSurface( );
+	if (bAlreadyExists)
+	{
+		if ((g_header->id != 0x00010002) ||
+			(g_header->dx != countX) ||
+			(g_header->dy != countY) ||
+			(g_header->res = (float)g_res))
+		{
+			MessageBoxA(NULL, "Simulation block header mismatch error", "3D simulator", MB_ICONERROR);
+		}
+		//g_header->cbAlt = SIM_MAX_SIZE_BYTES;
+		//g_header->originX = -g_MetaData.offsetX;
+		//g_header->originY = -g_MetaData.offsetY;
+	}
+	else
+	{
+		g_header->id = 0x00010002;
+		g_header->dx = countX;
+		g_header->dy = countY;
+		g_header->res = (float)g_res;
+		g_header->cbAlt = SIM_MAX_SIZE_BYTES;
+		g_header->originX = -g_MetaData.offsetX;
+		g_header->originY = -g_MetaData.offsetY;
 
+		resetBlockSurface();
+	}
 	return true;
 }
 
@@ -415,8 +438,9 @@ tStatus buildPath(t3DPoint P, long x, long y, long z, long d, long s)
 			PostMessage(hMainWindow, WM_UPDATE_POSITION, 0, 0);
 			prevTime = current;
 		}
-		// Slow down a bit
-		if (d && ((n % 5) == 1)) Sleep(1);
+		// Yield
+		Sleep(0);
+		//if (d && ((n % 5) == 1)) Sleep(1);
 	}
 	p = P;
 
@@ -452,11 +476,73 @@ void _3DSettingsInit(HWND hWnd)
 	int i;
 	HWND hItem;
 
-	hItem = GetDlgItem(hWnd, IDC_TOOL_SIZE);
+	hItem = GetDlgItem(hWnd, IDC_3D_TOOL_RADIUS);
 	for (i = 0; i < ITEM_CNT(TOOL_SIZES); i++) ComboBox_AddString(hItem, TOOL_SIZES[i].str);
 
+	HKEY hKey;
+	if (RegOpenKey(HKEY_CURRENT_USER, L"SOFTWARE", &hKey) == ERROR_SUCCESS)
+	{
+		DWORD cbData = sizeof(g_MetaData);
+		if (RegGetValue(hKey, L"WinCNC", L"3Dsettings", RRF_RT_REG_BINARY, NULL, &g_MetaData, &cbData) != ERROR_SUCCESS)
+		{
+			// Pre-populate with some defaults
+			g_MetaData.blockX = 5;
+			g_MetaData.blockY = 5;
+			g_MetaData.blockZ = 0.5;
+			g_MetaData.offsetX = -1;
+			g_MetaData.offsetY = -1;
+			g_MetaData.offsetZ = 0.5;	// Make it same as blockZ to when tool starts flush with top of block
+			g_MetaData.toolRadius = 0.125;	// 1/4
+			g_MetaData.toolHeight = 0.5;
+			g_MetaData.gotWhatTool = 1;
+			g_MetaData.gotWhatStart = 1;
+			g_MetaData.gotWhatBlock = 1;
+		}
+		RegCloseKey(hKey);
+	}
 }
 
+
+void _3DSettingsSave()
+{
+	HKEY hKey;
+	if (RegCreateKey(HKEY_CURRENT_USER, L"SOFTWARE\\WinCNC", &hKey) == ERROR_SUCCESS)
+	{
+		RegSetValueEx(hKey, L"3Dsettings", 0, REG_BINARY, (BYTE*)&g_MetaData, sizeof(g_MetaData));
+		RegCloseKey(hKey);
+	}
+}
+
+UINT _3DSettingsGetSet(BOOL get, HWND hWnd)
+{
+	ShapeGetSetFloat(hWnd, IDC_3D_X, get, &g_MetaData.blockX);
+	ShapeGetSetFloat(hWnd, IDC_3D_Y, get, &g_MetaData.blockY);
+	ShapeGetSetFloat(hWnd, IDC_3D_Z, get, &g_MetaData.blockZ);
+
+	ShapeGetSetFloat(hWnd, IDC_3D_OFFSET_X, get, &g_MetaData.offsetX);
+	ShapeGetSetFloat(hWnd, IDC_3D_OFFSET_Y, get, &g_MetaData.offsetY);
+	ShapeGetSetFloat(hWnd, IDC_3D_OFFSET_Z, get, &g_MetaData.offsetZ);
+
+	ShapeGetSetFloat(hWnd, IDC_3D_TOOL_HEIGHT, get, &g_MetaData.toolHeight);
+
+	ShapeGetSetToolSize(hWnd, IDC_3D_TOOL_RADIUS, get, &g_MetaData.toolRadius);
+
+	return 0;
+}
+
+void _3DLaunchSimulatorApp()
+{
+	// This is to get the metadata from the G-Code file
+	//ParseGCodeFile(hWnd, szFile, preParse);
+
+	init3DView(g_MetaData.blockX, g_MetaData.blockY);
+	initToolShape(g_MetaData.toolRadius);
+
+	setSimulationMode(buildPath);
+
+	// This launches the 3D viewer window
+	start3DViewer();
+}
 
 
 BOOL CALLBACK _3DSettingsProc(HWND hWnd,
@@ -470,30 +556,40 @@ BOOL CALLBACK _3DSettingsProc(HWND hWnd,
 	{
 	case WM_INITDIALOG:
 		_3DSettingsInit(hWnd);
-
-		//BitmapShapeGetSet(FALSE, hWnd);
-
-		// This is to capture the CTRL+A on the GCode edit box
-		//hDlg = GetDlgItem(hWnd, IDC_GCODE);
-		//g_oldBitmapDlgdProc = (WNDPROC)GetWindowLong(hDlg, GWL_WNDPROC);
-		//SetWindowLong(hDlg, GWL_WNDPROC, (LONG)BitmapInterceptWndProc);
+		_3DSettingsGetSet(FALSE, hWnd);
 		return TRUE;
 		break;
 
 	case WM_CLOSE:
-		//BitmapShapeGetSet(TRUE, hWnd);
-		//BitmapShapeSave();
+		_3DSettingsGetSet(TRUE, hWnd);
+		_3DSettingsSave( );
 		break;
 
 	case WM_COMMAND:
-		if (HIWORD(wParam) == BN_CLICKED)
+		switch( HIWORD(wParam))
 		{
+		case BN_CLICKED :
 			switch (LOWORD(wParam))
 			{
+			case IDC_3D_SIMULATOR :
+				_3DSettingsGetSet(TRUE, hWnd);
+				_3DSettingsSave();
+				_3DLaunchSimulatorApp();
+				break;
+
 			case IDOK:
 			case IDCANCEL:
 				EndDialog(hWnd, wParam);
 				return TRUE;
+			}
+			break;
+		case CBN_SELCHANGE :
+			switch (LOWORD(wParam))
+			{
+			case IDC_3D_TOOL_RADIUS :
+				_3DSettingsGetSet(TRUE, hWnd);
+				initToolShape(g_MetaData.toolRadius);
+				break;
 			}
 		}
 	}
@@ -507,28 +603,4 @@ void Start3DSimulator(HWND hWnd)
 		MAKEINTRESOURCE(IDD_3D_SETTINGS),
 		hWnd,
 		(DLGPROC)_3DSettingsProc);
-
-	g_MetaData.blockX = 5;
-	g_MetaData.blockY = 5;
-	g_MetaData.blockZ = 0.5;
-	g_MetaData.offsetX = -1;
-	g_MetaData.offsetY = -1;
-	g_MetaData.offsetZ = 0.5;	// Make it same as blockZ to when tool starts flush with top of block
-
-	g_MetaData.toolRadius = 0.125;	// 1/4
-	g_MetaData.toolHeight = 0.5;
-	g_MetaData.gotWhatTool = 1;
-	g_MetaData.gotWhatStart = 1;
-	g_MetaData.gotWhatBlock = 1;
-
-	// This is to get the metadata from the G-Code file
-	//ParseGCodeFile(hWnd, szFile, preParse);
-
-	init3DView(g_MetaData.blockX, g_MetaData.blockY);
-	initToolShape(g_MetaData.toolRadius);
-
-	setSimulationMode(buildPath);
-
-	// This launches the 3D viewer window
-	start3DViewer();
 }

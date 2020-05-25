@@ -27,7 +27,7 @@ using namespace DirectX;
 struct SimpleVertex
 {
     XMFLOAT3 Pos;
-    XMFLOAT3 Normal;
+	XMFLOAT3 Normal;
 };
 
 
@@ -36,9 +36,10 @@ struct ConstantBuffer
 	XMMATRIX mWorld;
 	XMMATRIX mView;
 	XMMATRIX mProjection;
+	XMFLOAT4 worldOffset;
 	XMFLOAT4 vLightDir[2];
-	XMFLOAT4 vLightColor[2];
-	XMFLOAT4 vOutputColor;
+	XMFLOAT4 vLightColor[3];
+	XMFLOAT4 vOutputColor[2];
 };
 
 
@@ -49,6 +50,8 @@ typedef struct
 	DWORD dy;
 	float res;
 	DWORD cbAlt;
+	float originX;
+	float originY;
 } header_t;
 
 
@@ -101,7 +104,10 @@ HANDLE					g_hMapFile = NULL;
 HANDLE					g_hFileChangeEvent = NULL;
 
 float*					g_alt = NULL;
-header_t*				g_header = NULL;;
+header_t*				g_header = NULL;
+
+float					g_3d_X_offset = 0.0f;
+float					g_3d_Z_offset = 0.0f;
 
 //--------------------------------------------------------------------------------------
 // Forward declarations
@@ -645,14 +651,14 @@ HRESULT UpdateSurface( )
 		n = 0;
 		float Xsz = (g_header->dx - 1) * g_header->res; // 6.0f;
 		float Ysz = (g_header->dy - 1) * g_header->res; // 5.0f;
-		float Xoffset = -(Xsz / 2.0f);
-		float Yoffset = -(Ysz / 2.0f);
+		g_3d_X_offset = (Xsz / 2.0f);
+		g_3d_Z_offset = (Ysz / 2.0f);
 		float x, z;
 
 		for (iX = 0; iX < g_header->dx; iX++) for (iY = 0; iY < g_header->dy; iY++)
 		{
-			x = Xoffset + iX * g_header->res;
-			z = Yoffset + iY * g_header->res;
+			x = iX * g_header->res - g_3d_X_offset;
+			z = iY * g_header->res - g_3d_Z_offset;
 			g_vertices[n].Pos = XMFLOAT3(x, 0.0f, z);
 			g_vertices[n].Normal = XMFLOAT3(0.0, 0.0, 0.0);
 			n++;
@@ -819,19 +825,22 @@ void Render()
 	XMVECTOR Up = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
 	g_View = XMMatrixLookAtLH(Eye, At, Up);
 	
-	float l1 = 0.2;
-	float l2 = 0.5;
-
 	// Setup our lighting parameters
 	XMFLOAT4 vLightDirs[2] =
 	{
 		XMFLOAT4(0.0f, 1.0f, 0.0f, 1.0f),
 		XMFLOAT4(1.0f, 0.2f, 1.0f, 1.0f),
 	};
-	XMFLOAT4 vLightColors[2] =
+
+	float l1 = 0.7;
+	float l2 = 0.8;
+	float l3 = 0.9;
+
+	XMFLOAT4 vLightColors[3] =
 	{
-		XMFLOAT4(l1, l1, l1, 1.0f),
-		XMFLOAT4(l2, l2, l2, 1.0f)
+		XMFLOAT4(l1/2, l1, l1, 1.0f),
+		XMFLOAT4(l2/2, l2, l2, 1.0f),
+		XMFLOAT4(l3/2, l3, l3, 1.0f)
 	};
 
 	// Rotate the second light around the origin
@@ -857,11 +866,18 @@ void Render()
 	cb1.mWorld = XMMatrixTranspose(g_World);
 	cb1.mView = XMMatrixTranspose(g_View);
 	cb1.mProjection = XMMatrixTranspose(g_Projection);
+	cb1.worldOffset.x = g_3d_X_offset - g_header->originX;
+	cb1.worldOffset.z = g_3d_Z_offset - g_header->originY;
+	cb1.worldOffset.y = 0.0f;
+	cb1.worldOffset.w = 0.0f;
 	cb1.vLightDir[0] = vLightDirs[0];
 	cb1.vLightDir[1] = vLightDirs[1];
 	cb1.vLightColor[0] = vLightColors[0];
 	cb1.vLightColor[1] = vLightColors[1];
-	cb1.vOutputColor = XMFLOAT4(0, 0, 0, 0);
+	cb1.vLightColor[2] = vLightColors[2];
+	//cb1.vOutputColor = XMFLOAT4(0, 0, 0, 0);
+	cb1.vOutputColor[0] = XMFLOAT4(1, 0, 0, 0);
+	cb1.vOutputColor[1] = XMFLOAT4(0, 1, 0, 0);
 	g_pImmediateContext->UpdateSubresource(g_pConstantBuffer, 0, nullptr, &cb1, 0, 0);
 
 	//
@@ -870,6 +886,7 @@ void Render()
 	g_pImmediateContext->VSSetShader(g_pVertexShader, nullptr, 0);
 	g_pImmediateContext->VSSetConstantBuffers(0, 1, &g_pConstantBuffer);
 	g_pImmediateContext->PSSetShader(g_pPixelShader, nullptr, 0);
+	//g_pImmediateContext->PSSetShader(g_pPixelShaderSolid, nullptr, 0);
 	g_pImmediateContext->PSSetConstantBuffers(0, 1, &g_pConstantBuffer);
 	g_pImmediateContext->DrawIndexed(g_iCount, 0, 0);
 

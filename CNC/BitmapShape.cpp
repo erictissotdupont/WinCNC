@@ -54,14 +54,14 @@ void BitmapShapeInit(HWND hWnd)
 	if (RegOpenKey(HKEY_CURRENT_USER, L"SOFTWARE", &hKey) == ERROR_SUCCESS)
 	{
 		DWORD cbData = sizeof(g_BmParams);
-		if (RegGetValue(hKey, L"WinCNC", L"BitmapShape", RRF_RT_REG_BINARY, NULL, &g_BmParams, &cbData) == ERROR_SUCCESS)
+		if (RegGetValue(hKey, L"WinCNC", L"BitmapShape", RRF_RT_REG_BINARY, NULL, &g_BmParams, &cbData) != ERROR_SUCCESS)
 		{
 			g_BmParams.width = 3.25;
 			g_BmParams.height = 3.25;
 			//g_BmParams.X = 2;
 			//g_BmParams.Y = 2;
-			return;
 		}
+		RegCloseKey(hKey);
 	}
 
 	ShapeInitToolInfo(&g_BmParams.tool);
@@ -237,15 +237,19 @@ typedef enum {
 #define SMALLEST_RADIUS			( g_BmParams.tool.radius + SMALL_OVELAP )
 #define SMALL_ANGLE				(PI/180)		// One degree
 
+#define GET_BYTE( pt, width, x, y ) ((unsigned char*)pt + (y * width) + (x / 8));
+#define GET_MASK( x ) (0x80 >> (x % 8))
+
 BOOL GetPixel(BITMAP* bm, int x, int y)
 {
 	unsigned char* pt;
 	// Test if the point is within the bitmap
 	if (x < 0 || y < 0 || x >= bm->bmWidth || y >= bm->bmHeight) return FALSE;
 	// Move pointer to byte that contains this pixel
-	pt = (unsigned char*)bm->bmBits + (y * bm->bmWidthBytes) + (x / 8);
+	//pt = (unsigned char*)bm->bmBits + (y * bm->bmWidthBytes) + (x / 8);
+	pt = GET_BYTE(bm->bmBits, bm->bmWidthBytes, x, y);
 	// Mask pixel in the byte
-	return (*pt & (0x80 >> (x % 8))) == 0;
+	return (*pt & GET_MASK( x )) == 0;
 }
 
 BITMAP* g_bm;
@@ -255,12 +259,15 @@ void RemovePointRecursive( unsigned short x, unsigned short y )
 	unsigned char* pt;
 	// Out of boundary, ignore
 	if (x < 0 || y < 0 || x >= g_bm->bmWidth || y >= g_bm->bmHeight) return;
-	pt = (unsigned char*)g_bm->bmBits + (y * g_bm->bmWidthBytes) + (x / 8);
+	
+	//pt = (unsigned char*)g_bm->bmBits + (y * g_bm->bmWidthBytes) + (x / 8);
+	pt = GET_BYTE(g_bm->bmBits, g_bm->bmWidthBytes, x, y);
+	
 	// If pixel is white (bit is set), fill it with black
-	if ((*pt & (0x80 >> (x % 8))) != 0 )
+	if ((*pt & GET_MASK( x )) != 0 )
 	{
 		// Clear the bit to make the pixel back
-		*pt &= ~(0x80 >> (x % 8));
+		*pt &= ~GET_MASK( x );
 		// Recursively remove all the points around this pixel
 		RemovePointRecursive( x, y + 1);
 		RemovePointRecursive( x + 1, y);
@@ -316,12 +323,15 @@ void CleanBitmap( BITMAP* bm, int x, int y )
 		POP(x, y);
 		// Test if it's within the bitmap
 		if (x < 0 || y < 0 || x >= bm->bmWidth || y >= bm->bmHeight) continue;
+		
 		// Test if color
-		pt = (unsigned char*)bm->bmBits + (y * bm->bmWidthBytes) + (x / 8);
-		if ((*pt & (0x80 >> (x % 8))) != 0)
+		//pt = (unsigned char*)bm->bmBits + (y * bm->bmWidthBytes) + (x / 8);
+		pt = GET_BYTE(bm->bmBits, bm->bmWidthBytes, x, y);
+
+		if ((*pt & GET_MASK( x )) != 0)
 		{
 			// If white, clear the bit to make the pixel back
-			*pt &= ~(0x80 >> (x % 8));
+			*pt &= ~GET_MASK( x );
 			PUSH(x + 1, y);
 			PUSH(x, y + 1);
 			PUSH(x - 1, y);

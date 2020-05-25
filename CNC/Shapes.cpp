@@ -81,25 +81,25 @@ UINT ShapeGetSetRadio(HWND hWnd, UINT id, int btnCnt, BOOL get, int* val )
 	return 0;
 }
 
-UINT ShapeGetSetTool(HWND hWnd, BOOL get, tGeneralToolInfo *pToolInfo )
+UINT ShapeGetSetToolSize(HWND hWnd, UINT id, BOOL get, float* pRadius)
 {
 	HWND hItem;
 	WCHAR str[MAX_STR];
 	float val;
 	int i;
 
-	hItem = GetDlgItem(hWnd, IDC_TOOL_SIZE);
+	hItem = GetDlgItem(hWnd, id);
 	if (get)
 	{
 		ComboBox_GetText(hItem, str, MAX_STR);
 		if (swscanf_s(str, L"%f", &val) != 1) return IDC_TOOL_SIZE;
-		pToolInfo->radius = val / 2.0f;
+		*pRadius = val / 2.0f;
 	}
 	else
 	{
 		for (i = 0; i < ITEM_CNT(TOOL_SIZES); i++)
 		{
-			if (TOOL_SIZES[i].val == (pToolInfo->radius * 2.0f))
+			if (TOOL_SIZES[i].val == (*pRadius * 2.0f))
 			{
 				ComboBox_SetCurSel(hItem, i);
 				break;
@@ -107,10 +107,20 @@ UINT ShapeGetSetTool(HWND hWnd, BOOL get, tGeneralToolInfo *pToolInfo )
 		}
 		if (i == ITEM_CNT(TOOL_SIZES))
 		{
-			StringCbPrintf(str, sizeof(str), L"%f", pToolInfo->radius * 2.0f);
+			StringCbPrintf(str, sizeof(str), L"%f", *pRadius * 2.0f);
 			ComboBox_SetText(hItem, str);
 		}
 	}
+}
+
+UINT ShapeGetSetTool(HWND hWnd, BOOL get, tGeneralToolInfo *pToolInfo )
+{
+	HWND hItem;
+	WCHAR str[MAX_STR];
+	float val;
+	int i;
+
+	ShapeGetSetToolSize(hWnd, IDC_TOOL_SIZE, get, &pToolInfo->radius);
 
 	hItem = GetDlgItem(hWnd, IDC_CUT_SPEED);
 	if (get)

@@ -3,8 +3,8 @@
 
 void OnPaint(HWND hWnd);
 
-bool init3DView( double x, double y );
-void initToolShape( double radius );
+bool init3DView( float x, float y );
+void initToolShape( float radius );
 void update3DView( );
 void resetBlockSurface();
 bool start3DViewer();

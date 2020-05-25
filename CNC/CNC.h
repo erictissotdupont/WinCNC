@@ -20,14 +20,14 @@
 
 typedef struct
 {
-	double blockX;       // Dimension of the block being machined
-	double blockY;
-	double blockZ;       // Z position has no offset 
-	double offsetX;      // Position block relative to initial tool position
-	double offsetY;
-	double offsetZ;
-	double toolRadius;
-	double toolHeight;   // Max cutting height of the tool
+	float blockX;       // Dimension of the block being machined
+	float blockY;
+	float blockZ;       // Z position has no offset 
+	float offsetX;      // Position block relative to initial tool position
+	float offsetY;
+	float offsetZ;
+	float toolRadius;
+	float toolHeight;   // Max cutting height of the tool
 	ULONG gotWhatBlock;
 	ULONG gotWhatTool;
 	ULONG gotWhatStart;
