@@ -2,8 +2,6 @@
 #include "HardwareSerial.h"
 #include "pins_arduino.h"
 
-#define TOOL_ON_REPLAY       A2
-
 #define X_AXIS_RES           0.0004389f
 #define Y_AXIS_RES           0.0004389f
 #define Z_AXIS_RES           0.0003925f
@@ -21,6 +19,8 @@
 
 #define MAX_FIFO_MOVE        7
 #define MAX_DEBUG            4
+
+#define TOOL_ON_REPLAY  3
 
 // DISPLAY_TASK_TIME
 // -----------------

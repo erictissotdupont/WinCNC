@@ -35,6 +35,8 @@ extern unsigned long g_missedStepCount;
 
 void LCD_Init( )
 {
+  startAnalogRead( LCD_X_JOY );
+
 #ifdef I2C_LCD
   uint8_t cmd;
   uint8_t _displayfunction = LCD_4BITMODE | LCD_1LINE | LCD_2LINE | LCD_5x8DOTS;
@@ -112,6 +114,8 @@ void LCD_Init( )
   // Disabled because somehoe the LCD only works after a warm boot
   // Wire.setClock(250000);
 
+  delay( 50 );
+
 #if 0
   int n = 842;
   unsigned long t = micros( );
@@ -153,8 +157,7 @@ void LCD_Init( )
   
   pinMode(LCD_RS, OUTPUT);
   pinMode(LCD_EN, OUTPUT);
-  pinMode(LCD_BTN, INPUT);
- 
+  
   // SEE PAGE 45/46 FOR INITIALIZATION SPECIFICATION!
   // according to datasheet, we need at least 40ms after power rises above 2.7V
   // before sending commands. Arduino can turn on way befer 4.5V so we'll wait 50
@@ -570,302 +573,131 @@ void LCD_SetStatus( const char *str, int offset )
 #define SELECT_10BIT_ADC        704  // right 
 #define BUTTONHYSTERESIS         10  // hysteresis for valid button sensing window
 
-LCD_Button LCD_ScanButtons( void )
-{
-  LCD_Button button = BUTTON_NONE;
-  int buttonVoltage = analogRead( LCD_BTN );
-  static LCD_Button debounce = BUTTON_NONE;
-  static unsigned char count = 0;
-  
-  /*
-  char tmp[6];
-  sprintf( tmp, "%04d ", buttonVoltage );
-  LCD_SetStatus( tmp );
-  return BUTTON_NONE;
-  */
-  
-   // Sense if the voltage falls within valid voltage windows
-   if( buttonVoltage < ( RIGHT_10BIT_ADC + BUTTONHYSTERESIS ) )
-   {
-      button = BUTTON_RIGHT;
-   }
-   else if(   buttonVoltage >= ( UP_10BIT_ADC - BUTTONHYSTERESIS )
-           && buttonVoltage <= ( UP_10BIT_ADC + BUTTONHYSTERESIS ) )
-   {
-      button = BUTTON_UP;
-   }
-   else if(   buttonVoltage >= ( DOWN_10BIT_ADC - BUTTONHYSTERESIS )
-           && buttonVoltage <= ( DOWN_10BIT_ADC + BUTTONHYSTERESIS ) )
-   {
-      button = BUTTON_DOWN;
-   }
-   else if(   buttonVoltage >= ( LEFT_10BIT_ADC - BUTTONHYSTERESIS )
-           && buttonVoltage <= ( LEFT_10BIT_ADC + BUTTONHYSTERESIS ) )
-   {
-      button = BUTTON_LEFT;
-   }
-   else if(   buttonVoltage >= ( SELECT_10BIT_ADC - BUTTONHYSTERESIS )
-           && buttonVoltage <= ( SELECT_10BIT_ADC + BUTTONHYSTERESIS ) )
-   {
-      button = BUTTON_SELECT;
-   }
-
-   if( debounce != button )
-   {
-     if( count++ >= 100 || button == BUTTON_NONE ) debounce = button;
-   }
-   else count = 0;
-
-   return debounce;
-}
-
-#define REPEAT_  750
-#define CONT_    100
-#define IDLE_    30
-#define MICRO_STEP_X  (long)(0.005 / X_AXIS_RES)
-#define MICRO_STEP_Y  (long)(0.005 / Y_AXIS_RES)
-#define MICRO_STEP_Z  (long)(0.005 / Z_AXIS_RES)
-#define STEP_X        (long)(0.05 / X_AXIS_RES)
-#define STEP_Y        (long)(0.05 / Y_AXIS_RES)
-#define STEP_Z        (long)(0.05 / Z_AXIS_RES)
 
 typedef enum {
- ButtonMode_XY = 0,
- ButtonMode_Z,
- ButtonMode_Max
-} ButtonMode;
+  ButtonState_WaitingForX,
+  ButtonState_WaitingForY,
+  ButtonState_WaitingForButtons,
+} tButtonState;
 
-const char* ModeString[ButtonMode_Max] = { "XY", "Z " };
+#define JOY_AVG_SAMPLE           32
+#define JOY_DEAD_ZONE            2
+#define ADC_AVG_COUNT            4
 
-void DoButtonAction( LCD_Button button, int longPress )
+class JoysticAxis
 {
-  static ButtonMode mode = ButtonMode_XY;
-  long x = 0;
-  long y = 0;
-  long z = 0;
-  static unsigned int acc = 0;
+public:
+  JoysticAxis( Motor* pM, int dir, int nA ) : 
+    pMotor(pM),
+    NextAxis(nA),
+    dir(dir),
+    adcAtRest(0), 
+    restAvgCount(JOY_AVG_SAMPLE),
+    adcReadIdx(0) { };
+    
+  bool ProcessAdcRead( );
   
-  if( button == BUTTON_SELECT )
-  {
-    mode = (ButtonMode)(mode + 1); 
-    if( mode >= ButtonMode_Max ) mode = ButtonMode_XY;
-  }
-  else
-  {
-    switch( mode )
-    {
-    case ButtonMode_XY :
-      switch(button)
-      {
-      case BUTTON_RIGHT: x = -1; break;
-      case BUTTON_UP:    y = -1; break;
-      case BUTTON_DOWN:  y = 1; break;
-      case BUTTON_LEFT:  x = 1; break;
-      }
-      break;
-    case ButtonMode_Z :
-      switch(button)
-      {
-      case BUTTON_RIGHT: x = 1; mode = ButtonMode_XY; break;
-      case BUTTON_UP:    z = 1; break;
-      case BUTTON_DOWN:  z = -1; break;
-      case BUTTON_LEFT:  x = -1; mode = ButtonMode_XY; break;
-      }
-    }
-  }
+protected :
+  Motor* pMotor;
+  int NextAxis;
+  int adcAtRest;
+  int restAvgCount;
+  int adcRead[ADC_AVG_COUNT];
+  int adcReadIdx;
+  int dir;
+};
 
-  LCD_SetStatus( ModeString[ mode ], 5 );
- 
-  if( longPress )
+class DualJoysticAxis : public JoysticAxis
+{
+public :
+  DualJoysticAxis ( Motor* pM, int dirM, Motor* pB, int dirB, int nA ) : 
+    pPrimary(pM), primDir(dirM),
+    pSecondary(pB), secDir(dirB),
+    JoysticAxis(pM,dirM,nA)
+    { pMotor = pPrimary; dir = primDir; };
+
+  void SecondaryAxis( bool enable )
   {
-    if( acc < 0x300 ) acc = acc + 32;
-    x = ( x * STEP_X * acc ) >> 8;
-    y = ( y * STEP_Y * acc ) >> 8;
-    z = ( z * STEP_Z * acc ) >> 8;
-  }
-  else
+    if( enable )
+    {
+      pPrimary->Manual( 0 );
+      JoysticAxis::pMotor = pSecondary;
+      JoysticAxis::dir = secDir;
+    }
+    else
+    {
+      pSecondary->Manual( 0 );
+      JoysticAxis::pMotor = pPrimary;
+      JoysticAxis::dir = primDir;
+    }
+  };
+
+private :
+  Motor* pPrimary;
+  Motor* pSecondary;
+  int primDir;
+  int secDir;
+};
+
+bool JoysticAxis::ProcessAdcRead(  )
+{
+  uint32_t adc;
+  if( fastAnalogRead( NextAxis, &adc ))
   {
-    acc = 0x100;
-    x = x * MICRO_STEP_X;
-    y = y * MICRO_STEP_Y;
-    z = z * MICRO_STEP_Z;
+    adcRead[adcReadIdx++] = adc;
+    if( adcReadIdx >= ADC_AVG_COUNT ) adcReadIdx = 0;
+    
+    if( restAvgCount > 0 )
+    {
+      adcAtRest += (int)adc;
+      if( --restAvgCount == 0 ) adcAtRest = adcAtRest / JOY_AVG_SAMPLE;
+    }
+    else
+    {
+      int avg = 0;
+      for( int i=0; i<ADC_AVG_COUNT; i++ ) avg += adcRead[i];
+      avg = avg / ADC_AVG_COUNT;
+
+      // Get position relative to resting position and apply direction
+      avg = ( dir > 0 ) ? adcAtRest - avg : avg - adcAtRest;
+
+      if( avg > JOY_DEAD_ZONE ) pMotor->Manual( avg-JOY_DEAD_ZONE );
+      else if( avg < -JOY_DEAD_ZONE ) pMotor->Manual( avg+JOY_DEAD_ZONE );
+      else pMotor->Manual( 0 );
+    }
+    return true;
   }
-  
-  if( x || y || z )
-  {
-    Motor_Move( x, y, z, CONT_ * 1100L );
-  }
+  return false;
 }
 
+DualJoysticAxis JoyX( &X,  1, &Z, -1, LCD_Y_JOY );
+    JoysticAxis JoyY( &Y, -1,         LCD_BUTTONS );
+
+bool LCD_ScanButtons( void )
+{
+  uint32_t adc;
+  if( fastAnalogRead( LCD_X_JOY, &adc ))
+  {
+    JoyX.SecondaryAxis( adc < 10 );
+    return true;
+  }
+  return false;
+}
 
 void LCD_ButtonTask( )
 {
+  static tButtonState state = ButtonState_WaitingForX;
 
-  delayMicroseconds( 2000 );
-  g_timeIdleUs += 2000;
-  
-  /*
-  static unsigned long nextScanTime = 50;
-  static LCD_Button prevButton = BUTTON_NONE;
-  static int state = 0;  
-  unsigned long curentTime = millis( );
-  LCD_Button button = LCD_ScanButtons( );
-  
-  
-  if( button != prevButton )
-  {
-    switch( button )
-    {
-    case BUTTON_RIGHT: LCD_SetStatus( "R", 7 );break;
-    case BUTTON_LEFT: LCD_SetStatus( "L", 7 );break;
-    case BUTTON_UP: LCD_SetStatus( "U", 7 );break;
-    case BUTTON_DOWN: LCD_SetStatus( "D", 7 );break;
-    case BUTTON_SELECT: LCD_SetStatus( "S", 7 );break;
-    default : LCD_SetStatus( " ", 7 );break;
-    }
-  }
-  
   switch( state )
   {
-  case 0 :
-    DoButtonAction( button, 0 );
-    state = 1;
+  case ButtonState_WaitingForX :
+    if( JoyX.ProcessAdcRead( )) state = ButtonState_WaitingForY;
     break;
-    
-  case 1 :
-    if( button != BUTTON_NONE )
-    {
-      nextScanTime = curentTime + REPEAT_DELAY;
-      state = 2;
-    }
+  case ButtonState_WaitingForY :
+    if( JoyY.ProcessAdcRead( )) state = ButtonState_WaitingForButtons;
     break;
-    
-  case 2 :
-    if( button == BUTTON_NONE )
-    {
-      DoButtonAction( prevButton, 0 );
-      DoButtonAction( button, 0 );
-      state = 1;
-    }
-    else if( button != prevButton )
-    {
-      nextScanTime = curentTime + REPEAT_DELAY;
-    }
-    else if( curentTime > nextScanTime )
-    {
-      nextScanTime = curentTime + CONT_DELAY;
-      DoButtonAction( prevButton, 1 );
-      state = 3;
-    }
+  case ButtonState_WaitingForButtons :
+    if( LCD_ScanButtons( )) state = ButtonState_WaitingForX;
     break;
-    
-  case 3 :
-    if( button == BUTTON_NONE )
-    {
-      DoButtonAction( button, 0 );
-      state = 1;
-    }
-    else if( button != prevButton )
-    {
-      nextScanTime = curentTime + REPEAT_DELAY;
-      state = 3; 
-    }
-    else if( curentTime > nextScanTime )
-    {
-      nextScanTime = curentTime + CONT_DELAY;
-      DoButtonAction( prevButton, 1 );
-    }
-  }
-  prevButton = button;
-  */
+  }    
 }
-
-
-#if 0
-/********** high level commands, for the user! */
-void LCD_Clear( void )
-{
-  LCD_command(LCD_CLEARDISPLAY);  // clear display, set cursor position to zero
-  delay( 250 );
-}
-
-// Allows us to fill the first 8 CGRAM locations
-// with custom characters
-void LCD_CreateChar(uint8_t location, uint8_t charmap[]) {
-  location &= 0x7; // we only have 8 locations 0-7
-  LCD_command(LCD_SETCGRAMADDR | (location << 3));
-  for (int i=0; i<8; i++) {
-    LCD_write(charmap[i]);
-  }
-}
-
-inline void LCD_command(uint8_t value) 
-{
-  LCD_send(value, LOW);
-}
-
-void LCD_setCursor(uint8_t col, uint8_t row)
-{
-  if( row != 0 ) row  = 0x40;
-  LCD_send(LCD_SETDDRAMADDR | (col + row ), LOW );
-}
-
-void LCD_write(uint8_t value) {
-  LCD_send(value, HIGH);
-}
-
-void LCD_send(uint8_t value, uint8_t mode) {
-  LCD_send_high( value, mode );
-  delayMicroseconds(500); 
-  LCD_send_low( value );
-  delayMicroseconds(500); 
-}
-
-// #####################################################################################
-void LCD_setCursor_high(uint8_t col, uint8_t row)
-{
-  if( row != 0 ) row  = 0x40;
-  LCD_send_high(LCD_SETDDRAMADDR | (col + row ), LOW );
-}
-
-void LCD_setCursor_low(uint8_t col, uint8_t row)
-{
-  if( row != 0 ) row  = 0x40;
-  LCD_send_low(LCD_SETDDRAMADDR | (col + row ));
-}
-
-void LCD_write_high(uint8_t value) {
-  LCD_send_high(value, HIGH);
-}
-
-void LCD_write_low(uint8_t value) {
-  LCD_send_low(value);
-}
-
-/************ low level data pushing commands **********/
-
-// write either command or data, with automatic 4/8-bit selection
-void LCD_send_high(uint8_t value, uint8_t mode) {
-  digitalWrite(LCD_RS, mode);
-  digitalWrite(LCD_D0, value & 0x10);
-  digitalWrite(LCD_D1, value & 0x20);
-  digitalWrite(LCD_D2, value & 0x40);
-  digitalWrite(LCD_D3, value & 0x80);
-  LCD_pulseEnable();
-}
-
-void LCD_send_low( uint8_t value) {
-  digitalWrite(LCD_D0, value & 0x01);
-  digitalWrite(LCD_D1, value & 0x02);
-  digitalWrite(LCD_D2, value & 0x04);
-  digitalWrite(LCD_D3, value & 0x08);
-  LCD_pulseEnable();
-}
-
-inline void LCD_pulseEnable(void) {
-  digitalWrite(LCD_EN, LOW);
-  digitalWrite(LCD_EN, HIGH);
-  digitalWrite(LCD_EN, LOW);
-}
-
-#endif

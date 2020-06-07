@@ -404,6 +404,9 @@ void Motor_Task( )
     if( ++g_fifoOut > MAX_FIFO_MOVE ) g_fifoOut = 0;
   }
 
+  // Manual motion
+  Motor_Move( 0, 0, 0, 0 );
+
   if( g_error )
   {
     sprintf( tmp, "E:%x", g_error );
@@ -414,7 +417,7 @@ void Motor_Task( )
     sprintf( tmp, "C:%d", g_CRCerror );
     LCD_SetStatus( tmp, 0 );
   }
-    
+ 
   //LCD_SetStatus( X.IsAtTheEnd( ) ? "X" : " ", 0 );
   //LCD_SetStatus( Y.IsAtTheEnd( ) ? "Y" : " ", 1 );
   //LCD_SetStatus( Z.IsAtTheEnd( ) ? "Z" : " ", 2 );

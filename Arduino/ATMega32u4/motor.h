@@ -13,6 +13,8 @@ public :
   unsigned long InitMove( long s, long t );
   void PrepareNextStep( );
   void Step( unsigned long& t );
+
+  void Manual( int dir );
   
   long GetPos( );
   long FakeMove( long s );
@@ -48,7 +50,12 @@ protected :
   unsigned long decelStart;   // Time when the deceleration has started
   long minSpeedStep;          // Duration of a step at G0 min speed 
   long maxSpeedStep;          // Same for max speed
-  unsigned long stepByInch;   // Number of steps for one inch (approx)
+  long stepByInch;            // Number of steps for one inch (approx)
+
+  // Manual mode
+  int manual;
+  int accManual;
+  unsigned long nextSlowStep;
 };
 
 class DualMotor : public Motor 

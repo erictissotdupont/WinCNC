@@ -15,13 +15,18 @@ typedef enum {
 } LCD_Button;
 
 // LCD GPIOs
+/*
 #define LCD_D0   4
 #define LCD_D1   5
 #define LCD_D2   6
 #define LCD_D3   7
 #define LCD_RS   8
 #define LCD_EN   9
-#define LCD_BTN  A0
+*/
+
+#define LCD_X_JOY          A0
+#define LCD_Y_JOY          A1
+#define LCD_BUTTONS        A2
 
 // LCD commands
 #define LCD_CLEARDISPLAY   0x01
@@ -95,6 +100,6 @@ void LCD_SetStatus( const char *str, int offset = 0 );
 
 void LCD_Init( void );
 void LCD_Clear( void );
-LCD_Button LCD_ScanButtons( void );
+bool LCD_ScanButtons( void );
 
 #endif

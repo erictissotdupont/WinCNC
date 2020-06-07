@@ -23,7 +23,7 @@ int g_debug[MAX_DEBUG];
 //-----------------------------------------------------------------
 //           Step,Dir,End,Swap,    LimitFlag,      StepByInch
 Motor     X ( 11, 10, -1,  0, ERROR_LIMIT_X, 1.0f/X_AXIS_RES );
-Motor     Y ( 13, 12, -1,  1, ERROR_LIMIT_Y, 1.0f/Y_AXIS_RES );
+Motor     Y ( 13, 12, -1,  0, ERROR_LIMIT_Y, 1.0f/Y_AXIS_RES );
 DualMotor Z (  7,  6, -1,
                9,  8, -1,  1, ERROR_LIMIT_Z | REDUCED_RAPID_POSITIONING_SPEED,
                                              1.0f/Z_AXIS_RES );
@@ -151,6 +151,31 @@ unsigned long Motor::InitMove( long s, long t )
   // The previous move might have left this pin HIGH
   *stepClrReg = stepPinMask;
   //digitalWrite( stepPin, LOW );
+
+  if( manual )
+  {
+    if( manual > -100 && manual < 100 )
+    {
+      unsigned long now = micros( );
+      if( now > nextSlowStep )
+      {
+        nextSlowStep = now + 100000;
+        accManual += manual;
+        if( accManual < -100 || accManual > 100 )
+        {
+          if( accManual > 0 ) s = 1; else s = -1;
+          accManual = 0;
+        }
+        else return NO_STEP_TIME;       
+      }
+      else return NO_STEP_TIME;
+    }
+    else
+    {
+      s = ( manual - 100 );
+    }
+    t = 100000;
+  }
   
   // Backward direction
   if( s < 0 ) 
@@ -308,7 +333,7 @@ long shortestStep;
 long avgStepCounter;
 #endif
 
-inline void WaitTillItsTime( unsigned long t )
+inline bool WaitTillItsTime( unsigned long t )
 {
   long s;
   int count = 0;
@@ -411,10 +436,15 @@ inline void WaitTillItsTime( unsigned long t )
           // Most LCD refresh commands take 30uS or less
           LCD_UpdateTask( );       
         }
+
+        LCD_ButtonTask( );
       }
       count++;
     }
-  } while( 1 );  
+  } while( 1 );
+  
+  // Time to move
+  return true;
 }
 
 void Motor::Step( unsigned long& t )
@@ -456,6 +486,11 @@ void DualMotor::Step( unsigned long& t )
   Motor::Step( t );
 }
 
+void Motor::Manual( int dir )
+{
+  manual = dir;
+}
+
 long Motor::GetPos( )
 {
   // During a movement, curPos doesn't get updated until the
@@ -495,9 +530,13 @@ void Motor_Move( long x, long y, long z, long d )
   // No movement means dwell (GCode "P")
   if( x==0 && y==0 && z==0 )
   {
-    // Just wait...
-    WaitTillItsTime( d );
-    return;
+    if( d != 0 )
+    {
+      // Just wait...
+      WaitTillItsTime( d );
+      return;
+    }
+    // Manual mode
   }
 
   // This calculates the interval between steps for each axis and returns the time
@@ -512,20 +551,17 @@ void Motor_Move( long x, long y, long z, long d )
     if(( tX < tY ) && ( tX < tZ ))
     {
       // X is next step
-      WaitTillItsTime( tX );
-      X.Step( tX );
+      if( WaitTillItsTime( tX )) X.Step( tX );
     }
     else if( tY < tZ )
     {
       // Y is next step
-      WaitTillItsTime( tY );
-      Y.Step( tY );
+      if( WaitTillItsTime( tY )) Y.Step( tY );
     }
     else if( tZ != NO_STEP_TIME )
     {
       // Z is next step
-      WaitTillItsTime( tZ );
-      Z.Step( tZ );
+      if( WaitTillItsTime( tZ )) Z.Step( tZ );
     }
     else
     {
@@ -540,6 +576,13 @@ void Motor_Move( long x, long y, long z, long d )
   LCD_SetStatus( str, 0 );
 #endif
 
+}
+
+void Manual_move( )
+{
+  static long tX,tY,tZ;
+  
+ 
 }
 
 void Motor_Init( )
