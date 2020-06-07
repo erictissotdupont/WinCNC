@@ -36,7 +36,7 @@ long xInPipe;
 long yInPipe;
 long zInPipe;
 
-tStatus(*g_pSimulation)(t3DPoint, long, long, long, long, long) = NULL;
+tStatus(*g_pSimulation)(t3DPoint, t3DPoint, long) = NULL;
 
 int getCountOfCommandsInPipe()
 {
@@ -103,7 +103,7 @@ void setExportFile( HANDLE file )
 	exportFile = file;
 }
 
-void setSimulationMode(tStatus(*callback)(t3DPoint, long, long, long, long, long))
+void setSimulationMode(tStatus(*callback)(t3DPoint, t3DPoint, long))
 {
 	g_pSimulation = callback;
 }
@@ -255,7 +255,7 @@ tStatus doMove( void(*posAtStep)(t3DPoint*,int,int,void*), int stepCount, double
 {
   int i;
   long x,y,z,d,s;
-  t3DPoint Ideal;
+  t3DPoint End;
   char str[ 100 ];
   char tmp[ 30 ];
   tStatus status = retNoOutputFound;
@@ -272,17 +272,22 @@ tStatus doMove( void(*posAtStep)(t3DPoint*,int,int,void*), int stepCount, double
  
   for( i=1; i<=stepCount; i++ )
   {
-    // Get the position we should be at for step i of stepCount
-    posAtStep( &Ideal, i, stepCount, pArg );
+    t3DPoint Start = {
+	  XMotor.step * XMotor.scale,
+	  YMotor.step * YMotor.scale,
+	  ZMotor.step * ZMotor.scale };
 
-    x = calculateMove( &XMotor, Ideal.x );
-    y = calculateMove( &YMotor, Ideal.y );
-    z = calculateMove( &ZMotor, Ideal.z );
+    // Get the position we should be at for step i of stepCount
+    posAtStep( &End, i, stepCount, pArg );
+
+    x = calculateMove( &XMotor, End.x );
+    y = calculateMove( &YMotor, End.y );
+    z = calculateMove( &ZMotor, End.z );
     s = getSpindleState( );
 
 	if (g_pSimulation)
 	{
-		status = g_pSimulation(Ideal, x, y, z, d, s);
+		status = g_pSimulation(Start, End, d );
 	}
 	else
 	{

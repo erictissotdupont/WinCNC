@@ -14,7 +14,7 @@ typedef struct _tSpindle {
 
 void motorInit( );
 void setExportFile( HANDLE file );
-void setSimulationMode(tStatus(*callback)(t3DPoint, long, long, long, long, long));
+void setSimulationMode(tStatus(*callback)(t3DPoint, t3DPoint, long));
 
 void getDistanceInPipe(long* x, long* y, long* z);
 

@@ -84,6 +84,7 @@ XMMATRIX                g_Projection;
 
 float					g_rotX = 0.0f;
 float					g_rotY = 0.0f;
+float					g_zoom = 1.0f;
 
 float					g_transX = 0.0f;
 float					g_transY = 0.0f;
@@ -820,7 +821,7 @@ void Render()
 	g_World = XMMatrixMultiply(XMMatrixRotationY(g_rotY), XMMatrixRotationX(g_rotX));
 
 	// Initialize the view matrix
-	XMVECTOR Eye = XMVectorSet(0.0f, 5.0f+g_transX, -5.0f, 0.0f);
+	XMVECTOR Eye = XMVectorSet(0.0f, 5.0f * g_zoom, -5.0f * g_zoom, 0.0f);
 	XMVECTOR At = XMVectorSet(0.0f, 0.0f, 0.0f, 0.0f);
 	XMVECTOR Up = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
 	g_View = XMMatrixLookAtLH(Eye, At, Up);
@@ -941,6 +942,9 @@ void CleanupDevice()
     if( g_pd3dDevice ) g_pd3dDevice->Release();
 }
 
+#define ZOOM_STEP	0.05f
+#define ZOOM_MAX	3
+
 //--------------------------------------------------------------------------------------
 // Called every time the application receives a message
 //--------------------------------------------------------------------------------------
@@ -979,11 +983,20 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam 
 				Render();
 				break;
 			case VK_UP:
-				g_rotX += 0.1;
+				if (bShiftDown)
+				{
+					g_zoom -= ZOOM_STEP;
+					if (g_zoom <= 0) g_zoom = ZOOM_STEP;
+				}
+				else g_rotX += 0.1;
 				Render();
 				break;
 			case VK_DOWN:
-				g_rotX -= 0.1;
+				if (bShiftDown)
+				{
+					if (g_zoom < ZOOM_MAX) g_zoom += ZOOM_STEP;
+				}
+				else g_rotX -= 0.1;
 				Render();
 				break;
 			}

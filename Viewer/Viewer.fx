@@ -54,7 +54,7 @@ PS_INPUT VS( VS_INPUT input )
 	bool xToggle = (phyPos.x > 0) ? (((int)phyPos.x & 1) != 0) : (((int)phyPos.x & 1) == 0);
 	bool zToggle = (phyPos.z > 0) ? (((int)phyPos.z & 1) != 0) : (((int)phyPos.z & 1) == 0);
 
-	// Origin marker is a circle with inverted checker pattern
+	// Origin marker diameter is a circle with inverted checker pattern
 	// 1/16: 0.0009765625
 	// 1/4 : 0.015635
 	bool bCenter = (abs(phyPos.x * phyPos.x + phyPos.z * phyPos.z) < 0.015635);

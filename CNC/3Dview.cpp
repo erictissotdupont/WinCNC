@@ -263,7 +263,8 @@ void resetBlockSurface()
 
 // 96MB is enough for 24x24in at 0.005 resolution (float)
 #define SIM_MAX_SIZE_BYTES		(96*1024*1024)
-#define SIM_RESOLUTION_IN		0.005f	// 0.127mm
+#define SIM_RESOLUTION_MIN		0.0001f	// 0.0254mm
+#define SIM_RESOLUTION_MAX		0.01f	// 0.254mm
 
 bool init3DView(float x, float y)
 {
@@ -271,8 +272,11 @@ bool init3DView(float x, float y)
 	DWORD countX, countY;
 	bool bAlreadyExists = false;
 
-	g_res = SIM_RESOLUTION_IN;
+	g_res = ( x + y ) / 4000.0f;
 
+	if(g_res < SIM_RESOLUTION_MIN) g_res = SIM_RESOLUTION_MIN;
+	if(g_res > SIM_RESOLUTION_MAX) g_res = SIM_RESOLUTION_MAX;
+	
 	// Calculate the size of the altitude matrix
 	countX = 1 + (DWORD)(x / g_res);
 	countY = 1 + (DWORD)(y / g_res);
@@ -394,30 +398,20 @@ inline void toolAt(long x, long y, float z)
 	}
 }
 
-tStatus buildPath(t3DPoint P, long x, long y, long z, long d, long s)
+tStatus buildPath(t3DPoint Start, t3DPoint End, long d )
 {
 	static DWORD prevTime = 0;
-	static t3DPoint p = { 0.0, 0.0, 0.0 };
-	t3DPoint v = { P.x - p.x, P.y - p.y, P.z - p.z };
+	t3DPoint p;
+	t3DPoint v = { End.x - Start.x, End.y - Start.y, End.z - Start.z };
 
 	double l = vector3DLength(v);
 	unsigned long step = (unsigned long)(l / g_res);
-	if (step == 0)
-	{
-		step = 1;
-	}
-	else
-	{
-		v.x = v.x / step;
-		v.y = v.y / step;
-		v.z = v.z / step;
-	}
 
-	for (unsigned long n = 0; n < step; n++)
+	for (unsigned long n = 0; n <= step; n++)
 	{
-		p.x += v.x;
-		p.y += v.y;
-		p.z += v.z;
+		p.x = Start.x + (v.x * n) / step;
+		p.y = Start.y + (v.y * n) / step;
+		p.z = Start.z + (v.z * n) / step;
 
 		DWORD iX = (DWORD)((p.x - g_MetaData.offsetX) / g_res);
 		DWORD iY = (DWORD)((p.y - g_MetaData.offsetY) / g_res);
@@ -425,12 +419,9 @@ tStatus buildPath(t3DPoint P, long x, long y, long z, long d, long s)
 		for (DWORD i = 0; i < iToolPoints; i++)
 		{
 			toolAt(iX + g_toolShape[i].dx, iY + g_toolShape[i].dy, (float)p.z);
-			if (i != 0)
-			{
-				toolAt(iX - g_toolShape[i].dx, iY + g_toolShape[i].dy, (float)p.z);
-				toolAt(iX - g_toolShape[i].dx, iY - g_toolShape[i].dy, (float)p.z);
-				toolAt(iX + g_toolShape[i].dx, iY - g_toolShape[i].dy, (float)p.z);
-			}
+			toolAt(iX - g_toolShape[i].dx, iY + g_toolShape[i].dy, (float)p.z);
+			toolAt(iX - g_toolShape[i].dx, iY - g_toolShape[i].dy, (float)p.z);
+			toolAt(iX + g_toolShape[i].dx, iY - g_toolShape[i].dy, (float)p.z);
 		}
 		DWORD current = timeGetTime();
 		if (current > prevTime + 50)
@@ -442,7 +433,6 @@ tStatus buildPath(t3DPoint P, long x, long y, long z, long d, long s)
 		Sleep(0);
 		//if (d && ((n % 5) == 1)) Sleep(1);
 	}
-	p = P;
 
 	/*
 	if (pathSteps >= maxPathSteps)
