@@ -468,7 +468,7 @@ BOOL BitmapProcess(HWND hWnd)
 	toolRadiusInPixels = (int)(g_BmParams.tool.radius / res);
 
 	// Estimate the # of points in the tool is the surface of the circle
-	maxToolCnt = (int)(PI * (toolRadiusInPixels + 1) * (toolRadiusInPixels + 1));
+	maxToolCnt = (int)(PI * (toolRadiusInPixels + 4) * (toolRadiusInPixels + 4));
 	tool = (t2DintPoint*)malloc(maxToolCnt * sizeof(t2DintPoint));
 
 	// Estimate that the # of points in the edge twice the length of the circle
@@ -513,15 +513,12 @@ BOOL BitmapProcess(HWND hWnd)
 
 	if (g_BmParams.contourOrCarve == modeMatrix )
 	{
+		t2DPoint realPos = { 0.0, 0.0 };
 		// Move to first location to be tested
 		curPos.x = 0;
 		curPos.y = 0;
 		C.x = g_BmParams.matrixPitch;
 		C.y = g_BmParams.matrixPitch;
-
-		//sprintf_s(cmd, sizeof(cmd), "G0 X%f Y%f\r\n", curPos.x, curPos.y);
-		//doGcode(cmd);
-		//update3DView();
 		
 		bDone = FALSE;
 		while (!bDone)
@@ -531,21 +528,21 @@ BOOL BitmapProcess(HWND hWnd)
 			{
 				if (curPos.y + C.y > g_BmParams.height)
 				{
-					sprintf_s(cmd, sizeof(cmd), "G0 X%f Y%f\r\n", -curPos.x, -curPos.y);
-					doGcode(cmd);
+//					sprintf_s(cmd, sizeof(cmd), "G0 X%f Y%f\r\n", -curPos.x, -curPos.y);
+//					doGcode(cmd);
 					bDone = TRUE;
 					break;
 				}
-				sprintf_s(cmd, sizeof(cmd), "G0 X%f Y%f\r\n", -curPos.x, C.y);
+//				sprintf_s(cmd, sizeof(cmd), "G0 X%f Y%f\r\n", -curPos.x, C.y);
 				curPos.y += C.y;
 				curPos.x = 0.0f;
-				doGcode(cmd);
+//				doGcode(cmd);
 			}
 			else
 			{
-				sprintf_s(cmd, sizeof(cmd), "G0 X%f\r\n", C.x);
+//				sprintf_s(cmd, sizeof(cmd), "G0 X%f\r\n", C.x);
 				curPos.x += C.x;
-				doGcode(cmd);
+//				doGcode(cmd);
 			}
 
 			// Convert the current position in pixels
@@ -554,21 +551,33 @@ BOOL BitmapProcess(HWND hWnd)
 
 			if (TestToolPosition(&bm, iX, iY, tool, toolPtCnt, edge, edgePtCnt, &a) == resultToolOverlap)
 			{
+				sprintf_s(cmd, sizeof(cmd), "G0 X%f Y%f\r\n", curPos.x - realPos.x, curPos.y - realPos.y );
+				doGcode(cmd);
+				realPos = curPos;
+
 				sprintf_s(cmd, sizeof(cmd), "G0 Z%f\r\n", -g_BmParams.tool.safeTravel );
 				doGcode(cmd);
 
 				float z = 0.0f;
-				float dz = g_BmParams.tool.radius * 16;
-				while (z < g_BmParams.depth)
+				float dz = 1.0; // 0.18; // g_BmParams.tool.radius * 4;
+				while( 1 )
 				{
 					if ((z + dz) > g_BmParams.depth) dz = g_BmParams.depth - z;
 					z += dz;
 					sprintf_s(cmd, sizeof(cmd), "G1 Z%f\r\n", -dz);
 					doGcode(cmd);
-					sprintf_s(cmd, sizeof(cmd), "G0 Z%f\r\n", z);
-					doGcode(cmd);
-					sprintf_s(cmd, sizeof(cmd), "G1 Z%f\r\n", -z);
-					doGcode(cmd);
+
+					if (z < g_BmParams.depth)
+					{
+						sprintf_s(cmd, sizeof(cmd), "G0 Z%f\r\n", z);
+						doGcode(cmd);
+						sprintf_s(cmd, sizeof(cmd), "G0 Z%f\r\n", -z);
+						doGcode(cmd);
+					}
+					else
+					{
+						break;
+					}
 				}
 				sprintf_s(cmd, sizeof(cmd), "G0 Z%f\r\n", z + g_BmParams.tool.safeTravel);
 				doGcode(cmd);
@@ -576,6 +585,10 @@ BOOL BitmapProcess(HWND hWnd)
 
 			update3DView();
 		}
+
+		// Return to origin
+		sprintf_s(cmd, sizeof(cmd), "G0 X%f Y%f\r\n", -realPos.x, -realPos.y);
+		doGcode(cmd);
 	}
 
 	if (g_BmParams.contourOrCarve == modeCenterOnly ||

@@ -2,8 +2,8 @@
 #include "HardwareSerial.h"
 #include "pins_arduino.h"
 
-#define X_AXIS_RES           0.0004389f
-#define Y_AXIS_RES           0.0004389f
+#define X_AXIS_RES           0.00043821f
+#define Y_AXIS_RES           0.00049271f
 #define Z_AXIS_RES           0.0003925f
 
 #define ERROR_LIMIT_X        0x00000001l

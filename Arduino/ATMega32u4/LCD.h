@@ -4,6 +4,14 @@
 #include <inttypes.h>
 #include "Print.h"
 
+
+typedef enum {
+  Manual_Disabled,
+  Manual_XY,
+  Manual_Z,
+  Manual_MaxMode
+} tManualMode;
+
 //return values for ReadButtons()
 typedef enum {
   BUTTON_NONE = 0, 

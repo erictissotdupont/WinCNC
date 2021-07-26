@@ -23,9 +23,9 @@ int g_debug[MAX_DEBUG];
 //-----------------------------------------------------------------
 //           Step,Dir,End,Swap,    LimitFlag,      StepByInch
 Motor     X ( 11, 10, -1,  0, ERROR_LIMIT_X, 1.0f/X_AXIS_RES );
-Motor     Y ( 13, 12, -1,  0, ERROR_LIMIT_Y, 1.0f/Y_AXIS_RES );
+Motor     Y ( 13, 12, -1,  1, ERROR_LIMIT_Y, 1.0f/Y_AXIS_RES );
 DualMotor Z (  7,  6, -1,
-               9,  8, -1,  1, ERROR_LIMIT_Z | REDUCED_RAPID_POSITIONING_SPEED,
+               9,  8, -1,  0, ERROR_LIMIT_Z | REDUCED_RAPID_POSITIONING_SPEED,
                                              1.0f/Z_AXIS_RES );
 
 
@@ -49,13 +49,15 @@ Motor::Motor( int sp, int dp, int ep, int rd, unsigned long flags, unsigned long
   
   if(( flags & REDUCED_RAPID_POSITIONING_SPEED ) == 0 )
   {
+    // Normal speed
     minSpeedStep = SPEED_TO_STEP( stepByInch, MIN_SPEED );
     maxSpeedStep = SPEED_TO_STEP( stepByInch, MAX_SPEED );
   }
   else
   {
+    // Reduced speed for axis with weak motors or lots of intertia
     minSpeedStep = SPEED_TO_STEP( stepByInch, MIN_SPEED / 2 );
-    maxSpeedStep = SPEED_TO_STEP( stepByInch, MAX_SPEED / 2 );
+    maxSpeedStep = SPEED_TO_STEP( stepByInch, MAX_SPEED / 3 );
   }
 
   stepSetReg = digitalSetRegister( sp );
@@ -82,6 +84,9 @@ void Motor::Reset( )
   moveLength = 0;
   moveStep = 0;
   moveDuration = 0;
+
+  accManual = 0;
+  nextSlowStep = 0;
 
   pinMode( stepPin, OUTPUT );
   digitalWrite(stepPin, LOW );
@@ -152,7 +157,7 @@ unsigned long Motor::InitMove( long s, long t )
   *stepClrReg = stepPinMask;
   //digitalWrite( stepPin, LOW );
 
-  if( manual )
+  if( s == 0 && manual )
   {
     if( manual > -100 && manual < 100 )
     {
@@ -163,16 +168,14 @@ unsigned long Motor::InitMove( long s, long t )
         accManual += manual;
         if( accManual < -100 || accManual > 100 )
         {
-          if( accManual > 0 ) s = 1; else s = -1;
+          if( accManual < 0 ) s = -1; else s = 1;
           accManual = 0;
         }
-        else return NO_STEP_TIME;       
       }
-      else return NO_STEP_TIME;
     }
     else
     {
-      s = ( manual - 100 );
+      if( manual > 0 ) s = ( manual - 100 ); else s = manual + 100;
     }
     t = 100000;
   }
@@ -576,13 +579,6 @@ void Motor_Move( long x, long y, long z, long d )
   LCD_SetStatus( str, 0 );
 #endif
 
-}
-
-void Manual_move( )
-{
-  static long tX,tY,tZ;
-  
- 
 }
 
 void Motor_Init( )

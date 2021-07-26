@@ -33,6 +33,8 @@ extern unsigned long g_timeIdleUs;
 extern unsigned long g_maxUARTtaskTime;
 extern unsigned long g_missedStepCount;
 
+tManualMode ManualMode = Manual_Disabled;
+
 void LCD_Init( )
 {
   startAnalogRead( LCD_X_JOY );
@@ -457,7 +459,21 @@ void LCD_UpdateTask( )
     break;
   case LCD_StatePrintStatusPart2 :
     fixedPoint = g_missedStepCount;
-    memset( next, 0, LCD_LINE_LENGTH - 8 );
+    if( ManualMode == Manual_Disabled )
+    {
+      memcpy( next, "AUTO", 4 );
+    }
+    else if( ManualMode == Manual_XY )
+    {
+      memcpy( next, "M-XY", 4 );
+    }
+    else
+    {
+      memcpy( next, "M-Z ", 4 );
+    }
+    
+    memset( next+4, 0, LCD_LINE_LENGTH - 4 );
+    
     charPointer = next + (LCD_LINE_LENGTH - 8);
     DEC_TO_STR( charPointer, fixedPoint, 1000 );
     state = LCD_StatePrintStatusPart3;
@@ -581,7 +597,7 @@ typedef enum {
 } tButtonState;
 
 #define JOY_AVG_SAMPLE           32
-#define JOY_DEAD_ZONE            2
+#define JOY_DEAD_ZONE            5
 #define ADC_AVG_COUNT            4
 
 class JoysticAxis
@@ -654,16 +670,20 @@ bool JoysticAxis::ProcessAdcRead(  )
     }
     else
     {
-      int avg = 0;
-      for( int i=0; i<ADC_AVG_COUNT; i++ ) avg += adcRead[i];
-      avg = avg / ADC_AVG_COUNT;
-
-      // Get position relative to resting position and apply direction
-      avg = ( dir > 0 ) ? adcAtRest - avg : avg - adcAtRest;
-
-      if( avg > JOY_DEAD_ZONE ) pMotor->Manual( avg-JOY_DEAD_ZONE );
-      else if( avg < -JOY_DEAD_ZONE ) pMotor->Manual( avg+JOY_DEAD_ZONE );
-      else pMotor->Manual( 0 );
+      int avg = 0;      
+      if( ManualMode != Manual_Disabled )
+      {  
+        for( int i=0; i<ADC_AVG_COUNT; i++ ) avg += adcRead[i];
+        avg = avg / ADC_AVG_COUNT;
+  
+        // Get position relative to resting position and apply direction
+        avg = ( dir > 0 ) ? adcAtRest - avg : avg - adcAtRest;
+  
+        if( avg > JOY_DEAD_ZONE ) avg -= JOY_DEAD_ZONE;
+        else if( avg < -JOY_DEAD_ZONE ) avg += JOY_DEAD_ZONE;
+        else avg = 0;
+      }
+      pMotor->Manual( avg );
     }
     return true;
   }
@@ -673,12 +693,44 @@ bool JoysticAxis::ProcessAdcRead(  )
 DualJoysticAxis JoyX( &X,  1, &Z, -1, LCD_Y_JOY );
     JoysticAxis JoyY( &Y, -1,         LCD_BUTTONS );
 
+#define BUTTON_DEBOUNCE    5
+
 bool LCD_ScanButtons( void )
 {
   uint32_t adc;
+  static int pressed[4] = {0,0,0,0};
+  
   if( fastAnalogRead( LCD_X_JOY, &adc ))
   {
-    JoyX.SecondaryAxis( adc < 10 );
+    if( adc < 10 )
+    {
+      pressed[0]++;
+    }
+    else
+    {
+      if( pressed[0] > BUTTON_DEBOUNCE )
+      {        
+        switch( ManualMode )
+        {
+        case Manual_Disabled : 
+          ManualMode = Manual_XY; 
+          JoyX.SecondaryAxis( false );
+          break;
+        case Manual_XY :
+          ManualMode = Manual_Z;
+          JoyX.SecondaryAxis( true );
+          break;
+        case Manual_Z : 
+          ManualMode = Manual_Disabled;
+          X.Manual( 0 );
+          Y.Manual( 0 );
+          Z.Manual( 0 );
+          break;
+        }
+      }
+      pressed[0] = 0;
+    }
+    
     return true;
   }
   return false;

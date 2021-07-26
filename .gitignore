@@ -212,3 +212,5 @@ $RECYCLE.BIN/
 *.msi
 *.msm
 *.msp
+
+ESP32/build/

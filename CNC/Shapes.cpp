@@ -46,6 +46,24 @@ UINT ShapeGetSetBool(HWND hWnd, UINT id, BOOL get, int* val)
 	return 0;
 }
 
+UINT ShapeGetSetInt(HWND hWnd, UINT id, BOOL get, int* val)
+{
+	WCHAR str[MAX_STR];
+	HWND hItem;
+	hItem = GetDlgItem(hWnd, id);
+	if (get)
+	{
+		GetWindowText(hItem, str, MAX_STR);
+		if (swscanf_s(str, L"%d", val) != 1) return id;
+	}
+	else
+	{
+		StringCbPrintf(str, sizeof(str), L"%d", *val);
+		SetWindowText(hItem, str);
+	}
+	return 0;
+}
+
 UINT ShapeGetSetString(HWND hWnd, UINT id, BOOL get, WCHAR* str, int cbStr )
 {
 	HWND hItem;

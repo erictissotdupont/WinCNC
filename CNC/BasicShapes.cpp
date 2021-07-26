@@ -29,10 +29,13 @@ typedef struct
 	int rectRounded;
 	float rectRadius;
 
-	// Hexagone
-	float hexRadius;
-	float hexDepth;
-	int hexFill;
+	// Polygon
+	float polyRadius;
+	float polyDepth;
+	int polyFill;
+	int polyCount;
+	int polySkip;
+	int polyExternal;
 
 } tSimpleShapeParam;
 
@@ -89,10 +92,14 @@ UINT BasicShapeGetSet(BOOL get, HWND hWnd )
 	ShapeGetSetBool(hWnd, IDC_RECT_EXTERNAL, get, &g_Params.rectExternal);
 	ShapeGetSetBool(hWnd, IDC_RECT_ROUNDED, get, &g_Params.rectRounded);
 
-	ShapeGetSetFloat(hWnd, IDC_HEX_RADIUS, get, &g_Params.hexRadius);
-	ShapeGetSetFloat(hWnd, IDC_HEX_DEPTH, get, &g_Params.hexDepth);
-	ShapeGetSetBool(hWnd, IDC_HEX_FILL, get, &g_Params.hexFill);
+	ShapeGetSetFloat(hWnd, IDC_HEX_RADIUS, get, &g_Params.polyRadius);
+	ShapeGetSetFloat(hWnd, IDC_HEX_DEPTH, get, &g_Params.polyDepth);
+	ShapeGetSetBool(hWnd, IDC_HEX_FILL, get, &g_Params.polyFill);
+	ShapeGetSetInt(hWnd, IDC_HEX_SIDES, get, &g_Params.polyCount);
+	ShapeGetSetInt(hWnd, IDC_HEX_SKIP, get, &g_Params.polySkip);
+	ShapeGetSetBool(hWnd, IDC_HEX_EXTERNAL_RADIUS, get, &g_Params.polyExternal);
 
+	
 	// Filling shape is only relevant when external dimensions are requested
 	EnableWindow(GetDlgItem(hWnd, IDC_CIRCLE_FILL), Button_GetCheck(GetDlgItem(hWnd, IDC_CIRCLE_EXTERNAL_RADIUS)));
 	EnableWindow(GetDlgItem(hWnd, IDC_RECT_FILL), Button_GetCheck(GetDlgItem(hWnd, IDC_RECT_EXTERNAL)));
@@ -120,37 +127,46 @@ G0 X - 4.625
 #define SAFE_TRAVEL_HEIGHT	0.25f
 
 
-BOOL CarveHexagon(HWND hWnd)
+BOOL CarvePolygon(HWND hWnd)
 {
 	bool bDone = false;
+	bool bBottom = false;
 	char str[MAX_STR];
 	char* cmd;
 
 	// Can't use a tool so small
 	if (g_Params.tool.radius < SMALL_OVELAP * 2)
 	{
-		MessageBoxA(hWnd, "Tool is too small.", "Hexagon", MB_ICONERROR);
+		MessageBoxA(hWnd, "Tool is too small.", "Polygon", MB_ICONERROR);
 		return FALSE;
 	}
 
 	// Can't carve a Hex smaller than the smallest radius
-	if (g_Params.hexRadius < SMALLEST_RADIUS )
+	if (g_Params.polyRadius < SMALLEST_RADIUS )
 	{
-		MessageBoxA(hWnd, "Radius is too small.", "Hexagon", MB_ICONERROR);
+		MessageBoxA(hWnd, "Radius is too small.", "Polygon", MB_ICONERROR);
 		return FALSE;
 	}
 
 	// Can't carve deeper than the tool max depth
-	if (g_Params.hexDepth > g_Params.tool.maxDepth)
+	if (g_Params.polyDepth > g_Params.tool.maxDepth)
 	{
-		MessageBoxA(hWnd, "Carving too deep.", "Hexagon", MB_ICONERROR);
+		MessageBoxA(hWnd, "Carving too deep.", "Polygon", MB_ICONERROR);
 		return FALSE;
 	}
+
+	// Polygone has to have at least 3 sides
+	if ( g_Params.polyCount < 3 )
+	{
+		MessageBoxA(hWnd, "Sides minus skip less than 3.", "Polygon", MB_ICONERROR);
+		return FALSE;
+	}
+
 
 	cmd = (char*)malloc(MAX_BUF);
 	if (cmd == NULL)
 	{
-		MessageBoxA(hWnd, "Failled to allocate buffer.", "Circle", MB_ICONERROR);
+		MessageBoxA(hWnd, "Failled to allocate buffer.", "Polygon", MB_ICONERROR);
 		return FALSE;
 	}
 	memset(cmd, 0x00, MAX_BUF);
@@ -168,12 +184,22 @@ BOOL CarveHexagon(HWND hWnd)
 
 	// Calculate the distance between concentric circles needed to fill
 	// the circle with a small overlap between each of them.
-	float R = g_Params.hexRadius - g_Params.tool.radius;
+	float R;
+	float skip = (g_Params.polySkip * 2.0f * PI) / 360.0f;
+	float slice = (2.0f * PI - skip ) / g_Params.polyCount;
+	
+	if (g_Params.polyExternal)
+	{
+		R = g_Params.polyRadius - g_Params.tool.radius;
+	}
+	else
+	{
+		R = g_Params.polyRadius / cos( slice / 2.0f ) + g_Params.tool.radius;
+	}
 
 	do
 	{
-		float a = R / 2;
-		float b = R * sqrt(3.0 / 4.0);
+		float a, b;
 		float Z = 0.0;
 
 		// Move from the center to the radius of the circle (3 o'clock)
@@ -186,48 +212,77 @@ BOOL CarveHexagon(HWND hWnd)
 
 		do
 		{
+			int i;
 			float dZ = g_Params.tool.cutDepth;
-			if (Z + dZ > g_Params.hexDepth)
+
+			if (bBottom)
 			{
-				dZ = g_Params.hexDepth - Z;
+				// We're at the bottom. Last first slice (or offce) will
+				// flaten the bottom
+				dZ = 0.0f;
 				bDone = true;
 			}
+			else
+			{
+				if (Z + dZ > g_Params.polyDepth)
+				{
+					dZ = g_Params.polyDepth - Z;
+					bBottom = true;
+				}
+			}
+
 			Z += dZ;
 
-			sprintf_s(str, MAX_STR, "G1 X%f Y%f Z%f\r\n", -a, b, -dZ);
+			if (g_Params.polySkip)
+			{
+				// The first slice is an arbitrary angle
+				a = -R * (1 - cos(skip));
+				b = -R * sin(skip);
+				i = 0;
+			}
+			else
+			{
+				// No slipping this is first slice
+				a = -R * (1 - cos(slice));
+				b = -R * sin(slice);
+				i = 1;
+			}
+
+			// Tool dives here
+			sprintf_s(str, MAX_STR, "G1 X%f Y%f Z%f\r\n", a, b, -dZ);
 			strcat_s(cmd, MAX_BUF, str);
-			sprintf_s(str, MAX_STR, "G1 X%f\r\n", -R);
-			strcat_s(cmd, MAX_BUF, str);
-			sprintf_s(str, MAX_STR, "G1 X%f Y%f\r\n", -a, -b);
-			strcat_s(cmd, MAX_BUF, str);
-			sprintf_s(str, MAX_STR, "G1 X%f Y%f\r\n", a, -b);
-			strcat_s(cmd, MAX_BUF, str);
-			sprintf_s(str, MAX_STR, "G1 X%f\r\n", R);
-			strcat_s(cmd, MAX_BUF, str);
-			sprintf_s(str, MAX_STR, "G1 X%f Y%f\r\n", a, b);
-			strcat_s(cmd, MAX_BUF, str);
+
+			if (!bDone)
+			{
+				// If bDone is true, do one more edge to flatten the bottom
+				for (; i < g_Params.polyCount; i++)
+				{
+					a = -R * (cos(skip + slice * i) - cos(skip + slice * (i + 1)));
+					b = R * (sin(skip + slice * i) - sin(skip + slice * (i + 1)));
+
+					sprintf_s(str, MAX_STR, "G1 X%f Y%f\r\n", a, b);
+					strcat_s(cmd, MAX_BUF, str);
+				}
+			}
 
 		} while (!bDone);
 
 		if (bDone)
 		{
-			// Do one more edge to flatten bottom
-			sprintf_s(str, MAX_STR, "G1 X%f Y%f\r\n", -a, b);
-			strcat_s(cmd, MAX_BUF, str);
 			// Come back to starting height
 			sprintf_s(str, MAX_STR, "G0 Z%f\r\n", Z + SAFE_TRAVEL_HEIGHT);
 			strcat_s(cmd, MAX_BUF, str);
+
 			// Move back to center
-			sprintf_s(str, MAX_STR, "G0 X%f Y%f\r\n", -a, -b);
+			sprintf_s(str, MAX_STR, "G0 X%f Y%f\r\n", -a - R, -b);
 			strcat_s(cmd, MAX_BUF, str);
 			sprintf_s(str, MAX_STR, "G1 Z%f", -SAFE_TRAVEL_HEIGHT);
 			strcat_s(cmd, MAX_BUF, str);
 
 			Z = 0.0;
 
-			if( g_Params.hexFill )
+			if( g_Params.polyFill )
 			{
-
 				// bDone = false;
 			}
 			// End the line and stop the motor if needed
@@ -885,7 +940,7 @@ BOOL CALLBACK BasicShapesProc(HWND hWnd,
 				break;
 			case IDC_CARVE_HEX:
 				BasicShapeGetSet(TRUE, hWnd);
-				CarveHexagon(hWnd);
+				CarvePolygon(hWnd);
 				break;
 			case IDOK:
 				/*

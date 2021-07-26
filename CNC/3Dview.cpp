@@ -424,7 +424,7 @@ tStatus buildPath(t3DPoint Start, t3DPoint End, long d )
 			toolAt(iX + g_toolShape[i].dx, iY - g_toolShape[i].dy, (float)p.z);
 		}
 		DWORD current = timeGetTime();
-		if (current > prevTime + 50)
+		if (current > prevTime + 50 || step == n )
 		{
 			PostMessage(hMainWindow, WM_UPDATE_POSITION, 0, 0);
 			prevTime = current;
@@ -540,8 +540,6 @@ BOOL CALLBACK _3DSettingsProc(HWND hWnd,
 	WPARAM wParam,
 	LPARAM lParam)
 {
-	HWND hDlg;
-
 	switch (message)
 	{
 	case WM_INITDIALOG:

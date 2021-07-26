@@ -376,6 +376,8 @@ bool UART_Task( )
   return ret;
 }
 
+extern tManualMode ManualMode;
+
 void Motor_Task( )
 {
   static char tmp[10];
@@ -383,6 +385,9 @@ void Motor_Task( )
   // While there are commands in the FIFO
   while( g_fifoIn != g_fifoOut )
   {
+    // As soon as commands are received via UART, disable manual mode
+    ManualMode = Manual_Disabled;
+    
     // Update the state of the spindle if needed
     if( g_fifo[g_fifoOut].s >= 0 )
     {

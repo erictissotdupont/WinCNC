@@ -72,7 +72,7 @@ tStatus parseLine(char* cmd)
 
 	if (strstr(cmd, "RUN ") == cmd)
 	{
-
+		
 	}
 	else if (strstr(cmd, "EXP") == cmd)
 	{
@@ -155,23 +155,26 @@ void OnCncStatus( HWND hWnd, char* str )
 
 	x = y = z = s = 0;
 
-	pt = strchr(str, 'X');
-	if (pt) if (sscanf_s(pt + 1, "%d", &x) == 1) gotWhat |= 0x01;
-	pt = strchr(str, 'Y');
-	if (pt) if (sscanf_s(pt + 1, "%d", &y) == 1) gotWhat |= 0x02;
-	pt = strchr(str, 'Z');
-	if (pt) if (sscanf_s(pt + 1, "%d", &z) == 1) gotWhat |= 0x04;
-	pt = strchr(str, 'S');
-	if (pt) if (sscanf_s(pt + 1, "%d", &s) == 1) gotWhat |= 0x08;
+	if (str)
+	{
+		pt = strchr(str, 'X');
+		if (pt) if (sscanf_s(pt + 1, "%d", &x) == 1) gotWhat |= 0x01;
+		pt = strchr(str, 'Y');
+		if (pt) if (sscanf_s(pt + 1, "%d", &y) == 1) gotWhat |= 0x02;
+		pt = strchr(str, 'Z');
+		if (pt) if (sscanf_s(pt + 1, "%d", &z) == 1) gotWhat |= 0x04;
+		pt = strchr(str, 'S');
+		if (pt) if (sscanf_s(pt + 1, "%d", &s) == 1) gotWhat |= 0x08;
 
-	pt = strchr(str, 'a');
-	if (pt) sscanf_s(pt + 1, "%d", &g_debug[0]);
-	pt = strchr(str, 'b');
-	if (pt) sscanf_s(pt + 1, "%d", &g_debug[1]);
-	pt = strchr(str, 'c');
-	if (pt) sscanf_s(pt + 1, "%d", &g_debug[2]);
-	pt = strchr(str, 'd');
-	if (pt) sscanf_s(pt + 1, "%d", &g_debug[3]);
+		pt = strchr(str, 'a');
+		if (pt) sscanf_s(pt + 1, "%d", &g_debug[0]);
+		pt = strchr(str, 'b');
+		if (pt) sscanf_s(pt + 1, "%d", &g_debug[1]);
+		pt = strchr(str, 'c');
+		if (pt) sscanf_s(pt + 1, "%d", &g_debug[2]);
+		pt = strchr(str, 'd');
+		if (pt) sscanf_s(pt + 1, "%d", &g_debug[3]);
+	}
 
 	if (gotWhat & 0x08)
 	{
@@ -182,7 +185,7 @@ void OnCncStatus( HWND hWnd, char* str )
 	if (gotWhat & 0x02) g_actualY = y;
 	if (gotWhat & 0x04) g_actualZ = z;
 	
-	if (gotWhat & 0x07 == 0x07 )
+	if (( gotWhat & 0x07 ) == 0x07 )
 	{
 		stepToPos(x, y, z, &g_displayPos);
 	}
@@ -243,9 +246,9 @@ int APIENTRY _tWinMain(_In_ HINSTANCE hInstance,
 
 	// 1/16 step - 400 steps - 2.8in per turn = 0.0004375 per step
 	// Error of 0.32% (too far) = 0.0004393
-	initAxis(0, 0.0004389); // X
+	initAxis(0, 0.00043821); // X
 	
-	initAxis(1, 0.0004389); // Y
+	initAxis(1, 0.00049271); // Y
 
 	initAxis(2, 0.0003925); // Z - 1/4 step - 400 steps - 0.5in per turn
 	
