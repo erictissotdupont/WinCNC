@@ -66,6 +66,7 @@ long g_xPos;
 long g_yPos;
 long g_zPos;
 
+unsigned long g_nackCounter = 0;
 int g_inQueue = 0;
 
 #define STATUS_LITLE_ENDIAN   0x80000000
@@ -239,12 +240,15 @@ void sendACK( unsigned long seq, int status )
 void sendNAK( unsigned long seq )
 {
   char rspbuf[80];
-  int cbRsp = sprintf( rspbuf, "NAK,%lu,%ld,%ld,%ld,%d", 
+  
+  int cbRsp = sprintf( rspbuf, "NAK,%lu,%ld,%ld,%ld,%lu", 
     seq,
     g_xPos,
     g_yPos,
     g_zPos,
-    g_inQueue ) + 1;
+    g_nackCounter ) + 1;
+    
+  g_nackCounter++;
     
   sendMessage( rspbuf, cbRsp );
 }
@@ -457,7 +461,9 @@ void receiverTask(void *arg)
               
               g_xPos = 0;
               g_yPos = 0;
-              g_zPos = 0;          
+              g_zPos = 0;     
+
+              g_nackCounter = 0;
               
               ResetStatus( );
               
@@ -478,13 +484,12 @@ void receiverTask(void *arg)
             }            
           }
           
+          // Sending the ACK once. If the message is lost, the host will 
+          // timeout and re-send the command message. Since the sequence #
+          // will be in the past the device will just ACK it again and
+          // transfer will resume.
           sendACK( seq, status );
-/*          
-          vTaskDelay( 5 / portTICK_PERIOD_MS );
-          sendACK( seq, status );          
-          vTaskDelay( 5 / portTICK_PERIOD_MS );
-          sendACK( seq, status );          
-*/        
+
           g_NextSeq++;
         }
       }

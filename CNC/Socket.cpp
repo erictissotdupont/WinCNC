@@ -77,6 +77,7 @@ unsigned long g_Status;
 unsigned long g_TXcount = 0;
 unsigned long g_RXcount = 0;
 unsigned long g_RetCount = 0;
+unsigned long g_LostNack = 0;
 int g_msgInQueue = 0;
 
 long errCount = 0;
@@ -176,11 +177,12 @@ unsigned long getDurationOfCommandsInPipe();
 
 void getSocketStatusString(char* szBuffer, unsigned int cbBuffer)
 {
-	sprintf_s(szBuffer, cbBuffer, "%s - Tx:%lu - Rx:%lu - Ret:%lu - %d %%",
+	sprintf_s(szBuffer, cbBuffer, "%s - Tx:%lu - Rx:%lu - Ret:%lu - Lost:%lu - Lvl:%d %%",
 		g_szCNCIP,
 		g_TXcount,
 		g_RXcount,
 		g_RetCount,
+		g_LostNack,
 		(int)((100 * g_msgInQueue ) / 256 ));
 }
 
@@ -426,6 +428,8 @@ bool listen( SOCKET s )
 	long x, y, z;
 	static char statusStr[80];
 	unsigned long seq;
+	unsigned long nackCounter;
+	static unsigned long expectedNack = 0;
 	int status;
 	
 	while( (cnt = recv( s, msg, sizeof(msg), 0)) > 0)
@@ -470,7 +474,7 @@ bool listen( SOCKET s )
 		{
 			g_RXcount++;
 
-			if (sscanf_s(msg + 4, "%lu,%ld,%ld,%ld,%d", &seq, &x, &y, &z, &g_msgInQueue) != 5 )
+			if (sscanf_s(msg + 4, "%lu,%ld,%ld,%ld,%d", &seq, &x, &y, &z, &nackCounter) != 5 )
 			{
 				OutputDebugStringA("NAK format error.");
 			}
@@ -481,6 +485,12 @@ bool listen( SOCKET s )
 			else
 			{
 				SetEvent(g_hNackReceived);
+
+				if (nackCounter != expectedNack )
+				{
+					g_LostNack++;
+				}
+				expectedNack = nackCounter + 1;
 
 				sprintf_s(statusStr, sizeof(statusStr), "X%ldY%ldZ%ld", x, y, z);
 				NOTIFY_CALLBACK(CNC_RESPONSE, statusStr)
