@@ -30,7 +30,7 @@
 // The CNC will nack immediately after reception and then every 100ms. 
 // This timeout is designed to allow for two consecutive missed NACK messages
 // not causing a retry.
-#define COMMAND_TIMEOUT_MS		150
+#define COMMAND_TIMEOUT_MS		350
 
 // This is how long a lack of communication will result in a disconnected state
 #define DISCONNECT_TIMEOUT_MS	30000
@@ -46,8 +46,6 @@
 
 #define MAX_CALLBACK			10
 
-
-
 void(*g_pEventCallback[CND_MAX_EVENT][MAX_CALLBACK])( PVOID );
 int g_pCallbg_ACKcount[CND_MAX_EVENT];
 #define NOTIFY_CALLBACK(event,param) for(int j=0;j<g_pCallbg_ACKcount[event];j++) g_pEventCallback[event][j](param);
@@ -58,13 +56,20 @@ HANDLE hResponseReceived = NULL;
 int bConnected = 0;
 int bRun = 1;
 
+
+bool g_bDebug = true;
 bool g_bRun = true;
 
 HANDLE g_hConnected;
 HANDLE g_hDisconnected;
+HANDLE g_hStop;
 HANDLE g_hBufferFull;
 HANDLE g_hBufferEmpty;
+HANDLE g_hEventMsgReceived;
+
 HANDLE g_hAckReceived;
+tCnCCmdStatus g_msgStatus; // Set just before signaling ACK received
+
 HANDLE g_hNackReceived;
 
 SOCKET g_CNCSocket;
@@ -88,6 +93,7 @@ int g_outCmdCount;
 char g_outBuffer[OUT_MSG_BUF_SIZE];
 HANDLE g_outBufferMutex = NULL;
 unsigned long g_msgSeq;
+
 
 HANDLE hDebug = INVALID_HANDLE_VALUE;
 
@@ -282,51 +288,93 @@ tStatus postCommand(char* cmd)
 	return status;
 }
 
-bool sendAndWaitForAck(char* msg, size_t cbMsg)
+tStatus sendAndWaitForAck(char* msg, size_t cbMsg)
 {
 	int iResult;
-	bool bSuccess = false;
+	// This is the status if the we exhaust the # of of retries
+	tStatus status = retCncCommunicationError;
 	int retry = 0;
+	bool bRetry = true;
 
-	while ( !bSuccess && retry++ < MAX_COMMAND_RETRY )
+	ResetEvent(g_hAckReceived);
+	ResetEvent(g_hNackReceived);
+
+	while (bRetry && retry++ < MAX_COMMAND_RETRY )
 	{
 		if (sendto(g_CNCSocket, msg, strlen(msg) + 1, 0, (SOCKADDR*)&g_CncAddr, sizeof(g_CncAddr)) <= 0)
 		{
 			iResult = WSAGetLastError();
+			if( g_bDebug )
+			{
+				char str[80];
+				sprintf_s(str, sizeof(str), "%s::sendto() failed. Reason:%d", __FUNCTION__, iResult);
+				OutputDebugStringA(str);
+			}
+			// Avoid sending retries in a tight loop 
+			Sleep(COMMAND_TIMEOUT_MS);
 		}
 		else
 		{
-			bool bTimeout = false;
-			HANDLE hEvent[3];
+			bool bWait = true;
+			HANDLE hEvent[4];
 
 			g_TXcount++;
 
 			hEvent[0] = g_hAckReceived;
 			hEvent[1] = g_hNackReceived;
 			hEvent[2] = g_hDisconnected;
+			hEvent[3] = g_hStop;
 
 			do
 			{
 				// The CNC will NACK every 100ms. Retry if we didn't get any
-				// communication for 350 which is 2 missed messages in a row.
+				// communication for 250 which is 2 missed messages in a row.
 				//
-				switch (WaitForMultipleObjects(3, hEvent, FALSE, 650 ))
+				switch (WaitForMultipleObjects(4, hEvent, FALSE, COMMAND_TIMEOUT_MS ))
 				{
+				default:
+					bWait = false;
+					bRetry = false;
+					status = retInternalError;
+					break;
+
 				case WAIT_TIMEOUT:
+					// Stop waiting and retry sending the message
 					g_RetCount++;
-					bTimeout = true;
+					bWait = false;
+					if (g_bDebug)
 					{
 						unsigned long seq;
 						char str[100];
 						sscanf_s(msg + 4, "%lu", &seq);
-						sprintf_s( str, 100, "Timeout waiting for %lu", seq);
+						sprintf_s( str, 100, "%s::Timeout waiting for %lu", __FUNCTION__, seq);
 						OutputDebugStringA(str);						
 					}				
 					break;
 
 				case WAIT_OBJECT_0: // Ack
-				case WAIT_OBJECT_0 + 2: // Stop
-					bSuccess = true;
+					bWait = false;
+					bRetry = false;
+					if (g_msgStatus != cncStatus_Success)
+					{
+						status = retCncCommunicationError;
+					}
+					else
+					{
+						status = retSuccess;
+					}
+					break;
+
+				case WAIT_OBJECT_0 + 2: // Disconnected
+					bWait = false;
+					bRetry = false;
+					status = retCncNotConnected;
+					break;
+
+				case WAIT_OBJECT_0 + 3: // Stop
+					bWait = false;
+					bRetry = false;
+					status = retStopRequested;
 					break;
 
 				case WAIT_OBJECT_0 + 1: // Nack
@@ -335,10 +383,10 @@ bool sendAndWaitForAck(char* msg, size_t cbMsg)
 					// us to wait...
 					break;
 				}
-			} while (!bTimeout && !bSuccess);
+			} while (bWait);
 		}
 	}
-	return bSuccess;
+	return status;
 }
 
 tStatus sendCommand(char* cmd, char* rsp, size_t cbRsp )
@@ -368,14 +416,7 @@ tStatus sendCommand(char* cmd, char* rsp, size_t cbRsp )
 
 	case WAIT_OBJECT_0:
 		cbMsg = sprintf_s(msg, sizeof(msg), "CMD,%lu,1|%s|", g_msgSeq, cmd) + 1;
-		if (sendAndWaitForAck(msg, cbMsg))
-		{
-			status = retSuccess;
-		}
-		else
-		{
-			status = retCncCommunicationError;
-		}
+		status = sendAndWaitForAck(msg, cbMsg);
 		ReleaseMutex(g_outBufferMutex);
 		break;
 	}
@@ -383,7 +424,7 @@ tStatus sendCommand(char* cmd, char* rsp, size_t cbRsp )
 }
 
 
-bool transmit( SOCKET s )
+void transmit( SOCKET s )
 {
 	HANDLE hEvent[2];
 	char msg[OUT_MSG_BUF_SIZE + 64]; // Extra space is of the header
@@ -418,10 +459,9 @@ bool transmit( SOCKET s )
 			// TODO : Deal with mutext timeout
 		}
 	}
-	return true;
 }
 
-bool listen( SOCKET s )
+void listen( SOCKET s )
 {
 	int cnt;
 	char msg[OUT_MSG_BUF_SIZE];
@@ -436,9 +476,13 @@ bool listen( SOCKET s )
 	{
 		if (msg[cnt - 1] != 0)
 		{
-			OutputDebugStringA("Not zero terminated message.");
+			OutputDebugStringA( __FUNCTION__"::Msg is not zero terminated.");
 			msg[cnt] = 0;
 		}
+
+		// Let the connection manager know we're receiving stuff
+		// from the machine
+		SetEvent(g_hEventMsgReceived);
 
 		if (strncmp(msg, "ACK,", 4) == 0)
 		{
@@ -450,16 +494,26 @@ bool listen( SOCKET s )
 				&g_msgInQueue,
 				&status) != 6 )
 			{
-				OutputDebugStringA("ACK format error.");
+				OutputDebugStringA( __FUNCTION__"::ACK format error.");
+			}
+			else if (seq == (g_msgSeq - 1))
+			{
+				OutputDebugStringA("Delayed ACK.");
 			}
 			else if (seq != g_msgSeq)
 			{
-				// OutputDebugStringA("Out of sequence ACK.");
+				char str[80];
+				sprintf_s(str, sizeof(str),
+					__FUNCTION__"::Out of sequence ACK. Got %lu, expected %lu.",
+					seq, g_msgSeq);
+
+				OutputDebugStringA( str );
 			}
 			else
 			{
 				// TODO : what if the status is not zero ???
 				g_msgSeq++;
+				g_msgStatus = (tCnCCmdStatus)status;
 				SetEvent(g_hAckReceived);
 
 				sprintf_s(statusStr, sizeof(statusStr), "X%ldY%ldZ%ld", x, y, z );
@@ -477,6 +531,10 @@ bool listen( SOCKET s )
 			if (sscanf_s(msg + 4, "%lu,%ld,%ld,%ld,%d", &seq, &x, &y, &z, &nackCounter) != 5 )
 			{
 				OutputDebugStringA("NAK format error.");
+			}
+			else if (seq == ( g_msgSeq - 1 ))
+			{
+				OutputDebugStringA("Delayed NAK.");
 			}
 			else if (seq != g_msgSeq)
 			{
@@ -496,23 +554,35 @@ bool listen( SOCKET s )
 				NOTIFY_CALLBACK(CNC_RESPONSE, statusStr)
 			}
 		}
+		else
+		{
+			OutputDebugStringA("Unexpected response message.");
+		}
 	}
-
-	closesocket(s);
-	return true;
 }
 
 DWORD senderThread(PVOID pParam)
 {
-	while (g_bRun)
+	bool bRun = true;
+	while (bRun)
 	{
 		HANDLE hEvent[2];
 		hEvent[0] = g_hConnected;
-		hEvent[1] = g_hDisconnected;
+		hEvent[1] = g_hStop;
+
 		switch (WaitForMultipleObjects(2, hEvent, FALSE, INFINITE))
 		{
+		default:
+			OutputDebugStringA(__FUNCTION__"::Bailed out waiting for connection.");
+			bRun = false;
+			break;
+
 		case WAIT_OBJECT_0: // Connected	
 			transmit(g_CNCSocket);
+			break;
+
+		case WAIT_OBJECT_0 + 1: // Stop
+			bRun = false;
 			break;
 		}
 	}
@@ -521,22 +591,107 @@ DWORD senderThread(PVOID pParam)
 
 DWORD receiverThread(PVOID pParam)
 {
-	while (g_bRun)
+	bool bRun = true;
+	while (bRun)
 	{
 		HANDLE hEvent[2];
 		hEvent[0] = g_hConnected;
-		hEvent[1] = g_hDisconnected;
+		hEvent[1] = g_hStop;
 
 		switch (WaitForMultipleObjects(2, hEvent, FALSE, INFINITE))
 		{
+		default :
+			OutputDebugStringA(__FUNCTION__"::Bailed out waiting for connection.");
+			bRun = false;
+			break;
+
 		case WAIT_OBJECT_0: // Connected	
 			listen(g_CNCSocket);
+			// Returns when we're disconnected
+			break;
+
+		case WAIT_OBJECT_0 + 1: // Stop
+			bRun = false;
 			break;
 		}
 	}
 	return 0;
 }
 
+DWORD connectionManagerThread(PVOID pParam)
+{
+	bool bRun = true;
+
+	do
+	{
+		if (bConnected)
+		{
+			HANDLE hEvent[2];
+
+			hEvent[0] = g_hEventMsgReceived;
+			hEvent[1] = g_hStop;
+
+			switch (WaitForMultipleObjects(2, hEvent, FALSE, DISCONNECT_TIMEOUT_MS))
+			{
+			case WAIT_TIMEOUT:
+				closesocket(g_CNCSocket);
+				bConnected = false;
+				ResetEvent(g_hConnected);
+				SetEvent(g_hDisconnected);
+				break;
+
+			case WAIT_OBJECT_0:
+				// Receiving stuff... we're connected okay
+				break;
+
+			case WAIT_OBJECT_0 + 1 :
+				// Normal shutdown
+				bRun = false;
+				break;
+
+			default:
+				OutputDebugStringA(__FUNCTION__"::Bailed out waiting for disconnection.");
+				bRun = false;
+			}
+		}
+		else // Not connected
+		{
+			HANDLE hEvent[2];
+
+			hEvent[0] = g_hConnected;
+			hEvent[1] = g_hStop;
+
+			strcpy_s(g_szCNCIP, sizeof(g_szCNCIP), "Disconnected");
+			NOTIFY_CALLBACK(CNC_CONNECTED, NULL)
+
+			switch (WaitForMultipleObjects(2, hEvent, FALSE, INFINITE ))
+			{
+			case WAIT_OBJECT_0: // Connected
+				bConnected = true;
+				ResetEvent(g_hDisconnected);
+				if (sendCommand("RST", NULL, 0) != retSuccess)
+				{
+					ResetEvent(g_hConnected);
+					SetEvent(g_hDisconnected);
+					bConnected = false;
+				}
+				break;
+
+			case WAIT_OBJECT_0 + 1:
+				// Normal shutdown
+				bRun = false;
+				break;
+
+			default:
+				OutputDebugStringA(__FUNCTION__"::Bailed out waiting for connection.");
+				bRun = false;
+			}
+		}
+
+	} while (bRun);
+
+	return 0;
+}
 
 DWORD listenerThread(PVOID pParam)
 {
@@ -596,10 +751,15 @@ DWORD listenerThread(PVOID pParam)
 			}
 			else
 			{
+				// If we get this it means the CNC is idle. Queue is empty
+				g_msgInQueue = 0;
+
+				// Let the connection manager know
+				SetEvent(g_hEventMsgReceived);
+
 				if (bConnected)
 				{
 					// TODO : refresh status
-
 				}
 				else
 				{
@@ -624,7 +784,6 @@ DWORD listenerThread(PVOID pParam)
 
 					OutputDebugStringA("Synchronized seq with CNC");
 					g_msgSeq = seq;
-					bConnected = true;
 					SetEvent(g_hConnected);
 				}
 
@@ -787,23 +946,21 @@ int initSocketCom( )
   g_outBufferMutex = CreateMutex(NULL, FALSE, NULL);
   hResponseReceived = CreateEvent(NULL, FALSE, FALSE, NULL);
 
-  strcpy_s(g_szCNCIP, sizeof(g_szCNCIP), "Disconnected");
-
   g_hConnected = CreateEvent(NULL, TRUE, FALSE, NULL);
-
-  g_hDisconnected          = CreateEvent(NULL, FALSE, FALSE, NULL);
+  g_hDisconnected  = CreateEvent(NULL, TRUE, FALSE, NULL);
+  g_hStop = CreateEvent(NULL, TRUE, FALSE, NULL);
+  
   g_hBufferFull    = CreateEvent(NULL, FALSE, FALSE, NULL);
   g_hBufferEmpty   = CreateEvent(NULL, FALSE, FALSE, NULL);
   g_hAckReceived   = CreateEvent(NULL, FALSE, FALSE, NULL);
   g_hNackReceived  = CreateEvent(NULL, FALSE, FALSE, NULL);
+  g_hEventMsgReceived = CreateEvent(NULL, FALSE, FALSE, NULL);
 
+  CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)connectionManagerThread, NULL, 0, &threadId);
   CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)senderThread, NULL, 0, &threadId);
   CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)receiverThread, NULL, 0, &threadId);
   CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)listenerThread, NULL, 0, &threadId);
-
-  WaitForSingleObject(g_hConnected, 3000);
-  sendCommand("RST", NULL, 0 );
-  
+ 
   return 0;
 }
 

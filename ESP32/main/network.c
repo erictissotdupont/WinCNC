@@ -83,15 +83,15 @@ stateChangeCallback callback = NULL;
 
 static const char* TAG = "network";
 
-enum {
-	timeStateWaitingForConnection,
-	timeStateWaitingForHello,
-	timeStateWaitingForSNTP,
-	timeStateWaitingForPeerToGetTime,
-	timeStateGotSNTPTime,
-	timeStateGotPeerTime,
-	timeStateError,
-} g_timeState = timeStateWaitingForConnection;
+typedef enum {
+	cncStatus_Success = 0,
+  cncStatus_HeaderDecodingError = -1,
+  cncStatus_MessageIsTooShort = -2,
+  cncStatus_CommandDecodingError = -3,
+  cncStatus_PositionCRCmismatch = -4,
+  cncStatus_UnknownCommand = -5,
+  cncStatus_SequenceError = -6,
+} tCnCCmdStatus;
 
 uint64_t g_timeStateTimout;
 
@@ -222,7 +222,7 @@ void sendMessage( char* msg, size_t cbMsg )
   }
 }
 
-void sendACK( unsigned long seq, int status )
+void sendACK( unsigned long seq, tCnCCmdStatus status )
 {
   char rspbuf[80];
 
@@ -232,7 +232,7 @@ void sendACK( unsigned long seq, int status )
     g_yPos,
     g_zPos,
     g_inQueue,    
-    status ) + 1;
+    (int)status ) + 1;
     
   sendMessage( rspbuf, cbRsp );
 }
@@ -259,9 +259,9 @@ void receiverTask(void *arg)
 {
   int rxSocket, nbytes;
   unsigned int addrlen;
-  static char msgbuf[2048];
   u_int yes=1;
-  
+  static char msgbuf[2048]; // Static to avoid bloating the stack
+
   ESP_LOGI( TAG, "Receiver task started." );
 
   // create what looks like an ordinary UDP socket
@@ -294,7 +294,6 @@ void receiverTask(void *arg)
   // Now just enter the receive loop
   while (bRun) 
   {
-    int status = 0;
     char srcIP[IPSTRSIZE];
 
     addrlen=sizeof(g_hostAddr);
@@ -339,7 +338,7 @@ void receiverTask(void *arg)
     if( memcmp( msgbuf, "CMD,", 4 ) != 0 )
     {
       ESP_LOGW( TAG, "Invalid header. Message ignored." );
-      // Do nothing else
+      // Ignore
     }
     else
     {
@@ -353,19 +352,31 @@ void receiverTask(void *arg)
       {
         // Format error.
         ESP_LOGE( TAG, "Message header error" );
-        status = -1;
+        // Ignore
       }
       else
       {
+        // For the purpose of monitoring the communication, send the number
+        // of message in the queue BEFORE filling it. This can help measure
+        // how close to an underrun contion the CNC is.
         g_inQueue = uxQueueMessagesWaiting( g_cmd_queue );
         
         // We got a sequence # of a packet we already received ( a repeat )
-        if( seq != g_NextSeq )
+        if( seq == ( g_NextSeq - 1 ))
         {
-          // Let's ACK it. The host probably missed the reponse.
-          sendACK( seq, 0 );
+          // Let's ACK it. The host missed the reponse and re-sent.
+          sendACK( seq, cncStatus_Success );
           
-          ESP_LOGW( TAG, "Out of sequence. Exp:%lu Got:%lu Queue:%d.", 
+          ESP_LOGW( TAG, "Retry of %lu - Queue:%d.", 
+            seq,
+            g_inQueue );
+        }
+        // Got a completely out of order packet. That is not recoverable.
+        else if( seq != g_NextSeq )
+        {
+          sendACK( seq, cncStatus_SequenceError );
+          
+          ESP_LOGE( TAG, "Out of sequence. Exp:%lu Got:%lu Queue:%d.", 
             g_NextSeq,
             seq,
             g_inQueue );
@@ -374,29 +385,36 @@ void receiverTask(void *arg)
         {
           int nackCount = 0;
           char *pt = msgbuf+4;
-          
-          for( int i=0; i<cmdCount; i++ )
+          tCnCCmdStatus status = cncStatus_Success;
+    
+          for( int i=0; i<cmdCount && status == cncStatus_Success; i++ )
           {
-            // Find the first command separator '|'
+            // Find the next command separator '|'
             while( *pt != '|' && pt < (msgbuf + nbytes)) pt++;
             
+            // Move to the next char which should be the start of the command
             pt++;
             if( pt >= (msgbuf + nbytes))
             {
               // Message size invalid
               ESP_LOGE( TAG, "Message too small" );
-              status = -2;
-              break;
+              status = cncStatus_MessageIsTooShort;
             }
+            // This is a movement command
             else if( *pt == '@' )
             {
-              
-              unsigned int remotePosCRC;
               cmd_t cmd;
+              unsigned int remotePosCRC;
               
+              // Move to the start of the command parameters
               pt++;
               
-              uint8_t localPosCRC = crc8( (uint8_t*)g_NetworkPosition, sizeof( g_NetworkPosition ), 0xFF );
+              // Pre-calculate the current position CRC so that we can compare
+              // it what the command expects us to be at
+              uint8_t localPosCRC = crc8( 
+                (uint8_t*)g_NetworkPosition, 
+                sizeof( g_NetworkPosition ), 
+                0xFF );
               
               if( sscanf( pt, "%ld,%ld,%ld,%lu,%lu,%x",
                 &cmd.dx,
@@ -407,28 +425,24 @@ void receiverTask(void *arg)
                 &remotePosCRC ) != 6 )
               {
                   ESP_LOGE( TAG, "Message failed to decode" );
-                  status = -3;
-                  break;
+                  status = cncStatus_CommandDecodingError;
               }
               else if( localPosCRC != remotePosCRC )
               {
                 ESP_LOGE( TAG, "Position CRC mismatch. Got %x, expected %x.", remotePosCRC, localPosCRC );
-                status = -4;
+                status = cncStatus_PositionCRCmismatch;
               }
               else 
               {
+                // Update the position from the command received so that
+                // we can update calculate the CRC
                 g_NetworkPosition[0] += cmd.dx;
                 g_NetworkPosition[1] += cmd.dy;
                 g_NetworkPosition[2] += cmd.dz;
-                
-                if( uxQueueMessagesWaiting( g_cmd_queue ) == 0 )
-                {
-                  ESP_LOGW( TAG, "Cmd queue is empty" );
-                }
-                
+             
                 // Try to place msg into the queue. NAK until it's in queue.
                 // Note that we want to nack immediately to reduce the timeout
-                // on the host side
+                // on the host side.
                 while( xQueueSend( g_cmd_queue, 
                                    &cmd, 
                                    nackCount == 0 ? 0 : ( NACK_INTERVAL_MS / portTICK_PERIOD_MS )) != pdPASS )
@@ -467,7 +481,6 @@ void receiverTask(void *arg)
               
               ResetStatus( );
               
-              status = 0;
             }
             else if( strncmp( pt, "POS", 3 ) == 0 )
             {
@@ -479,9 +492,16 @@ void receiverTask(void *arg)
             }
             else
             {
-              status = -4;
               ESP_LOGE( TAG, "Invalid command" );
-            }            
+              status = cncStatus_UnknownCommand;
+            }
+          } // for( )
+          
+          // Only increment the sequence counter if the message was processed
+          // successfully.
+          if( status == cncStatus_Success )
+          {
+            g_NextSeq++;
           }
           
           // Sending the ACK once. If the message is lost, the host will 
@@ -489,8 +509,7 @@ void receiverTask(void *arg)
           // will be in the past the device will just ACK it again and
           // transfer will resume.
           sendACK( seq, status );
-
-          g_NextSeq++;
+          
         }
       }
     }
@@ -582,26 +601,6 @@ int getNetworkStatus( )
 	else 
 		return -1;
 
-}
-
-char* getTimeStatus( int state )
-{
-  switch( state )
-  {
-  case timeStateWaitingForConnection :    return "Wt C";
-	case timeStateWaitingForHello :         return "Wt H";
-	case timeStateWaitingForSNTP :          return "Wt S";
-	case timeStateWaitingForPeerToGetTime : return "Wt P";
-	case timeStateGotSNTPTime :             return "SNTP";
-	case timeStateGotPeerTime :             return "Peer";
-	case timeStateError :                   return "ERR.";
-  default :                               return "????";
-  }
-}
-
-char* getMyTimeStatus( )
-{
-  return getTimeStatus( g_timeState );
 }
 
 void time_sync_notification_cb(struct timeval *tv)

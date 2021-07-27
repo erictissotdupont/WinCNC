@@ -7,6 +7,17 @@ typedef enum
 	CND_MAX_EVENT
 } CNC_SOCKET_EVENT;
 
+
+typedef enum {
+	cncStatus_Success = 0,
+	cncStatus_HeaderDecodingError = -1,
+	cncStatus_MessageIsTooShort = -2,
+	cncStatus_CommandDecodingError = -3,
+	cncStatus_PositionCRCmismatch = -4,
+	cncStatus_UnknownCommand = -5,
+	cncStatus_SequenceError = -6,
+} tCnCCmdStatus;
+
 int isCncConnected( );
 int getLastErrorStatus( );
 long getCncErrorCount( );
