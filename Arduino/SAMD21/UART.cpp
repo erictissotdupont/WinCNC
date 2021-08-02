@@ -67,7 +67,7 @@ inline uint8_t crc8( uint8_t* pdata, unsigned int nbytes, uint8_t crc )
 
 void UART_Init( )
 {
-  Serial1.begin(460800);
+  Serial1.begin(115200);
   g_fifoIn = 0;
   g_fifoOut = 0;
 }
@@ -182,6 +182,7 @@ bool UART_Task( )
         // what should be in a frame then enter error state.
         g_error |= ERROR_SYNTAX;
         g_debug[1] = c;
+        state = COMM_IDLE;
       }  
     }
     else if( state == COMM_CONNECTED )

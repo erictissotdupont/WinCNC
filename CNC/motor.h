@@ -16,13 +16,12 @@ void motorInit( );
 void setExportFile( HANDLE file );
 void setSimulationMode(tStatus(*callback)(t3DPoint, t3DPoint, long));
 
-void getDistanceInPipe(long* x, long* y, long* z);
-
 void initAxis( int a, double scale );
 
 void stepToPos(long x, long y, long z, t3DPoint* P);
 void getCurPos( t3DPoint* P );
-void getRawStepPos( int* x, int* y, int* z );
+void getRawStepPos( long* x, long* y, long* z );
+void setRawStepPos(long x, long y, long z);
 
 void resetMotorPosition( long x, long y, long z );
 void resetCompensation( );

@@ -38,6 +38,11 @@ void getTheoricalPos( double* x, double* y, double* z)
 	if(z) *z = theoricalPos.z;
 }
 
+void resetTheoricalPosition( )
+{
+	getCurPos(&theoricalPos);
+}
+
 void getCompPos( t3DPoint* P )
 {
   double cX,cY,cZ;
@@ -144,7 +149,7 @@ tStatus arcInXYPlane( double X, double Y, double Z, double I, double J, double P
 
   info.end.x = info.start.x + X;
   info.end.y = info.start.y + Y;
-  info.end.z = info.start.z + Z;  
+  info.end.z = info.start.z + Z;
 
   // The center of the ellipse
   info.center.x = I;
@@ -456,7 +461,6 @@ int doCutterCompensation( tMotion* pM, int mode, int loop )
   return 0;
 }
 
-
 // ------------------------- G CODE PARSER ------------------------
 
 #define CMD_G0		  0
@@ -512,12 +516,12 @@ void showDistanceInfo()
 {
 	t3DPoint actualPos;
 	t3DPoint compPos;
-	int x, y, z;
+	long x, y, z;
 
 	printf("Distance information\n");
 
 	getRawStepPos(&x, &y, &z);
-	printf(" Raw Motor Step: X:%d Y:%d Z:%d \n", x, y, z);
+	printf(" Raw Motor Step: X:%ld Y:%ld Z:%ld \n", x, y, z);
 
 	getCompPos(&compPos);
 	getCurPos(&actualPos);

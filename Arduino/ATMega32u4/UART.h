@@ -1,10 +1,7 @@
 
 typedef enum {
   COMM_IDLE,
-  COMM_RESET_1,
-  COMM_RESET_2,
-  COMM_CONNECTED,
-  COMM_IN_FRAME 
+  COMM_IN_FRAME,
 } tCommState;
 
 typedef struct

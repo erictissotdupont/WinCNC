@@ -21,82 +21,7 @@ tAxis XMotor,YMotor,ZMotor;
 tAxis* pMotor[] = {&XMotor,&YMotor,&ZMotor};
 tSpindle Spindle;
 
-typedef struct
-{
-	long x;
-	long y;
-	long z;
-	unsigned long duration;
-} tCommandInPipe;
-
-int timePipeInIdx, timePipeOutIdx;
-tCommandInPipe inPipe[TIMEPIPESIZE];
-unsigned long timeInPipe;
-long xInPipe;
-long yInPipe;
-long zInPipe;
-
 tStatus(*g_pSimulation)(t3DPoint, t3DPoint, long) = NULL;
-
-int getCountOfCommandsInPipe()
-{
-	int c = timePipeInIdx - timePipeOutIdx;
-	if (c < 0) c = c + TIMEPIPESIZE;
-	return c;
-}
-
-unsigned long getDurationOfCommandsInPipe()
-{
-	return timeInPipe;
-}
-
-
-void getDistanceInPipe(long* x, long* y, long* z)
-{
-	*x = xInPipe;
-	*y = yInPipe;
-	*z = zInPipe;
-}
-
-bool isPipeAvailable(int cmdLen)
-{
-	if (getDurationOfCommandsInPipe() > MAX_DURATION_IN_PIPE) return false;
-	
-	// Add function to check if the out buffer is full
-
-	return true;
-}
-
-
-void addCommandToPipe( long x, long y, long z, unsigned long d )
-{
-	tCommandInPipe *pt = &inPipe[timePipeInIdx++];
-	if (timePipeInIdx >= TIMEPIPESIZE) timePipeInIdx = 0;
-
-	pt->duration = d;
-	pt->x = x;
-	pt->y = y;
-	pt->z = z;
-
-	timeInPipe += d;
-	xInPipe += x;
-	yInPipe += y;
-	zInPipe += z;
-}
-
-void removeCommandFromPipe( )
-{
-	tCommandInPipe *pt = &inPipe[timePipeOutIdx++];
-	if (timePipeOutIdx >= TIMEPIPESIZE) timePipeOutIdx = 0;
-	timeInPipe -= pt->duration;
-	xInPipe -= pt->x;
-	yInPipe -= pt->y;
-	zInPipe -= pt->z;
-	if (pt->x || pt->y || pt->z)
-	{
-		printf("move\r\n");
-	}
-}
 
 void setExportFile( HANDLE file )
 {
@@ -134,11 +59,22 @@ void getCurPos( t3DPoint* P )
 	stepToPos(XMotor.step, YMotor.step, ZMotor.step, P);
 }
 
-void getRawStepPos( int* x, int* y, int* z )
+void getRawStepPos( long* x, long* y, long* z )
 {
   if( x ) *x = XMotor.step;
   if( y ) *y = YMotor.step;
   if( z ) *z = ZMotor.step;
+}
+
+void resetTheoricalPosition( );
+
+void setRawStepPos(long x, long y, long z)
+{
+	XMotor.step = x;
+	YMotor.step = y;
+	ZMotor.step = z;
+
+	resetTheoricalPosition();
 }
 
 void addCompensation( double x, double y, double z )
@@ -255,11 +191,6 @@ tStatus doMove( void(*posAtStep)(t3DPoint*,int,int,void*), int stepCount, double
 			x, y, z, d, s, posCRC );
 
 		status = postCommand( str );
-
-		if (status == retSuccess)
-		{
-			addCommandToPipe(x, y, z, (unsigned long)duration);
-		}
 	}
 
     if( exportFile )
@@ -283,7 +214,6 @@ tStatus ResetCNCPosition( )
 	if (g_pSimulation == NULL)
 	{
 		ret = sendCommand( COMMAND_RESET_ORIGIN, NULL, 0 );
-		if (ret == retSuccess) addCommandToPipe(0, 0, 0, 10);
 	}
 	return ret;
 }
@@ -294,7 +224,6 @@ tStatus ClearCNCError()
 	if (g_pSimulation == NULL)
 	{
 		ret = sendCommand(COMMAND_RESET_ORIGIN, NULL, 0 );
-		if (ret == retSuccess) addCommandToPipe(0, 0, 0, 10);
 	}
 	return ret;
 }
@@ -309,6 +238,7 @@ tStatus CheckStatus( BOOL bWait )
 
 	if (g_pSimulation == NULL)
 	{
+		/*
 		char rsp[100];
 		DWORD now = GetTickCount();
 		if( bWait || (( getDurationOfCommandsInPipe( ) == 0 ) && (( now - lastCheck ) > 200 )))
@@ -325,27 +255,13 @@ tStatus CheckStatus( BOOL bWait )
 			count++;
 		}
 		else ret = retBusy;
+	    */
 	}
 	return ret;
-}
-
-void OnAcknowledge(PVOID pParam)
-{
-	removeCommandFromPipe();
 }
 
 void motorInit()
 {
 	Spindle.currentState = 0;
 	Spindle.nextState = 0;
-
-	timePipeInIdx = 0;
-	timePipeOutIdx = 0;
-	timeInPipe = 0;
-	xInPipe = 0;
-	yInPipe = 0;
-	zInPipe = 0;
-	memset(inPipe, 0, sizeof(inPipe));
-
-	registerSocketCallback(CNC_ACKNOWLEDGE, OnAcknowledge);
 }

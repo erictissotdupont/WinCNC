@@ -120,10 +120,9 @@ void OnPaint(HWND hWnd)
 		VIEW_POSITION_FONT);
 	SelectObject(hdcMem, font);
 
-	long xInPipe, yInPipe, zInPipe;
+	long xInPipe = 0, yInPipe = 0, zInPipe = 0;
 	t3DPoint current, inPipe;
 	getCurPos(&current);
-	getDistanceInPipe(&xInPipe, &yInPipe, &zInPipe);
 	stepToPos(xInPipe, yInPipe, zInPipe, &inPipe);
 	current.x -= inPipe.x;
 	current.y -= inPipe.y;

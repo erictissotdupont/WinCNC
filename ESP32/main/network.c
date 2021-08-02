@@ -38,7 +38,7 @@
 #include "nvs_flash.h"
 #include "esp_sntp.h"
 
-
+#include "Cnc.h"
 #include "network.h"
 
 // Arbitrary non-privileged port
@@ -67,12 +67,6 @@ long g_yPos;
 long g_zPos;
 
 unsigned long g_nackCounter = 0;
-int g_inQueue = 0;
-
-#define STATUS_LITLE_ENDIAN   0x80000000
-
-unsigned long g_Status = 0;
-
 
 char myIP[IPSTRSIZE] = {0};
 unsigned long iMyIP = 0;
@@ -95,23 +89,7 @@ typedef enum {
 
 uint64_t g_timeStateTimout;
 
-#define SNTP_TIMEOUT_MS             ( 1000L * 120L )
-#define PEER_RESPONSE_TIMEOUT_MS	  ( 3000L )
-#define SNTP_BROADCAST_PERIOD_MS    ( 15000L )
-
-#define NACK_INTERVAL_MS            ( 100 )
-
-#define CMD_QUEUE_SIZE              ( 256 )
-
-typedef struct _cmd_t
-{
-  long dx;
-  long dy;
-  long dz;
-  unsigned long duration;
-  unsigned long flags;
-} cmd_t;
-
+#define CMD_QUEUE_SIZE            ( 256 )
 static xQueueHandle g_cmd_queue = NULL;
 
 struct sockaddr_in g_hostAddr;
@@ -123,6 +101,8 @@ int g_transmitSocket;
 #define EVENT_CALLBACK_SET	 BIT1
 #define WIFI_CONNECTED_BIT   BIT2
 #define WIFI_FAIL_BIT        BIT3
+
+
 
 
 
@@ -199,6 +179,17 @@ unsigned char crc8( unsigned char* pt, unsigned int nbytes, unsigned char crc )
 	return crc;
 }
 
+void SetPosition( long x, long y, long z )
+{
+  g_NetworkPosition[0] = x;
+  g_NetworkPosition[1] = y;
+  g_NetworkPosition[2] = z;
+              
+  g_xPos = x;
+  g_yPos = y;
+  g_zPos = z;    
+}
+
 
 void processEvent( char* pt )
 {
@@ -218,11 +209,13 @@ void sendMessage( char* msg, size_t cbMsg )
       ESP_LOGE( TAG, "Outpbound message not zero terminated." );
       msg[cbMsg] = 0;
     }
+#ifdef DEBUG_UDP
     ESP_LOGI( TAG, "Sent:'%s'", msg );
+#endif
   }
 }
 
-void sendACK( unsigned long seq, tCnCCmdStatus status )
+void sendACK( unsigned long seq, tCnCCmdStatus status, int inQueue )
 {
   char rspbuf[80];
 
@@ -231,7 +224,7 @@ void sendACK( unsigned long seq, tCnCCmdStatus status )
     g_xPos,
     g_yPos,
     g_zPos,
-    g_inQueue,    
+    inQueue,    
     (int)status ) + 1;
     
   sendMessage( rspbuf, cbRsp );
@@ -239,18 +232,20 @@ void sendACK( unsigned long seq, tCnCCmdStatus status )
 
 void sendNAK( unsigned long seq )
 {
-  char rspbuf[80];
-  
-  int cbRsp = sprintf( rspbuf, "NAK,%lu,%ld,%ld,%ld,%lu", 
-    seq,
-    g_xPos,
-    g_yPos,
-    g_zPos,
-    g_nackCounter ) + 1;
-    
-  g_nackCounter++;
-    
-  sendMessage( rspbuf, cbRsp );
+  if( g_hostAddr.sin_addr.s_addr != 0 )
+  {  
+    char rspbuf[80];
+    int cbRsp = sprintf( rspbuf, "NAK,%lu,%ld,%ld,%ld,%lu", 
+      seq,
+      g_xPos,
+      g_yPos,
+      g_zPos,
+      g_nackCounter ) + 1;
+      
+    g_nackCounter++;
+      
+    sendMessage( rspbuf, cbRsp );
+  }
 }
 
 
@@ -258,6 +253,7 @@ void sendNAK( unsigned long seq )
 void receiverTask(void *arg)
 {
   int rxSocket, nbytes;
+  int inQueue;
   unsigned int addrlen;
   u_int yes=1;
   static char msgbuf[2048]; // Static to avoid bloating the stack
@@ -318,6 +314,8 @@ void receiverTask(void *arg)
       msgbuf[nbytes] = 0;
     }
     
+    
+#ifdef DEBUG_UDP    
     #define MSG_TRUNK_AT  30
     #define ELIPSYS       4   // Length of "..." with the zero!
     char tmp[ELIPSYS];
@@ -333,7 +331,8 @@ void receiverTask(void *arg)
     if( nbytes > MSG_TRUNK_AT )
     {
       memcpy( msgbuf + MSG_TRUNK_AT - ELIPSYS, tmp, ELIPSYS );
-    }    
+    }
+#endif
     
     if( memcmp( msgbuf, "CMD,", 4 ) != 0 )
     {
@@ -359,27 +358,27 @@ void receiverTask(void *arg)
         // For the purpose of monitoring the communication, send the number
         // of message in the queue BEFORE filling it. This can help measure
         // how close to an underrun contion the CNC is.
-        g_inQueue = uxQueueMessagesWaiting( g_cmd_queue );
+        inQueue = uxQueueMessagesWaiting( g_cmd_queue );
         
         // We got a sequence # of a packet we already received ( a repeat )
         if( seq == ( g_NextSeq - 1 ))
         {
           // Let's ACK it. The host missed the reponse and re-sent.
-          sendACK( seq, cncStatus_Success );
+          sendACK( seq, cncStatus_Success, inQueue );
           
           ESP_LOGW( TAG, "Retry of %lu - Queue:%d.", 
             seq,
-            g_inQueue );
+            inQueue );
         }
         // Got a completely out of order packet. That is not recoverable.
         else if( seq != g_NextSeq )
         {
-          sendACK( seq, cncStatus_SequenceError );
+          sendACK( seq, cncStatus_SequenceError, inQueue );
           
           ESP_LOGE( TAG, "Out of sequence. Exp:%lu Got:%lu Queue:%d.", 
             g_NextSeq,
             seq,
-            g_inQueue );
+            inQueue );
         }
         else
         {
@@ -462,24 +461,19 @@ void receiverTask(void *arg)
                   timeSinceLastNAK = esp_timer_get_time( );
                 }                  
               }
-            }              
+            }
+            else if( strncmp( pt, "ORIGIN", 6 ) == 0 )
+            {
+              OriginCommand( );
+              
+              CheckMachineIsIdle( seq );
+              
+            }           
             else if( strncmp( pt, "RST", 3 ) == 0 )
             {
               ESP_LOGW( TAG, "Reset command received." );
               
-              // TODO : Reset the system
-              
-              g_NetworkPosition[0] = 0;
-              g_NetworkPosition[1] = 0;
-              g_NetworkPosition[2] = 0;
-              
-              g_xPos = 0;
-              g_yPos = 0;
-              g_zPos = 0;     
-
               g_nackCounter = 0;
-              
-              ResetStatus( );
               
             }
             else if( strncmp( pt, "POS", 3 ) == 0 )
@@ -508,7 +502,7 @@ void receiverTask(void *arg)
           // timeout and re-send the command message. Since the sequence #
           // will be in the past the device will just ACK it again and
           // transfer will resume.
-          sendACK( seq, status );
+          sendACK( seq, status, inQueue );
           
         }
       }
@@ -516,7 +510,6 @@ void receiverTask(void *arg)
   }
   return;
 }
-
 
 void broadcastTask(void* arg)
 {
@@ -549,7 +542,6 @@ void broadcastTask(void* arg)
     // If there is nothing to process 
     if( xQueueReceive( g_cmd_queue, &cmd, 1000 / portTICK_PERIOD_MS))
     {	  
-
       /*
       ESP_LOGI( TAG, "x:%ld y:%ld z:%ld d:%lu f:%lu",
         cmd.dx,
@@ -559,35 +551,71 @@ void broadcastTask(void* arg)
         cmd.flags );
       */
       
+      if( !MoveCommand( &cmd ))
+      {
+        ESP_LOGE( TAG, "Command failed" );
+      }
+      
       g_xPos += cmd.dx;
       g_yPos += cmd.dy;
       g_zPos += cmd.dz;
-      
+
+/*      
       cmd.duration = cmd.duration / 1000;
-      
       if( cmd.duration )
       {      
         vTaskDelay( cmd.duration / portTICK_PERIOD_MS );
-      }        
-    }
-    else if( g_broadcastAddr.sin_addr.s_addr != 0 )
-    {
-      char statusmsg[256];
-      
-      g_inQueue = 0;
-
-      sprintf( statusmsg, "CNC,%lu,%ld,%ld,%ld,%lx",
-        g_NextSeq,
-        g_xPos,
-        g_yPos,
-        g_zPos,
-        g_Status );
-        
-      if ( sendto(g_transmitSocket,statusmsg,strlen(statusmsg)+1,0,(struct sockaddr *) &g_broadcastAddr, sizeof(g_broadcastAddr)) < 0) 
-      {
-        ESP_LOGE( TAG, "Send failed" );
       }
-      ESP_LOGI( TAG, "Broadcast : %s", statusmsg );
+*/
+    }
+    else
+    {
+      long x,y,z;
+      unsigned long S,Q;
+      
+      if( !GetPositionCommand( &x, &y, &z, &S, &Q ))
+      {
+        ESP_LOGE( TAG, "Failed to get current position" );
+        g_Status &= ~STATUS_GOT_POSITION;
+      }
+      else
+      {
+        if( Q == 0 && uxQueueMessagesWaiting( g_cmd_queue ) == 0 )
+        {
+          if( g_xPos != x || g_yPos != y || g_zPos != z )
+          {
+            ESP_LOGW( TAG, "Position forced from %ld,%ld,%ld to %ld,%ld,%ld",
+              g_xPos, g_yPos, g_zPos,
+              x,y,z );
+              
+            g_xPos = x;
+            g_yPos = y;
+            g_zPos = z;
+          }
+          g_Status |= STATUS_GOT_POSITION;
+        }           
+        else
+        {
+          ESP_LOGW( TAG, "Queues are not empty" );
+        }          
+      }      
+     
+      if( g_broadcastAddr.sin_addr.s_addr != 0 )
+      {
+        char statusmsg[64];
+        
+        sprintf( statusmsg, "CNC,%lu,%ld,%ld,%ld,%lx",
+          g_NextSeq,
+          g_xPos,
+          g_yPos,
+          g_zPos,
+          g_Status );
+          
+        if ( sendto(g_transmitSocket,statusmsg,strlen(statusmsg)+1,0,(struct sockaddr *) &g_broadcastAddr, sizeof(g_broadcastAddr)) < 0) 
+        {
+          ESP_LOGE( TAG, "Send failed" );
+        }
+      }
     }    
   }
   return;

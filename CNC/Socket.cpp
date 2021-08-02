@@ -8,6 +8,7 @@
 
 #include "status.h"
 #include "socket.h"
+#include "motor.h"
 
 // This is the port onto which the CNC advertizes its presence. Those
 // messages include the current state and position. Those are sent every
@@ -75,8 +76,13 @@ HANDLE g_hNackReceived;
 SOCKET g_CNCSocket;
 char g_szCNCIP[IPSTRSIZE];
 struct sockaddr_in g_CncAddr;
+long g_CncX;
+long g_CncY;
+long g_CncZ;
 
 #define STATUS_LITLE_ENDIAN   0x80000000
+#define STATUS_GOT_POSITION   0x40000000
+
 unsigned long g_Status;
 
 unsigned long g_TXcount = 0;
@@ -667,13 +673,45 @@ DWORD connectionManagerThread(PVOID pParam)
 			switch (WaitForMultipleObjects(2, hEvent, FALSE, INFINITE ))
 			{
 			case WAIT_OBJECT_0: // Connected
-				bConnected = true;
-				ResetEvent(g_hDisconnected);
-				if (sendCommand("RST", NULL, 0) != retSuccess)
 				{
-					ResetEvent(g_hConnected);
-					SetEvent(g_hDisconnected);
-					bConnected = false;
+					long x, y, z;
+					getRawStepPos(&x, &y, &z);
+
+					bConnected = true;
+					ResetEvent(g_hDisconnected);
+					if (sendCommand("RST", NULL, 0) != retSuccess)
+					{
+						ResetEvent(g_hConnected);
+						SetEvent(g_hDisconnected);
+						closesocket(g_CNCSocket);
+						bConnected = false;
+						OutputDebugStringA(__FUNCTION__"::Synchronization failed.");
+					}
+
+					if (g_CncX != x || g_CncY != y || g_CncZ)
+					{
+						switch (MessageBoxA(NULL,
+"CNC position mismatch.\r\n\r\nDo you want to use the machine position?\r\n\
+Selecting No will reset the position to zero.", "Connecting", MB_ICONWARNING | MB_YESNOCANCEL))
+						{
+						case IDYES :
+							setRawStepPos(g_CncX, g_CncY, g_CncZ);
+							break;
+
+						case IDNO :
+							sendCommand("ORIGIN", NULL, 0);
+							ResetEvent(g_hConnected);
+							SetEvent(g_hDisconnected);
+							bConnected = false;
+							closesocket(g_CNCSocket);
+							break;
+
+						case IDCANCEL:
+							ResetEvent(g_hConnected);
+							SetEvent(g_hDisconnected);
+							bConnected = false;
+						}
+					}					
 				}
 				break;
 
@@ -687,9 +725,7 @@ DWORD connectionManagerThread(PVOID pParam)
 				bRun = false;
 			}
 		}
-
 	} while (bRun);
-
 	return 0;
 }
 
@@ -759,31 +795,39 @@ DWORD listenerThread(PVOID pParam)
 
 				if (bConnected)
 				{
+					static char statusStr[80];
+					sprintf_s(statusStr, sizeof(statusStr), "X%ldY%ldZ%ld", x, y, z);
+					NOTIFY_CALLBACK(CNC_RESPONSE, statusStr)
 					// TODO : refresh status
 				}
-				else
+				else if (g_Status & STATUS_GOT_POSITION )
 				{
 					memcpy(&g_CncAddr, &CncAddr, sizeof(g_CncAddr));
 					g_CncAddr.sin_port = htons(DATA_PORT);
-					RtlIpv4AddressToStringA(&CncAddr.sin_addr, g_szCNCIP);
+					g_CncX = x;
+					g_CncY = y;
+					g_CncZ = z;
 
 					g_CNCSocket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
 					if (g_CNCSocket == INVALID_SOCKET)
 					{
+						iResult = WSAGetLastError();
+						OutputDebugStringA(__FUNCTION__"::Opening socket failed.");
 						return false;
 					}
 
 					Addr.sin_port = htons(DATA_PORT);
-
-					iResult = bind(g_CNCSocket, (SOCKADDR*)&Addr, sizeof(Addr));
-					if (iResult == SOCKET_ERROR)
+					if (bind(g_CNCSocket, (SOCKADDR*)&Addr, sizeof(Addr)) == SOCKET_ERROR )
 					{
 						iResult = WSAGetLastError();
+						OutputDebugStringA(__FUNCTION__"::Bailed out waiting for connection.");
 						return false;
 					}
 
-					OutputDebugStringA("Synchronized seq with CNC");
+					RtlIpv4AddressToStringA(&CncAddr.sin_addr, g_szCNCIP);
+
 					g_msgSeq = seq;
+					bConnected = true;
 					SetEvent(g_hConnected);
 				}
 

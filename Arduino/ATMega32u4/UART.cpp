@@ -8,7 +8,7 @@
 //extern Uart Serial1;
 
 extern int g_debug[MAX_DEBUG];
-extern unsigned int g_error;
+extern unsigned long g_error;
 // To know the current position
 extern Motor X;
 extern Motor Y;
@@ -22,6 +22,8 @@ int g_fifoIn;
 int g_fifoOut;
 int g_CRCerror = 0;
 unsigned long g_maxUARTtaskTime = 0;
+unsigned long g_timeOfLastAck = 0;
+char g_ACKchar = '0';
 
 static const uint8_t crc8_table[256] = {
     0x00, 0xF7, 0xB9, 0x4E, 0x25, 0xD2, 0x9C, 0x6B,
@@ -69,7 +71,7 @@ inline uint8_t crc8( uint8_t* pdata, unsigned int nbytes, uint8_t crc )
 
 void UART_Init( )
 {
-  Serial1.begin(460800);
+  Serial1.begin(115200);
   g_fifoIn = 0;
   g_fifoOut = 0;
 
@@ -85,11 +87,12 @@ inline unsigned int fifoCount( )
     return g_fifoIn - g_fifoOut + MAX_FIFO_MOVE + 1;
 }
 
-#if 1
+#define USE_FAST_UART
+#ifdef USE_FAST_UART
 
 void UART_Print( const char* str )
 {
-  Serial1.write_noWait( (uint8_t*)str, strlen( str ));
+  Serial1.write_noWait( (uint8_t*)str, strlen( str ) + 1 );
 }
 
 #define DEC_TO_STR( pt, n, dec ) { *pt = '0' + (n / dec); pt++; n = n % dec; flag = 1; }
@@ -119,6 +122,27 @@ void UART_Write( char c )
   Serial1.write_noWait( (uint8_t*)&c, 1 );
 }
 
+#define DEC_TO_HEX( pt, n, shift ) { *pt = HEXTOCHAR[(n >> shift) & 0x0F]; pt++; flag = 1; }
+
+void UART_PrintHex( const char prefix, const unsigned long val )
+{
+  const char HEXTOCHAR[16] = { '0','1','2','3','4','5','6','7','8','9','A','B','C','D','E','F' };
+  char str[12];
+  char *pt = str;
+  unsigned long n = val;
+  bool flag = 0;
+  *pt++ = prefix;
+  if( flag || n > (0x10000000L - 1 )) DEC_TO_HEX( pt, n, 28 );
+  if( flag || n > (0x1000000L - 1 )) DEC_TO_HEX( pt, n, 24 );
+  if( flag || n > (0x100000L - 1 )) DEC_TO_HEX( pt, n, 20 );
+  if( flag || n > (0x10000L - 1 )) DEC_TO_HEX( pt, n, 16 );
+  if( flag || n > (0x1000L - 1 )) DEC_TO_HEX( pt, n, 12 );
+  if( flag || n > (0x100L - 1 )) DEC_TO_HEX( pt, n, 8 );
+  if( flag || n > (0x10L - 1 )) DEC_TO_HEX( pt, n, 4 );
+  *pt++ = HEXTOCHAR[ n & 0xF ];
+  Serial1.write_noWait( (uint8_t*)str, pt - str );
+}
+
 #else
 
 #define DEC_TO_STR( n, dec ) { Serial1.write( '0' + (n / dec)); n = n % dec; flag = 1; }
@@ -140,6 +164,24 @@ void UART_Print( const char prefix, const long val )
   Serial1.write( '0' + n);
 }
 
+#define DEC_TO_HEX( n, shift ) { Serial1.write( HEXTOCHAR[(n >> shift) & 0x0F]); flag = 1; }
+
+void UART_PrintHex( const char prefix, const unsigned long val )
+{
+  const char HEXTOCHAR[16] = { '0','1','2','3','4','5','6','7','8','9','A','B','C','D','E','F' };
+  unsigned long n = val;
+  bool flag = 0;
+  Serial1.write( prefix );
+  if( flag || n > (0x10000000L - 1 )) DEC_TO_HEX( n, 28 );
+  if( flag || n > (0x1000000L - 1 )) DEC_TO_HEX( n, 24 );
+  if( flag || n > (0x100000L - 1 )) DEC_TO_HEX( n, 20 );
+  if( flag || n > (0x10000L - 1 )) DEC_TO_HEX( n, 16 );
+  if( flag || n > (0x1000L - 1 )) DEC_TO_HEX( n, 12 );
+  if( flag || n > (0x100L - 1 )) DEC_TO_HEX( n, 8 );
+  if( flag || n > (0x10L - 1 )) DEC_TO_HEX( n, 4 );
+  Serial1.write( HEXTOCHAR[ n & 0xF ] );
+}
+
 void UART_Print( const char* str )
 {
   Serial1.print( str );
@@ -149,23 +191,39 @@ void UART_Print( const char* str )
 
 #endif
 
+inline void UART_SendAck( )
+{
+  UART_Write( g_ACKchar );
+  g_ACKchar++;
+  if( g_ACKchar > '9' ) g_ACKchar = '0';
+}
+
 void UART_SendStatus( int command )
 {
   static int state = 0;
   switch( state )
   {
     case 0 : 
-      if( command == 1 ) state = 1; 
-      if( command == 2 ) state = 5;
+      if( command == 1 )
+      {
+        UART_Write( '#' );
+        state = 1; 
+      }
+      else if( command == 2 )
+      {
+        UART_Write( '#' );
+        state = 10;
+      }
       break;
     case 1 : UART_Print( 'X', X.GetPos( ));state=2; break;
     case 2 : UART_Print( 'Y', Y.GetPos( ));state=3; break;
     case 3 : UART_Print( 'Z', Z.GetPos( ));state=4; break;
-    case 4 : UART_Print( 'S', g_error );UART_Write( '\n' );state = 0;break;
-    case 5 : UART_Print( 'a', g_debug[0] );state=6;break;
-    case 6 : UART_Print( 'b', g_debug[1] );state=7;break;
-    case 7 : UART_Print( 'c', g_debug[2] );state=8;break;
-    case 8 : UART_Print( 'd', g_debug[3] );UART_Write( '\n' );state=0;break;
+    case 4 : UART_PrintHex( 'S', g_error );state=5;break;
+    case 5 : UART_Print( 'Q', fifoCount( )); UART_Write( '\0' );state = 0;break;
+    case 10 : UART_Print( 'a', g_debug[0] );state=11;break;
+    case 11 : UART_Print( 'b', g_debug[1] );state=12;break;
+    case 12 : UART_Print( 'c', g_debug[2] );state=13;break;
+    case 13 : UART_Print( 'd', g_debug[3] );UART_Write( '\0' );state=0;break;
     default :
       state = 0;
   }
@@ -181,9 +239,11 @@ bool UART_Task( )
   static bool bInCRC = false;
   char c;
   bool ret = false;
-
+  unsigned long now = micros( );
+  static int rxCount = 0;
+  static char rxBuffer[16];
 #ifdef DISPLAY_TASK_TIME
-  unsigned long timeItTook = micros( );
+  unsigned long timeItTook = now;
 #endif 
 
   // Flush out status
@@ -193,7 +253,7 @@ bool UART_Task( )
   if( Serial1.write_noWait( NULL, 0 ))
   {
     c = Serial1.read( );
-        
+         
     if( state == COMM_IN_FRAME )
     {
       if( bInCRC == false )
@@ -220,20 +280,35 @@ bool UART_Task( )
       else if( c == 'S' ) { pt = &g_fifo[g_fifoIn].s; sign = 1; *pt = 0; } // Spindle state (1 = ON 0=OFF)
       else if( c == 'C' ) { pt = &receivedCRC; sign = 1; bInCRC = true; }          // CRC 8 value
       else if( c == '-' ) { sign = -1; }          
-      else if( c == '\n' )
+      else if( c == '\0' )
       {
         if( g_error )
         {
-          // Report the Error state to the host. Ignore the command.     
+          // Report the Error state to the host.
+          // Ignore the command.
           UART_Write( 'E' );
+          UART_Write( '1' );          
+          g_timeOfLastAck = now;
         }
         else
         {
           // If we got a CRC, check it
           if( bInCRC && ( calculatedCRC != receivedCRC ))
-          {            
+          {
+            /*
+            char str[32];
+            sprintf( str, "#%d,%d,%d,%d", 
+              g_fifo[g_fifoIn].x,
+              g_fifo[g_fifoIn].y,
+              g_fifo[g_fifoIn].z,
+              g_fifo[g_fifoIn].d );
+
+            UART_Print( str );
+            */
             // Report the CRC mismatch. Ignore the command.
-            UART_Write( 'C' );
+            UART_Write( 'E' );
+            UART_Write( '2' );            
+            g_timeOfLastAck = now;
             // Count the error so that it can be displayed
             g_CRCerror++;
           }
@@ -246,7 +321,11 @@ bool UART_Task( )
             // Flow control : If the FIFO contains less than the MAX #
             // of commands send the ACK to the host to indicate that the
             // ATMEGA is ready to receive the next command. 
-            if( fifoCount( ) < MAX_FIFO_MOVE ) UART_Write( 'O' );
+            if( fifoCount( ) < MAX_FIFO_MOVE )
+            {
+              UART_SendAck( );
+              g_timeOfLastAck = now;
+            }
           }
         }
         
@@ -260,7 +339,9 @@ bool UART_Task( )
         receivedCRC = 0;
         bInCRC = false;
         pt = NULL;
-        state = COMM_CONNECTED;
+
+        rxCount = 0; 
+        state = COMM_IDLE;
       }
       else
       {
@@ -268,9 +349,13 @@ bool UART_Task( )
         // what should be in a frame then enter error state.
         g_error |= ERROR_SYNTAX;
         g_debug[1] = c;
-      }  
+        rxCount = 0; 
+        state = COMM_IDLE;
+        UART_Write( 'E' );
+        UART_Write( '6' );
+      }     
     }
-    else if( state == COMM_CONNECTED )
+    else if( state == COMM_IDLE )
     {
       // START OF FRAME
       // -------------- 
@@ -278,27 +363,50 @@ bool UART_Task( )
       {
         state = COMM_IN_FRAME;
       }
-      // ORIGIN
-      // ------
-      else if( c == 'O' )
+      else
       {
-        Motor_Init( );
-        UART_SendStatus(1);
-      }
-      // CLEAR
-      // -----
-      else if( c == 'C' )
-      {
-        g_error = 0;
-        UART_SendStatus(1);
-      }    
-      // RESET
-      // -----
-      else if( c == 'R' )
-      {
-        state = COMM_RESET_1;
-      }
-      // POSITION
+        if( rxCount >= sizeof(rxBuffer) - 1 )
+        {
+          UART_Write( 'E' );
+          UART_Write( '3' );
+          g_timeOfLastAck = now;
+          rxCount = 0;
+        }
+        else
+        {
+          rxBuffer[rxCount] = c;
+          rxCount++;
+          if( c == '\0' )
+          {
+            if( strcmp( rxBuffer, "RESET" ) == 0 )
+            {
+              UART_Print( "#Hello" );
+              g_fifoIn = 0;
+              g_fifoOut = 0;
+              g_fifo[g_fifoIn].x = 0;
+              g_fifo[g_fifoIn].y = 0;
+              g_fifo[g_fifoIn].z = 0;
+              g_fifo[g_fifoIn].d = 0;
+              g_fifo[g_fifoIn].s = -1;
+              calculatedCRC = 0xFF;
+              receivedCRC = 0;
+              bInCRC = false;
+              pt = NULL;
+              g_CRCerror = 0;
+              g_timeOfLastAck = now;
+              g_ACKchar = '0';
+            }
+            else if( strcmp( rxBuffer, "ORIGIN" ) == 0 )
+            {
+              Motor_Init( );
+              UART_SendStatus(1);      
+            }
+            else if( strcmp( rxBuffer, "POSITION" ) == 0 )
+            {
+              UART_SendStatus(1);
+            }
+            /*
+             // POSITION
       // --------
       else if( c == 'P' )
       {
@@ -310,58 +418,35 @@ bool UART_Task( )
       {
         UART_SendStatus(2);
       }
-      else if ( c == '\n' )
-      {
-        // Ignore new lines symbols
+            */
+            else // Unknown command
+            {
+              UART_Write( 'E' );
+              UART_Write( '4' );
+              g_timeOfLastAck = now;
+            }
+            rxCount = 0;
+          }
+        }
       }
-      else
-      {
-        // This symbol is not valid in this state
-        g_error |= ERROR_COMM;
-        g_debug[0] = c;
-      }    
     }
-    else if( state == COMM_IDLE )
+    else
     {
-      if( c == 'R' ) state = COMM_RESET_1;
-    }
-    else if( state == COMM_RESET_1 )
-    {
-      if( c == 'S' ) 
-        state = COMM_RESET_2;
-      else
-        state = COMM_IDLE;
-    }
-    else if( state == COMM_RESET_2 )
-    {
-      if( c == 'T' )
-      {
-        UART_Print( "HLO\n" );
-        g_fifoIn = 0;
-        g_fifoOut = 0;
-        g_fifo[g_fifoIn].x = 0;
-        g_fifo[g_fifoIn].y = 0;
-        g_fifo[g_fifoIn].z = 0;
-        g_fifo[g_fifoIn].d = 0;
-        g_fifo[g_fifoIn].s = -1;
-        calculatedCRC = 0xFF;
-        receivedCRC = 0;
-        bInCRC = false;
-        pt = NULL;
-        g_CRCerror = 0;
-        state = COMM_CONNECTED;
-      }
-      else if( c == '\n' )
-      {
-        // Ignore
-      }
-      else
-      {
-        state = COMM_IDLE;
-      }
+      UART_Write( 'E' );
+      UART_Write( '5' );
+      state = COMM_IDLE;
     }
     // The UART buffer was not empty
     ret = true;
+  }
+
+  if( state == COMM_IDLE && fifoCount( ) == MAX_FIFO_MOVE )
+  {
+    if( g_timeOfLastAck + 500000L < now )
+    {
+      UART_Write( 'W' );
+      g_timeOfLastAck = now;
+    }
   }
 
 #ifdef DISPLAY_TASK_TIME
@@ -372,7 +457,6 @@ bool UART_Task( )
   }
 #endif
   
-  // The UART buffer was empty
   return ret;
 }
 
@@ -403,7 +487,11 @@ void Motor_Task( )
 
     // If the FIFO was full, send the ACK to the AR9331 so that
     // the next command is sent.
-    if( fifoCount( ) == MAX_FIFO_MOVE ) UART_Write( 'O' );
+    if( fifoCount( ) == MAX_FIFO_MOVE )
+    {
+      UART_SendAck( );
+      g_timeOfLastAck = micros( );
+    }
     
     // Move the FIFO out index to the next slot
     if( ++g_fifoOut > MAX_FIFO_MOVE ) g_fifoOut = 0;

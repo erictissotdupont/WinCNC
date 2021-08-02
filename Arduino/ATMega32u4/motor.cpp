@@ -539,7 +539,7 @@ void Motor_Move( long x, long y, long z, long d )
       WaitTillItsTime( d );
       return;
     }
-    // Manual mode
+    // Manual mode, don't return here
   }
 
   // This calculates the interval between steps for each axis and returns the time
