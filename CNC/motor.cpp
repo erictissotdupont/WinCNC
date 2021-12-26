@@ -159,7 +159,7 @@ tStatus doMove( void(*posAtStep)(t3DPoint*,int,int,void*), int stepCount, double
   // Split the duration of the whole move for each step
   duration = duration / stepCount;
   // Convert that in uS for the CNC
-  d = (long)(duration * 1000);
+  d = (unsigned long)(duration * 1000);
  
   for( i=1; i<=stepCount; i++ )
   {

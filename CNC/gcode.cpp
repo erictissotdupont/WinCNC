@@ -243,7 +243,11 @@ tStatus linearRel( double x, double y, double z )
   getCurPos( &info.Origin );
 
   // Make sure we don't send single move command taking longer than 1sec
-  steps = 1 + (long)( duration / 1000 );
+  steps = (long)( duration / 1000 );
+  if (steps == 0)
+  {
+	  steps = 1;
+  }
 
   // printf( "Length=%.2f - Feed=%.2f - Duration=%.2f - Steps=%d\n", l, feedSpeed, duration,steps );
 

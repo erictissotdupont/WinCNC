@@ -56,20 +56,41 @@ void BasicShapeInit(HWND hWnd)
 	if (RegOpenKey(HKEY_CURRENT_USER, L"SOFTWARE", &hKey) == ERROR_SUCCESS)
 	{
 		DWORD cbData = sizeof(g_Params);
-		if (RegGetValue(hKey, L"WinCNC", L"BasicShape", RRF_RT_REG_BINARY, NULL, &g_Params, &cbData) == ERROR_SUCCESS)
+		if (RegGetValue(hKey, L"WinCNC", L"BasicShape", RRF_RT_REG_BINARY, NULL, &g_Params, &cbData) != ERROR_SUCCESS)
 		{
 			return;
+		}
+		cbData = 0;
+		if (RegGetValue(hKey, L"WinCNC", L"BasicShapeCmd", RRF_RT_REG_SZ, NULL, NULL, &cbData) == ERROR_SUCCESS)
+		{
+			WCHAR* cmd = (WCHAR*)malloc(cbData);
+			if (RegGetValue(hKey, L"WinCNC", L"BasicShapeCmd", RRF_RT_REG_SZ, NULL, cmd, &cbData) == ERROR_SUCCESS)
+			{
+				HWND hItem = GetDlgItem(hWnd, IDC_GCODE);
+				SetWindowText(hItem, cmd);
+			}
+			free(cmd);
 		}
 	}
 	ShapeInitToolInfo(&g_Params.tool);
 }
 
-void BasicShapeSave()
+void BasicShapeSave( HWND hWnd )
 {
 	HKEY hKey;
 	if (RegCreateKey(HKEY_CURRENT_USER, L"SOFTWARE\\WinCNC", &hKey) == ERROR_SUCCESS)
 	{
 		RegSetValueEx(hKey, L"BasicShape", 0, REG_BINARY, (BYTE*)&g_Params, sizeof(g_Params));
+
+		HWND hItem = GetDlgItem(hWnd, IDC_GCODE);
+		DWORD l = (GetWindowTextLength(hItem) + 1) * sizeof(WCHAR);
+		WCHAR* cmd = (WCHAR*)malloc(l);
+		if (cmd)
+		{
+			GetWindowText(hItem, cmd, l/sizeof(WCHAR));
+			RegSetValueEx(hKey, L"BasicShapeCmd", 0, REG_SZ, (BYTE*)cmd, l);
+			free(cmd);
+		}
 	}
 }
 
@@ -98,6 +119,7 @@ UINT BasicShapeGetSet(BOOL get, HWND hWnd )
 	ShapeGetSetInt(hWnd, IDC_HEX_SIDES, get, &g_Params.polyCount);
 	ShapeGetSetInt(hWnd, IDC_HEX_SKIP, get, &g_Params.polySkip);
 	ShapeGetSetBool(hWnd, IDC_HEX_EXTERNAL_RADIUS, get, &g_Params.polyExternal);
+
 
 	
 	// Filling shape is only relevant when external dimensions are requested
@@ -908,7 +930,7 @@ BOOL CALLBACK BasicShapesProc(HWND hWnd,
 
 	case WM_CLOSE:
 		BasicShapeGetSet(TRUE, hWnd);
-		BasicShapeSave();
+		BasicShapeSave(hWnd);
 		break;
 
 	case WM_COMMAND:

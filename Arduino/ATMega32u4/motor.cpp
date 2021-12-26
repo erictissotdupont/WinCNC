@@ -30,7 +30,7 @@ DualMotor Z (  7,  6, -1,
 
 
 
-unsigned long g_MoveStart;  // Time when the current move was started (uS)
+unsigned long g_MoveStart = 0;  // Time when the current move was started (uS)
 
 // For debug purpose, measures the time spent on idle task to estimate the
 // CPU load of the system (displayed on LCD screen).
@@ -249,13 +249,13 @@ void Motor::PrepareNextStep( )
     // Movement with duration means linear motion (G1).
     else if( moveDuration != 0 )
     {      
+      nextStepTime = currentStepTime + stepDuration;
       stepAcc += stepModulo;
       if( stepAcc >= moveLength )
       {
         stepAcc -= moveLength;
         nextStepTime++;
       }
-      nextStepTime = currentStepTime + stepDuration;
       currentStepTime = nextStepTime;
       moveStep++;
     }
@@ -519,9 +519,12 @@ void Motor_Move( long x, long y, long z, long d )
     return;
   }
 
-  // Capture when the motion started (in uS). Do this as early as possible
-  // to avoid jitter in consecutive linear motion
-  g_MoveStart = micros();
+  if( g_MoveStart == 0 )
+  {
+    // Capture when the motion started (in uS). Do this as early as possible
+    // to avoid jitter in consecutive linear motion
+    g_MoveStart = micros();
+  }
 
 #ifdef MEASURE_MOVE
   maxLateTime = 0;
@@ -537,6 +540,7 @@ void Motor_Move( long x, long y, long z, long d )
     {
       // Just wait...
       WaitTillItsTime( d );
+      g_MoveStart = 0;
       return;
     }
     // Manual mode, don't return here
@@ -572,6 +576,8 @@ void Motor_Move( long x, long y, long z, long d )
       break;
     }
   } while( 1 );
+
+  g_MoveStart += d;
   
 #ifdef MEASURE_MOVE
   char str[10];

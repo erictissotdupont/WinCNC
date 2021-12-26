@@ -70,6 +70,14 @@ void UART_Init( )
   Serial1.begin(115200);
   g_fifoIn = 0;
   g_fifoOut = 0;
+
+  /*
+  while( 1 )
+  {
+    Serial1.write( "Hello\n" );
+    delay(1);
+  }
+  */
 }
 
 inline unsigned int fifoCount( )
@@ -104,6 +112,17 @@ bool UART_Task( )
   int8_t c;
 
   c = Serial1.read( );
+
+/*  
+  if( c != -1 )
+  {
+    char str[2];
+  
+    str[0] = c;
+    str[1] = 0;
+    Serial1.write( str );
+  }
+*/
 
   // Buffer not empty
   if( c != -1 )

@@ -461,6 +461,7 @@ bool UART_Task( )
 }
 
 extern tManualMode ManualMode;
+extern unsigned long g_MoveStart;
 
 void Motor_Task( )
 {
@@ -496,6 +497,12 @@ void Motor_Task( )
     // Move the FIFO out index to the next slot
     if( ++g_fifoOut > MAX_FIFO_MOVE ) g_fifoOut = 0;
   }
+
+  // Fifo is now empty, reset the timestamp for the start
+  // of the next command so that the Motor_Move( ) function
+  // will use the current time instead of previous command
+  // plus its duration.
+  g_MoveStart = 0;
 
   // Manual motion
   Motor_Move( 0, 0, 0, 0 );

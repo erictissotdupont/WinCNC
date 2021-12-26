@@ -5,10 +5,10 @@
 
 void setup( ) 
 {
-  LCD_Init( );
-  LCD_Clear( );
+  //LCD_Init( );
+  //LCD_Clear( );
   UART_Init( );
-  Motor_Init( );
+  //Motor_Init( );
 }
 
 void loop( ) 
@@ -17,12 +17,11 @@ void loop( )
   while( UART_Task( ));
   
   // Perform the commands (until no more commands in FIFO)
-  Motor_Task( );
+  //Motor_Task( );
 
   // Refresh the LCD outside of the move loop
-  LCD_UpdateTask( 1000 );
+  //LCD_UpdateTask( 1000 );
   
   // Scan the keyboard 
-  LCD_ButtonTask( );
+  //LCD_ButtonTask( );
 }
-
