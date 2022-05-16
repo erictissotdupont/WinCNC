@@ -3,6 +3,7 @@
 #include "motor.h"
 #include "LCD.h"
 #include "UART.h"
+//#include "EEPROM.h"
 
 unsigned int g_error;
 int g_debug[MAX_DEBUG];
@@ -22,9 +23,9 @@ int g_debug[MAX_DEBUG];
 // Instantiation and configuration of the stepper motor controlers.
 //-----------------------------------------------------------------
 //           Step,Dir,End,Swap,    LimitFlag,      StepByInch
-Motor     X ( 11, 10, -1,  0, ERROR_LIMIT_X, 1.0f/X_AXIS_RES );
-Motor     Y ( 13, 12, -1,  1, ERROR_LIMIT_Y, 1.0f/Y_AXIS_RES );
-DualMotor Z (  7,  6, -1,
+Motor     X ( 11, 10, A3,  0, ERROR_LIMIT_X, 1.0f/X_AXIS_RES );
+Motor     Y ( 13, 12, A4,  1, ERROR_LIMIT_Y, 1.0f/Y_AXIS_RES );
+DualMotor Z (  7,  6, A5,
                9,  8, -1,  0, ERROR_LIMIT_Z | REDUCED_RAPID_POSITIONING_SPEED,
                                              1.0f/Z_AXIS_RES );
 
@@ -63,6 +64,9 @@ Motor::Motor( int sp, int dp, int ep, int rd, unsigned long flags, unsigned long
   stepSetReg = digitalSetRegister( sp );
   stepClrReg = digitalClrRegister( sp );
   stepPinMask = digitalPinMask( sp );
+
+  endPinDebounceTime = 0;
+  endDetectionState = 0;
 }
 
 DualMotor::DualMotor( int sp, int dp, int ep, int sp2, int dp2, int ep2, int s, unsigned long flags, unsigned long sbi )
@@ -106,12 +110,12 @@ void DualMotor::Reset( )
   Motor::Reset( );
 }
 
+#define AVG_SAMPLE_COUNT  100
+
 bool Motor::IsAtTheEnd( )
 {
-  if( endPin >= 0 ) 
-    return(( digitalRead( endPin ) == HIGH ) ? true : false );
-  else
-    return false;
+  return false;
+
 }
 
 void Motor::SetDirection( int d )
@@ -157,6 +161,7 @@ unsigned long Motor::InitMove( long s, long t )
   *stepClrReg = stepPinMask;
   //digitalWrite( stepPin, LOW );
 
+/*
   if( s == 0 && manual )
   {
     if( manual > -100 && manual < 100 )
@@ -179,7 +184,7 @@ unsigned long Motor::InitMove( long s, long t )
     }
     t = 100000;
   }
-  
+*/  
   // Backward direction
   if( s < 0 ) 
   { 
@@ -217,8 +222,10 @@ unsigned long Motor::InitMove( long s, long t )
   else 
   {
     moveStep = 0;
+    nextStepTime = NO_STEP_TIME;
     return NO_STEP_TIME;
   }
+  
   currentStepTime = stepDuration;
   return stepDuration;
 }
@@ -422,27 +429,16 @@ inline bool WaitTillItsTime( unsigned long t )
         X.PrepareNextStep( );
         Y.PrepareNextStep( );
         Z.PrepareNextStep( );
+
+        count = 1;
       }
       else
       {   
-        // Alternate between UART and LCD tasks (UART first)
-        if( count & 1 )
-        {
-          // Read from UART and decode (one char at a time)
-          // Except for the G10 (Reset) command, all the UART processing is done
-          // in less than 20uS
-          UART_Task( );
-        }
-        else
-        {
-          // Refresh the LCD screen (if enough time)
-          // Most LCD refresh commands take 30uS or less
-          LCD_UpdateTask( );       
-        }
-
-        LCD_ButtonTask( );
+        // Read from UART and decode (one char at a time)
+        // Except for the G10 (Reset) command, all the UART processing is done
+        // in less than 20uS
+        UART_Task( );
       }
-      count++;
     }
   } while( 1 );
   
@@ -532,25 +528,29 @@ void Motor_Move( long x, long y, long z, long d )
   avgStepTime = 0;
   avgStepCounter = 0;
 #endif
-  
-  // No movement means dwell (GCode "P")
-  if( x==0 && y==0 && z==0 )
-  {
-    if( d != 0 )
-    {
-      // Just wait...
-      WaitTillItsTime( d );
-      g_MoveStart = 0;
-      return;
-    }
-    // Manual mode, don't return here
-  }
 
   // This calculates the interval between steps for each axis and returns the time
   // to the first step needs to occur ( NO_STEP_TIME if no move necessary).
   tX = X.InitMove( x, d );
   tY = Y.InitMove( y, d );
   tZ = Z.InitMove( z, d );
+ 
+  // No movement means dwell (GCode "P")
+  if( x==0 && y==0 && z==0 )
+  {
+    if( d != 0 )
+    {
+      while( g_MoveStart + d >= micros( ))
+      {
+        UART_Task( );
+      }     
+      
+      // Just wait...
+      //WaitTillItsTime( d );
+      g_MoveStart += d;
+    }
+    return;
+  }
 
   do
   {
@@ -577,7 +577,14 @@ void Motor_Move( long x, long y, long z, long d )
     }
   } while( 1 );
 
-  g_MoveStart += d;
+  if( d != 0 )
+  {
+    g_MoveStart += d;
+  }
+  else
+  {
+    g_MoveStart = 0;
+  }
   
 #ifdef MEASURE_MOVE
   char str[10];
@@ -587,12 +594,16 @@ void Motor_Move( long x, long y, long z, long d )
 
 }
 
+
 void Motor_Init( )
-{
+{  
   g_error = 0;
   g_missedStepCount = 0;
   
-  for( int i=0; i<MAX_DEBUG; i++ ) g_debug[i] = 0;
+  for( int i=0; i<MAX_DEBUG; i++ )
+  {
+    g_debug[i] = 0;
+  }
   
   pinMode(TOOL_ON_REPLAY, OUTPUT);
   digitalWrite(TOOL_ON_REPLAY, LOW);

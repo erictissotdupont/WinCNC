@@ -41,7 +41,10 @@ protected :
   long stepModulo;            // The remainder of the division
   unsigned long nextStepTime; // Time when the next half step should be made
   unsigned long currentStepTime; // Time when the current step is happening
-  long stepAcc;           // The fractional error accumulator
+  long stepAcc;               // The fractional error accumulator
+  int endDetectionState;      // The current state of the end of course pin
+  unsigned long endPinDebounceTime; // To measure how long the end of course
+                              // detection pin stays high (debouncing)
 
   // Rapid positionning (G0)
   //

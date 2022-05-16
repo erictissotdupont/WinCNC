@@ -875,7 +875,7 @@ BOOL CarveRect(HWND hWnd)
 	return TRUE;
 }
 
-void BasicShapeOneCommand(HWND hWnd)
+void BasicShapeOneCommand(HWND hWnd, bool bDebug )
 {
 	char* cmd;
 	HWND hItem;
@@ -886,7 +886,7 @@ void BasicShapeOneCommand(HWND hWnd)
 	if (cmd)
 	{
 		GetWindowTextA(hItem, cmd, l);
-		ParseBuffer(hWnd, cmd, l, doGcode, FALSE );
+		ParseBuffer(hWnd, cmd, l, doGcode, bDebug );
 		free(cmd);
 	}
 }
@@ -947,8 +947,13 @@ BOOL CALLBACK BasicShapesProc(HWND hWnd,
 				break;
 
 			case IDC_EXECUTE:
-				BasicShapeOneCommand(hWnd);
+				BasicShapeOneCommand(hWnd,false);
 				break;
+
+			case IDC_STEP:
+				BasicShapeOneCommand(hWnd,true);
+				break;
+
 			case IDC_RESET_SIM:
 				resetBlockSurface();
 				break;

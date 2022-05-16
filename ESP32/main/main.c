@@ -20,8 +20,9 @@
 #include "driver/uart.h"
 #include "string.h"
 
-#include "Cnc.h"
 #include "Network.h"
+#include "LCD.h"
+#include "Cnc.h"
 
 static const char* TAG = "main";
 
@@ -35,12 +36,14 @@ unsigned long g_Status = 0;
 char g_UARTrxData[UART_RX_BUF_SIZE];
 char g_ACKchar = '0';
 
+#define DEBUG_UARTx
 
 void cnc_loop( )
 {
   while( 1 )
-  {    
-    vTaskDelay( 100 / portTICK_PERIOD_MS);  
+  {
+    //LCD_Refresh( );
+    vTaskDelay( 10 / portTICK_PERIOD_MS);  
   } 
 }
 
@@ -141,6 +144,41 @@ bool ResetCommand( )
   return true;
 }
 
+
+bool GetAnalogCommand( unsigned long* A0, unsigned long* A1, unsigned long* A2 )
+{
+  bool bStatus = false;
+  unsigned long a0,a1,a2;
+  
+  if( UART_Command( "ANALOG" ) <= 0 )
+  {
+    ESP_LOGE( TAG, "Get analog values failed" );
+  }
+  else
+  {      
+    if( sscanf( g_UARTrxData, "A%luB%luC%lu",
+        &a0,&a1,&a2 ) != 3 )
+    {
+      ESP_LOGE( TAG, "Analog '%s' failed to decode.", g_UARTrxData );
+    }
+    else
+    {  
+      ESP_LOGI( TAG, "Analog : %lu,%lu,%lu",
+          *A0, *A1, *A2 );
+          
+      if( A0 ) *A0 = a0;
+      if( A1 ) *A1 = a1;
+      if( A2 ) *A2 = a2;
+          
+      bStatus = true;
+    }
+  }
+  
+  return bStatus;
+}
+
+
+
 bool GetPositionCommand( long* pX, long* pY, long *pZ, unsigned long* pS, unsigned long *pQ )
 {
   long x,y,z;
@@ -184,7 +222,7 @@ bool OriginCommand( )
 }
 
 
-bool CheckMachineIsIdle( unsigned long seq )
+bool CheckMachineIsIdle( unsigned long seq, struct sockaddr_in* source )
 {
   int retry = 0;
   bool bStatus = false;
@@ -215,7 +253,7 @@ bool CheckMachineIsIdle( unsigned long seq )
           for( int i=0; i<(1000 / NACK_INTERVAL_MS ); i++ )
           {     
             vTaskDelay( NACK_INTERVAL_MS / portTICK_PERIOD_MS );
-            sendNAK( seq );
+            sendNAK( seq, source );
           }
         }
         else if( s == 2 )
@@ -256,7 +294,7 @@ bool MoveCommand( cmd_t* pCmd )
     
   uint8_t crc = crc8( (unsigned char*)szCmd+1, cbCmd-1, 0xFF );
   cbCmd += sprintf( szCmd + cbCmd, "%d", crc );
-
+  
   bStatus = (( cbRet = UART_Command( szCmd )) == 1 && g_UARTrxData[0] == g_ACKchar ); 
   if( !bStatus )
   {
@@ -320,7 +358,7 @@ void initUART(void)
   MoveCommand( &cmd );
   */
   
-  if( !CheckMachineIsIdle( 0 ))
+  if( !CheckMachineIsIdle( 0, NULL ))
   {
     ESP_LOGE( TAG, "Unable to retrive CNC position" );
   }
@@ -345,6 +383,8 @@ void app_main(void)
   ESP_ERROR_CHECK( err );
   
   g_startTime = esp_timer_get_time( );
+  
+  // LCD_Refresh( );
   
 	// Initialize the network and start the tasks
 	initSocketCom( );

@@ -18,8 +18,7 @@ typedef struct _cmd_t
 
 bool ResetCommand( );
 bool OriginCommand( );
-bool CheckMachineIsIdle( unsigned long seq, struct sockaddr_in* source );
-bool GetAnalogCommand( unsigned long* A0, unsigned long* A1, unsigned long* A2 );
+bool CheckMachineIsIdle( unsigned long seq );
 bool GetPositionCommand( long* pX, long* pY, long *pZ, unsigned long* pS, unsigned long *pQ );
 bool MoveCommand( cmd_t* pCmd );
 

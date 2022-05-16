@@ -25,6 +25,12 @@ unsigned long g_maxUARTtaskTime = 0;
 unsigned long g_timeOfLastAck = 0;
 char g_ACKchar = '0';
 
+#define MAX_ADC           3
+#define ADC_SAMPLE_AVG    16
+
+uint32_t adc_sample[MAX_ADC][ADC_SAMPLE_AVG];
+int adc_pin[MAX_ADC] = {A1,A2,A0};
+
 static const uint8_t crc8_table[256] = {
     0x00, 0xF7, 0xB9, 0x4E, 0x25, 0xD2, 0x9C, 0x6B,
     0x4A, 0xBD, 0xF3, 0x04, 0x6F, 0x98, 0xD6, 0x21,
@@ -198,6 +204,20 @@ inline void UART_SendAck( )
   if( g_ACKchar > '9' ) g_ACKchar = '0';
 }
 
+uint32_t ADC_GetAverage( int idx )
+{
+  if( idx >= MAX_ADC )
+  {
+    return 0;
+  }
+  else
+  {
+    uint32_t avg = 0;
+    for( int n=0; n<ADC_SAMPLE_AVG; n++ ) avg += adc_sample[idx][n];
+    return avg / ADC_SAMPLE_AVG;
+  } 
+}
+
 void UART_SendStatus( int command )
 {
   static int state = 0;
@@ -214,19 +234,63 @@ void UART_SendStatus( int command )
         UART_Write( '#' );
         state = 10;
       }
+      else if( command == 3 )
+      {
+        UART_Write( '#' );
+        state = 14;
+      }
       break;
     case 1 : UART_Print( 'X', X.GetPos( ));state=2; break;
     case 2 : UART_Print( 'Y', Y.GetPos( ));state=3; break;
     case 3 : UART_Print( 'Z', Z.GetPos( ));state=4; break;
     case 4 : UART_PrintHex( 'S', g_error );state=5;break;
     case 5 : UART_Print( 'Q', fifoCount( )); UART_Write( '\0' );state = 0;break;
+    
     case 10 : UART_Print( 'a', g_debug[0] );state=11;break;
     case 11 : UART_Print( 'b', g_debug[1] );state=12;break;
     case 12 : UART_Print( 'c', g_debug[2] );state=13;break;
     case 13 : UART_Print( 'd', g_debug[3] );UART_Write( '\0' );state=0;break;
+
+    case 14 : UART_Print( 'A', ADC_GetAverage( 0 ));state=15;break;
+    case 15 : UART_Print( 'B', ADC_GetAverage( 1 ));state=16;break;
+    case 16 : UART_Print( 'C', ADC_GetAverage( 2 ));UART_Write( '\0' );state=0;break;
+    
     default :
       state = 0;
   }
+}
+
+bool ADC_Task( )
+{
+  bool bRet = false;
+  static int adc_index = -1;
+  static int sample_index = 0;
+  uint32_t adc;
+
+  if( adc_index == -1 )
+  {
+    startAnalogRead( A0 );
+    adc_index = 0;
+  }
+  else
+  {
+    if( fastAnalogRead( adc_pin[adc_index], &adc ))
+    {
+      adc_sample[adc_index][sample_index] = adc;
+      adc_index++;
+      if( adc_index >= MAX_ADC )
+      {
+        adc_index = 0;
+        sample_index++;
+        if( sample_index >= ADC_SAMPLE_AVG )
+        {
+          sample_index = 0;       
+        }
+      }
+      bRet = true;
+    }
+  }
+  return bRet;
 }
 
 bool UART_Task( )
@@ -250,7 +314,12 @@ bool UART_Task( )
   UART_SendStatus(0);
 
   // Write any pending characters to the UART and return 'true' if RX buffer not empty
-  if( Serial1.write_noWait( NULL, 0 ))
+  if( Serial1.write_noWait( NULL, 0 ) == 0 )
+  {
+    // Nothing to read from UART, let's refresh the ADC
+    ADC_Task( );    
+  }
+  else
   {
     c = Serial1.read( );
          
@@ -314,7 +383,7 @@ bool UART_Task( )
           }
           else
           {
-    
+            
             // Move the FIFO input index to the next slot.
             if( ++g_fifoIn > MAX_FIFO_MOVE ) g_fifoIn = 0;
   
@@ -405,6 +474,10 @@ bool UART_Task( )
             {
               UART_SendStatus(1);
             }
+            else if( strcmp( rxBuffer, "ANALOG" ) == 0 )
+            {
+              UART_SendStatus(3);
+            }
             /*
              // POSITION
       // --------
@@ -478,7 +551,7 @@ void Motor_Task( )
     {
       digitalWrite(TOOL_ON_REPLAY, g_fifo[g_fifoOut].s ? HIGH : LOW);
     }
-        
+    
     // Perform the move
     Motor_Move( 
       g_fifo[g_fifoOut].x,
@@ -498,14 +571,15 @@ void Motor_Task( )
     if( ++g_fifoOut > MAX_FIFO_MOVE ) g_fifoOut = 0;
   }
 
+  X.IsAtTheEnd( );
+  Y.IsAtTheEnd( );
+  Z.IsAtTheEnd( );
+
   // Fifo is now empty, reset the timestamp for the start
   // of the next command so that the Motor_Move( ) function
   // will use the current time instead of previous command
   // plus its duration.
   g_MoveStart = 0;
-
-  // Manual motion
-  Motor_Move( 0, 0, 0, 0 );
 
   if( g_error )
   {

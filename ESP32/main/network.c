@@ -9,10 +9,7 @@
 #include <errno.h>
 #include <string.h>
 #include <sys/types.h>
-#include <sys/socket.h>
 #include <sys/ioctl.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -38,8 +35,9 @@
 #include "nvs_flash.h"
 #include "esp_sntp.h"
 
-#include "Cnc.h"
 #include "network.h"
+#include "Cnc.h"
+
 
 // Arbitrary non-privileged port
 #define BROADCAST_PORT   50042
@@ -47,6 +45,8 @@
 #define HELLO            "Cnc 2.0"
 
 #define NETWORK_STACK_SIZE		4096
+
+#define DEBUG_UDPx
 
 unsigned long comStateIdx = 0;
 unsigned long currentComState = 0;
@@ -92,7 +92,6 @@ uint64_t g_timeStateTimout;
 #define CMD_QUEUE_SIZE            ( 256 )
 static xQueueHandle g_cmd_queue = NULL;
 
-struct sockaddr_in g_hostAddr;
 struct sockaddr_in g_broadcastAddr;
 int g_transmitSocket;
 
@@ -196,26 +195,26 @@ void processEvent( char* pt )
   
 }
 
-void sendMessage( char* msg, size_t cbMsg )
+void sendMessage( char* msg, size_t cbMsg, struct sockaddr_in* target )
 {
-  if( sendto( g_transmitSocket, msg, cbMsg, 0, (struct sockaddr*)&g_hostAddr, sizeof(g_hostAddr)) < 0 )
+  if( msg[cbMsg-1] != 0 )
+  {
+    ESP_LOGE( TAG, "Outpbound message not zero terminated." );
+    msg[cbMsg] = 0;
+  }
+  if( sendto( g_transmitSocket, msg, cbMsg, 0, (struct sockaddr*)target, sizeof(struct sockaddr)) < 0 )
   {
     ESP_LOGE( TAG, "Failed to send message." );
   }
   else
   {
-    if( msg[cbMsg-1] != 0 )
-    {
-      ESP_LOGE( TAG, "Outpbound message not zero terminated." );
-      msg[cbMsg] = 0;
-    }
 #ifdef DEBUG_UDP
     ESP_LOGI( TAG, "Sent:'%s'", msg );
 #endif
   }
 }
 
-void sendACK( unsigned long seq, tCnCCmdStatus status, int inQueue )
+void sendACK( unsigned long seq, tCnCCmdStatus status, int inQueue, struct sockaddr_in* target )
 {
   char rspbuf[80];
 
@@ -227,12 +226,12 @@ void sendACK( unsigned long seq, tCnCCmdStatus status, int inQueue )
     inQueue,    
     (int)status ) + 1;
     
-  sendMessage( rspbuf, cbRsp );
+  sendMessage( rspbuf, cbRsp, target );
 }
 
-void sendNAK( unsigned long seq )
+void sendNAK( unsigned long seq, struct sockaddr_in* target )
 {
-  if( g_hostAddr.sin_addr.s_addr != 0 )
+  if( target && target->sin_addr.s_addr != 0 )
   {  
     char rspbuf[80];
     int cbRsp = sprintf( rspbuf, "NAK,%lu,%ld,%ld,%ld,%lu", 
@@ -244,11 +243,69 @@ void sendNAK( unsigned long seq )
       
     g_nackCounter++;
       
-    sendMessage( rspbuf, cbRsp );
+    sendMessage( rspbuf, cbRsp, target );
   }
 }
 
+tCnCCmdStatus MovementCommand( unsigned long seq, char* pt, struct sockaddr_in* source, bool bIgnoreCRC )
+{
+  tCnCCmdStatus status = cncStatus_Success;
+  cmd_t cmd;
+  unsigned int remotePosCRC;
+  int nackCount = 0;
+  static uint64_t timeSinceLastNAK = 0;
+    
+  // Pre-calculate the current position CRC so that we can compare
+  // it what the command expects us to be at
+  uint8_t localPosCRC = crc8( 
+    (uint8_t*)g_NetworkPosition, 
+    sizeof( g_NetworkPosition ), 
+    0xFF );
 
+  if( sscanf( pt, "%ld,%ld,%ld,%lu,%lu,%x",
+    &cmd.dx,
+    &cmd.dy,
+    &cmd.dz,
+    &cmd.duration,
+    &cmd.flags,
+    &remotePosCRC ) != 6 )
+  {
+      ESP_LOGE( TAG, "Message failed to decode" );
+      status = cncStatus_CommandDecodingError;
+  }
+  else if( localPosCRC != remotePosCRC && !bIgnoreCRC )
+  {
+    ESP_LOGE( TAG, "Position CRC mismatch. Got %x, expected %x.", remotePosCRC, localPosCRC );
+    status = cncStatus_PositionCRCmismatch;
+  }
+  else 
+  {
+    // Update the position from the command received so that
+    // we can update calculate the CRC
+    g_NetworkPosition[0] += cmd.dx;
+    g_NetworkPosition[1] += cmd.dy;
+    g_NetworkPosition[2] += cmd.dz;
+
+    // Try to place msg into the queue. NAK until it's in queue.
+    // Note that we want to nack immediately to reduce the timeout
+    // on the host side.
+    while( xQueueSend( g_cmd_queue, 
+                       &cmd, 
+                       nackCount == 0 ? 0 : ( NACK_INTERVAL_MS / portTICK_PERIOD_MS )) != pdPASS )
+    {
+      // The message was placed in the queue. If it has been more than
+      // the nack interval or it's the first message we put in the queue,
+      // send a NACK to the host.
+      if( esp_timer_get_time( ) > timeSinceLastNAK )
+      {
+        nackCount++;
+        sendNAK( seq, source );
+        timeSinceLastNAK = esp_timer_get_time( ) + ( NACK_INTERVAL_MS * 1000 );
+      }    
+    }
+  }
+  return status;
+}
 
 void receiverTask(void *arg)
 {
@@ -256,7 +313,10 @@ void receiverTask(void *arg)
   int inQueue;
   unsigned int addrlen;
   u_int yes=1;
+  tCnCCmdStatus status = cncStatus_Success;
   static char msgbuf[2048]; // Static to avoid bloating the stack
+  struct sockaddr_in source;
+  struct sockaddr_in local;
 
   ESP_LOGI( TAG, "Receiver task started." );
 
@@ -275,13 +335,13 @@ void receiverTask(void *arg)
   }
 
   // Set up destination address
-  memset(&g_hostAddr,0,sizeof(g_hostAddr));
-  g_hostAddr.sin_family=AF_INET;
-  g_hostAddr.sin_addr.s_addr=htonl(INADDR_ANY);
-  g_hostAddr.sin_port=htons(DATA_PORT);
+  memset(&local,0,sizeof(local));
+  local.sin_family=AF_INET;
+  local.sin_addr.s_addr=htonl(INADDR_ANY);
+  local.sin_port=htons(DATA_PORT);
   
   // bind to receive from data this port only
-  if (bind(rxSocket,(struct sockaddr *) &g_hostAddr,sizeof(g_hostAddr)) < 0)
+  if (bind(rxSocket,(struct sockaddr *) &local,sizeof(local)) < 0)
   {
     ESP_LOGE( TAG, "RX socket bind failed");
     return;
@@ -292,15 +352,15 @@ void receiverTask(void *arg)
   {
     char srcIP[IPSTRSIZE];
 
-    addrlen=sizeof(g_hostAddr);
-    if ((nbytes=recvfrom(rxSocket,msgbuf,sizeof(msgbuf),0,(struct sockaddr *) &g_hostAddr,&addrlen)) < 0 )
+    addrlen=sizeof(source);
+    if ((nbytes=recvfrom(rxSocket,msgbuf,sizeof(msgbuf),0,(struct sockaddr *) &source,&addrlen)) < 0 )
     {
       // Fatal
       ESP_LOGE( TAG, "rcvfrom( ) failed." );
       return;
     }
     
-    inet_ntop(AF_INET, &g_hostAddr.sin_addr, srcIP, sizeof(srcIP));
+    inet_ntop(AF_INET, &source.sin_addr, srcIP, sizeof(srcIP));
     if(strcmp( srcIP, myIP )==0) 
     {
       // Ignore our own transmission
@@ -333,17 +393,13 @@ void receiverTask(void *arg)
       memcpy( msgbuf + MSG_TRUNK_AT - ELIPSYS, tmp, ELIPSYS );
     }
 #endif
-    
-    if( memcmp( msgbuf, "CMD,", 4 ) != 0 )
-    {
-      ESP_LOGW( TAG, "Invalid header. Message ignored." );
-      // Ignore
-    }
-    else
+
+    // This this a G Code command
+    // --------------------------
+    if( memcmp( msgbuf, "CMD,", 4 ) == 0 )
     {
       unsigned long seq;
       long cmdCount;
-      uint64_t timeSinceLastNAK = esp_timer_get_time( );
       
       if( sscanf( msgbuf+4, "%lu,%lu", &seq, &cmdCount ) != 2 || 
           cmdCount <= 0 || 
@@ -364,7 +420,7 @@ void receiverTask(void *arg)
         if( seq == ( g_NextSeq - 1 ))
         {
           // Let's ACK it. The host missed the reponse and re-sent.
-          sendACK( seq, cncStatus_Success, inQueue );
+          sendACK( seq, cncStatus_Success, inQueue, &source );
           
           ESP_LOGW( TAG, "Retry of %lu - Queue:%d.", 
             seq,
@@ -373,7 +429,7 @@ void receiverTask(void *arg)
         // Got a completely out of order packet. That is not recoverable.
         else if( seq != g_NextSeq )
         {
-          sendACK( seq, cncStatus_SequenceError, inQueue );
+          sendACK( seq, cncStatus_SequenceError, inQueue, &source );
           
           ESP_LOGE( TAG, "Out of sequence. Exp:%lu Got:%lu Queue:%d.", 
             g_NextSeq,
@@ -382,9 +438,8 @@ void receiverTask(void *arg)
         }
         else
         {
-          int nackCount = 0;
           char *pt = msgbuf+4;
-          tCnCCmdStatus status = cncStatus_Success;
+          status = cncStatus_Success;
     
           for( int i=0; i<cmdCount && status == cncStatus_Success; i++ )
           {
@@ -402,71 +457,16 @@ void receiverTask(void *arg)
             // This is a movement command
             else if( *pt == '@' )
             {
-              cmd_t cmd;
-              unsigned int remotePosCRC;
-              
               // Move to the start of the command parameters
               pt++;
               
-              // Pre-calculate the current position CRC so that we can compare
-              // it what the command expects us to be at
-              uint8_t localPosCRC = crc8( 
-                (uint8_t*)g_NetworkPosition, 
-                sizeof( g_NetworkPosition ), 
-                0xFF );
-              
-              if( sscanf( pt, "%ld,%ld,%ld,%lu,%lu,%x",
-                &cmd.dx,
-                &cmd.dy,
-                &cmd.dz,
-                &cmd.duration,
-                &cmd.flags,
-                &remotePosCRC ) != 6 )
-              {
-                  ESP_LOGE( TAG, "Message failed to decode" );
-                  status = cncStatus_CommandDecodingError;
-              }
-              else if( localPosCRC != remotePosCRC )
-              {
-                ESP_LOGE( TAG, "Position CRC mismatch. Got %x, expected %x.", remotePosCRC, localPosCRC );
-                status = cncStatus_PositionCRCmismatch;
-              }
-              else 
-              {
-                // Update the position from the command received so that
-                // we can update calculate the CRC
-                g_NetworkPosition[0] += cmd.dx;
-                g_NetworkPosition[1] += cmd.dy;
-                g_NetworkPosition[2] += cmd.dz;
-             
-                // Try to place msg into the queue. NAK until it's in queue.
-                // Note that we want to nack immediately to reduce the timeout
-                // on the host side.
-                while( xQueueSend( g_cmd_queue, 
-                                   &cmd, 
-                                   nackCount == 0 ? 0 : ( NACK_INTERVAL_MS / portTICK_PERIOD_MS )) != pdPASS )
-                {
-                  nackCount++;
-                  sendNAK( seq );
-                  timeSinceLastNAK = esp_timer_get_time( );
-                }
-                // The message was placed in the queue. If it has been more than
-                // the nack interval or it's the first message we put in the queue,
-                // send a NACK to the host.
-                if( nackCount == 0 || 
-                    esp_timer_get_time( ) > timeSinceLastNAK + ( NACK_INTERVAL_MS * 1000 ))
-                {
-                  nackCount++;
-                  sendNAK( seq );
-                  timeSinceLastNAK = esp_timer_get_time( );
-                }                  
-              }
+              status = MovementCommand( seq, pt, &source, false );
             }
             else if( strncmp( pt, "ORIGIN", 6 ) == 0 )
             {
               OriginCommand( );
               
-              CheckMachineIsIdle( seq );
+              CheckMachineIsIdle( seq, &source );
               
             }           
             else if( strncmp( pt, "RST", 3 ) == 0 )
@@ -502,10 +502,25 @@ void receiverTask(void *arg)
           // timeout and re-send the command message. Since the sequence #
           // will be in the past the device will just ACK it again and
           // transfer will resume.
-          sendACK( seq, status, inQueue );
+          sendACK( seq, status, inQueue, &source );
           
         }
       }
+    }
+    else if( memcmp( msgbuf, "MAN,@", 4 ) == 0 )
+    {
+      inQueue = uxQueueMessagesWaiting( g_cmd_queue );
+      status = MovementCommand( 0, msgbuf+5, &source, true );
+      sendACK( 0, status, inQueue, &source );
+    }
+    else if( memcmp( msgbuf, "NOP", 3 ) == 0 )
+    {
+      // Do nothing. This is to help keep the respontiveness of the joystick
+    }
+    else
+    {
+      ESP_LOGW( TAG, "Invalid header. Message ignored." );
+      // Ignore
     }
   }
   return;
@@ -572,6 +587,10 @@ void broadcastTask(void* arg)
     {
       long x,y,z;
       unsigned long S,Q;
+      unsigned long A0,A1,A2;
+      
+      GetAnalogCommand( &A0, &A1, &A2 );
+      
       
       if( !GetPositionCommand( &x, &y, &z, &S, &Q ))
       {
@@ -852,6 +871,8 @@ int initSocketCom( void )
       .sta = {
         .ssid = "aet home",
         .password = "makeaguess",
+        .bssid_set = 1,
+        .bssid = { 0x44,0x07,0x0b,0x03,0x08,0x00 }, // Garage AP
         
         /* Setting a password implies station will connect to all security modes including WEP/WPA.
          * However these modes are deprecated and not advisable to be used. Incase your Access point
@@ -867,6 +888,7 @@ int initSocketCom( void )
     
   ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA) );
   ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config) );
+  ESP_ERROR_CHECK(esp_wifi_set_bandwidth(ESP_IF_WIFI_STA, WIFI_BW_HT20));
   ESP_ERROR_CHECK(esp_wifi_start() );
 
   if( xTaskCreate( 

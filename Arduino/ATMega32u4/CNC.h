@@ -15,12 +15,15 @@
 #define ERROR_COMM           0x00000040l
 #define ERROR_FLAG_MASK      0x000000FFl
 
+#define STATUS_MANUAL_MODE   0x00000100l
+
 #define REDUCED_RAPID_POSITIONING_SPEED   0x80000000l
 
-#define MAX_FIFO_MOVE        7
+#define MAX_FIFO_MOVE        3
 #define MAX_DEBUG            4
 
-#define TOOL_ON_REPLAY  3
+#define TOOL_ON_REPLAY       2
+
 
 // DISPLAY_TASK_TIME
 // -----------------

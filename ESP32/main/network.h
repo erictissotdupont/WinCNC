@@ -1,6 +1,10 @@
 
 #include <time.h>
 
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+
 #define MSGBUFSIZE     256
 #define IPSTRSIZE      17
 #define MACSTRSIZE     19
@@ -12,7 +16,7 @@
 #define PEER_RESPONSE_TIMEOUT_MS	  ( 3000L )
 #define SNTP_BROADCAST_PERIOD_MS    ( 15000L )
 
-#define NACK_INTERVAL_MS            ( 100 )
+#define NACK_INTERVAL_MS            ( 100L )
 
 
 typedef void(*stateChangeCallback)(int);
@@ -29,7 +33,7 @@ char* getNetworkHealth( );
 void resetNetworkHealth( );
 char* getTimeStatus( int state );
 char* getMyTimeStatus( );
-void sendNAK( unsigned long seq );
+void sendNAK( unsigned long seq, struct sockaddr_in* target );
 
 typedef struct _socket_diag {
   unsigned int txCnt;

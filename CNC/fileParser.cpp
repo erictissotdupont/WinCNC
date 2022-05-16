@@ -126,8 +126,20 @@ void ParserInit(HWND hWnd)
 void ParserOnPause(HWND hWnd)
 {
 	HWND hItem = GetDlgItem(hWnd, IDD_PAUSE);
-	job.bPause = !job.bPause;
-	SetWindowText(hItem, job.bPause ? L"RESUME" : L"PAUSE" );
+	if (job.hDebugStepEvent == NULL)
+	{
+		job.hDebugStepEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
+		SetWindowText(hItem, L"RESUME");
+	}
+	else
+	{
+		HANDLE hEvent = job.hDebugStepEvent;
+		job.hDebugStepEvent = NULL;
+		SetEvent(hEvent);
+		CloseHandle(hEvent);
+		SetWindowText(hItem, L"PAUSE");
+	}
+	
 }
 
 void ParserOnStep(HWND hWnd)

@@ -740,6 +740,7 @@ void LCD_ButtonTask( )
 {
   static tButtonState state = ButtonState_WaitingForX;
 
+  /*
   switch( state )
   {
   case ButtonState_WaitingForX :
@@ -751,5 +752,6 @@ void LCD_ButtonTask( )
   case ButtonState_WaitingForButtons :
     if( LCD_ScanButtons( )) state = ButtonState_WaitingForX;
     break;
-  }    
+  } 
+  */   
 }
