@@ -45,6 +45,7 @@ extern long g_xPos;
 extern long g_yPos;
 extern long g_zPos;
 extern unsigned long g_Status;
+extern char g_szStatus[20];
 
 bool g_bI2Cinitialized = false;
 
@@ -191,11 +192,13 @@ void LCD_Refresh( void )
       n = sprintf( tmp, "Z:%.3f", z );
       memcpy( &LCD_buffer[0][10], tmp, n );
       
-      n = sprintf( tmp, "%.1f", g_Vbatt );
+      memcpy( LCD_buffer[3], g_szStatus, strlen(g_szStatus));
+      
+      n = sprintf( tmp, "%.1fV", g_Vbatt );
       memcpy( LCD_buffer[3]+LCD_COL-n, tmp, n);
       
+#if 0
       int i;
-
       i = 10 + g_joyX;
       if( i < 0 ) i = 0;
       if( i > 19 ) i = 19; 
@@ -205,7 +208,8 @@ void LCD_Refresh( void )
       if( i < 0 ) i = 0;
       if( i > 19  ) i = 19;
       LCD_buffer[3][ i ] = '*';
-      
+#endif      
+
       static int wiggle = 0;
       static uint64_t timeToNextWiggle = 0;
       uint64_t now = esp_timer_get_time( );

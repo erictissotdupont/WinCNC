@@ -56,8 +56,6 @@ int bGotIP = 0;
 
 int g_bConnected = 0;
 
-
-
 unsigned long g_NextSeq = 0;
 
 long g_NetworkPosition[3];
@@ -590,8 +588,7 @@ void broadcastTask(void* arg)
       unsigned long A0,A1,A2;
       
       GetAnalogCommand( &A0, &A1, &A2 );
-      
-      
+              
       if( !GetPositionCommand( &x, &y, &z, &S, &Q ))
       {
         ESP_LOGE( TAG, "Failed to get current position" );
@@ -623,12 +620,15 @@ void broadcastTask(void* arg)
       {
         char statusmsg[64];
         
-        sprintf( statusmsg, "CNC,%lu,%ld,%ld,%ld,%lx",
+        sprintf( statusmsg, "CNC,%lu,%ld,%ld,%ld,%lx,%ld,%ld,%ld",
           g_NextSeq,
           g_xPos,
           g_yPos,
           g_zPos,
-          g_Status );
+          g_Status,
+          A0,
+          A1,
+          A2 );
           
         if ( sendto(g_transmitSocket,statusmsg,strlen(statusmsg)+1,0,(struct sockaddr *) &g_broadcastAddr, sizeof(g_broadcastAddr)) < 0) 
         {

@@ -24,6 +24,7 @@ static const char* TAG = "main";
 
 uint64_t g_startTime = 0;
 unsigned long g_Status = 0;
+char g_szStatus[20] = { 0 };
 
 void app_main(void)
 {

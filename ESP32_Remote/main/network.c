@@ -51,7 +51,11 @@ char myIP[IPSTRSIZE] = {0};
 unsigned long iMyIP = 0;
 char myMAC[MACSTRSIZE] = {0};
 
+extern char g_szStatus[20];
+
 static const char* TAG = "network";
+
+
 
 typedef enum {
 	cncStatus_Success = 0,
@@ -166,6 +170,7 @@ void receiverTask(void *arg)
   unsigned int addrlen;
   u_int yes=1;
   static char msgbuf[2048]; // Static to avoid bloating the stack
+  unsigned long A0,A1,A2;
 
   ESP_LOGI( TAG, "Receiver task started." );
 
@@ -229,17 +234,27 @@ void receiverTask(void *arg)
     
     ESP_LOGI( TAG, "Received %s", msgbuf );
        
-    if( sscanf( msgbuf, "CNC,%ld,%ld,%ld,%ld,%lx",
+    if( sscanf( msgbuf, "CNC,%ld,%ld,%ld,%ld,%lx,%ld,%ld,%ld",
       &g_NextSeq,
       &g_xPos,
       &g_yPos,
       &g_zPos,
-      &g_Status ) != 5 )
+      &g_Status,
+      &A0,
+      &A1,
+      &A2 ) != 8 )
     {
       ESP_LOGE( TAG, "Decoding failed." );  
     }
     else
     {      
+      ESP_LOGW( TAG, "Status:'%s'",g_szStatus );
+  
+      sprintf( g_szStatus, "%.0fC %.0fV %.0fV", 
+        (A0 - 157 ) * 0.304f,
+        (A1 * 0.05179f),
+        (A2 * 0.01604f));
+  
       g_hostAddr.sin_addr = cncAddr.sin_addr;
       
       if( ackRxTaskHandle == 0 )
