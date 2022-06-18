@@ -511,6 +511,11 @@ void receiverTask(void *arg)
       status = MovementCommand( 0, msgbuf+5, &source, true );
       sendACK( 0, status, inQueue, &source );
     }
+    else if( memcmp( msgbuf, "CAL_Z", 5 ) == 0 )
+    {
+      ESP_LOGI( TAG, "Calibrate Z" );
+      Calibrate_Z( );
+    } 
     else if( memcmp( msgbuf, "NOP", 3 ) == 0 )
     {
       // Do nothing. This is to help keep the respontiveness of the joystick

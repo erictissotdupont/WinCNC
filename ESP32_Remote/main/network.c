@@ -278,6 +278,7 @@ void receiverTask(void *arg)
 extern int g_joyX;
 extern int g_joyY;
 extern int g_Green;
+extern int g_Red;
 
 int absInt( int n )
 {
@@ -328,6 +329,23 @@ void senderTask(void* arg)
     duration_ms = 0;
     
 #define MICRO_STEP_THR   2
+
+    if( g_Red )
+    {
+      static int done = 0;
+      if( done == 0 )
+      {
+        ESP_LOGE( TAG, "Calibration Z Axis" );
+        
+        sprintf( cmd, "CAL_Z" );
+        if ( sendto(g_transmitSocket,cmd,strlen(cmd)+1,0,(struct sockaddr *) &cncAddr, sizeof(cncAddr)) < 0) 
+        {
+          ESP_LOGE( TAG, "Send failed" );
+        }
+        done = 1;
+      }
+    }
+      
   
     if( g_joyX || g_joyY )
     {

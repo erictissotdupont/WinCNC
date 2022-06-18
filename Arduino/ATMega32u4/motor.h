@@ -12,6 +12,7 @@ public :
   
   unsigned long InitMove( long s, long t );
   void PrepareNextStep( );
+  void Step( );
   void Step( unsigned long& t );
 
   void Manual( int dir );
@@ -77,6 +78,8 @@ private:
 
 public:
   void PrepareNextStep( );
+  void StepL( );
+  void StepR( );
   void Step( unsigned long& t );
   void Reset( );
   void SetDirection( int d );
@@ -85,3 +88,5 @@ public:
 
 void Motor_Init( );
 void Motor_Move( long x, long y, long z, long d );
+
+void Calibrate_Z( );

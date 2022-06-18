@@ -478,6 +478,19 @@ bool UART_Task( )
             {
               UART_SendStatus(3);
             }
+            else if( strcmp( rxBuffer, "CAL_Z" ) == 0 )
+            {
+              g_fifo[g_fifoIn].x = 0;
+              g_fifo[g_fifoIn].y = 0;
+              g_fifo[g_fifoIn].z = 0;
+              g_fifo[g_fifoIn].d = -1;
+              g_fifo[g_fifoIn].s = 0;
+
+              // Move the FIFO input index to the next slot.
+              if( ++g_fifoIn > MAX_FIFO_MOVE ) g_fifoIn = 0;
+
+              UART_SendAck( );
+            }
             /*
              // POSITION
       // --------

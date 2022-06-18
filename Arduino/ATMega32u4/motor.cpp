@@ -446,6 +446,28 @@ inline bool WaitTillItsTime( unsigned long t )
   return true;
 }
 
+void Motor::Step( )
+{
+  *stepSetReg = stepPinMask;
+  delayMicroseconds(100);
+  *stepClrReg = stepPinMask;
+}
+
+void DualMotor::StepL( )
+{
+  *stepSetReg = stepPinMask;
+  delayMicroseconds(100);
+  *stepClrReg = stepPinMask;
+}
+
+void DualMotor::StepR( )
+{
+  *step2SetReg = step2PinMask;
+  delayMicroseconds(100);
+  *step2ClrReg = step2PinMask;
+}
+
+
 void Motor::Step( unsigned long& t )
 {
 #ifdef MEASURE_MOVE
@@ -485,6 +507,7 @@ void DualMotor::Step( unsigned long& t )
   Motor::Step( t );
 }
 
+
 void Motor::Manual( int dir )
 {
   manual = dir;
@@ -503,6 +526,8 @@ long Motor::FakeMove( long s )
   curPos += s;
 }
 
+void Calibrate_Z( );
+
 // Move the tool position by the specified # of steps for x,y,z directions.
 // Duration of the motion determines the speed. d is in microseconds
 void Motor_Move( long x, long y, long z, long d )
@@ -513,6 +538,12 @@ void Motor_Move( long x, long y, long z, long d )
   if( g_error != 0 )
   {
     return;
+  }
+
+  if( d < 0 )
+  {
+    Calibrate_Z( );
+    return;    
   }
 
   if( g_MoveStart == 0 )
@@ -611,4 +642,139 @@ void Motor_Init( )
   X.Reset( );
   Y.Reset( );
   Z.Reset( );
+}
+
+#define FILTER_IO  10
+
+unsigned int filterPin( )
+{
+  int l = 0;
+  int r = 0;
+  for( int i=0; i<FILTER_IO; i++)
+  {
+    if( digitalRead( 4 ) == HIGH ) l++;
+    if( digitalRead( 3 ) == HIGH ) r++;
+  }
+  return ((l > FILTER_IO/2) ? 1 : 0 ) | 
+         ((r > FILTER_IO/2) ? 2 : 0 );
+}
+
+void Calibrate_Z( )
+{
+  unsigned int p;
+  
+  pinMode( 3, INPUT );
+  pinMode( 4, INPUT );
+
+  if( (filterPin( ) & 3) != 0 )
+  {
+    // If either side has tripped the sensor, move away
+    // so that we can detect the edge
+    Z.SetDirection( -1 ); // Down
+
+    while(( p = filterPin( )) != 0 )
+    {
+      if(( p & 1 ) != 0 ) Z.StepL( );
+      if(( p & 2 ) != 0 ) Z.StepR( );
+      UART_Task( );
+      delay( 1 );
+    }
+  }
+  else
+  {
+    Z.SetDirection( 1 ); // Up
+    while(( p = filterPin( )) != 3 )
+    {
+      if(( p & 1 ) == 0 ) Z.StepL( );
+      if(( p & 2 ) == 0 ) Z.StepR( );
+  
+      UART_Task( );
+      delayMicroseconds( 250 );
+    }
+  }
+
+  Z.SetDirection( -1 );
+  delay( 50 );
+
+#define CALIB_Z_OFFSET ((int)(0.2566f / Z_AXIS_RES ))
+  
+  // Apply the offset
+  for( int i=0;i<CALIB_Z_OFFSET; i++)
+  {
+    Z.StepR( );
+    UART_Task( );
+    delay( 1 );
+  }
+
+  // Back out by 0.5
+  for( int i=0; i<(int)(.25f / Z_AXIS_RES ); i++)
+  {
+    Z.StepL( );
+    Z.StepR( );
+    UART_Task( );
+    delay( 1 );
+  }
+
+#define CALIB_Z_REPEAT 4
+
+  int idleAtZero;
+  int totalL = 0;
+  int totalR = 0;
+  int backL;
+  int backR;
+
+  for( int n=0; n<CALIB_Z_REPEAT; n++ )
+  {
+    backL = 0;
+    backR = 0;
+
+    Z.SetDirection( 1 ); // Up
+    delay( 50 );
+
+    idleAtZero = 25;
+    while(( p = filterPin( )) != 3 || idleAtZero != 0 )
+    {
+      if(( p & 1 ) == 0 ) {  totalL++; }
+      if(( p & 2 ) == 0 ) {  totalR++; }
+      if((( p & 3 ) != 3 ))
+      {
+        Z.StepL( );
+        Z.StepR( );
+        backL++;
+        backR++;
+      }
+      else
+      {
+        idleAtZero--;
+      }
+      UART_Task( );
+      delay( 1 );
+    }
+
+    if( n == (CALIB_Z_REPEAT - 1))
+    {
+      backL = (totalL / CALIB_Z_REPEAT) + CALIB_Z_OFFSET;
+      backR = (totalR / CALIB_Z_REPEAT);
+    }
+    
+    Z.SetDirection( -1 ); // Down
+    delay( 50 );
+    
+    while( backL > 0 || backR > 0 )
+    {
+      if( backL > 0 ) { Z.StepL( ); backL--; }
+      if( backR > 0 ) { Z.StepR( ); backR--; }
+      UART_Task( );
+      delayMicroseconds( 500 );
+    }
+  }
+  
+  for( int i=0; i<(int)(3.5f / Z_AXIS_RES ); i++)
+  {
+    Z.StepL( );
+    Z.StepR( );
+    UART_Task( );
+    delayMicroseconds( 250 );
+  }
+  
 }

@@ -22,6 +22,7 @@ bool CheckMachineIsIdle( unsigned long seq, struct sockaddr_in* source );
 bool GetAnalogCommand( unsigned long* A0, unsigned long* A1, unsigned long* A2 );
 bool GetPositionCommand( long* pX, long* pY, long *pZ, unsigned long* pS, unsigned long *pQ );
 bool MoveCommand( cmd_t* pCmd );
+bool Calibrate_Z( );
 
 #define DEBUG_UDPx
 #define DEBUG_UARTx
