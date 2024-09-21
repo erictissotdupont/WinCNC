@@ -15,6 +15,7 @@
 #define COMMAND_RESET_ORIGIN   "RST"
 #define COMMAND_GET_POSITION   "POS"
 #define COMMAND_GET_DEBUG	   "DBG"
+#define COMMAND_CALIBRATE      "CAL_Z"
 
 HANDLE exportFile = NULL;
 tAxis XMotor,YMotor,ZMotor;
@@ -206,6 +207,16 @@ tStatus doMove( void(*posAtStep)(t3DPoint*,int,int,void*), int stepCount, double
   CheckStatus(false);
 
   return status;
+}
+
+tStatus CalibrateCNCPosition()
+{
+	tStatus ret = retSuccess;
+	if (g_pSimulation == NULL)
+	{
+		ret = sendCommand(COMMAND_CALIBRATE, NULL, 0);
+	}
+	return ret;
 }
 
 tStatus ResetCNCPosition( )

@@ -1,33 +1,35 @@
 #include "CNC.h"
 #include "helper.h"
 #include "motor.h"
-#include "LCD.h"
 #include "UART.h"
 //#include "EEPROM.h"
 
-unsigned int g_error;
+uint32_t g_error = WARNING_CALIBRATION;
+uint32_t g_limitState = 0;
 int g_debug[MAX_DEBUG];
 
 #define RAMP_SHIFT    19 // 19=524ms
 #define RAMP_TIME     (1L << RAMP_SHIFT)
 #define MIN_SPEED     15L
-#define MAX_SPEED     250L
+#define MAX_SPEED     150L
 // Calculate the speed ramp for G0 accel / decel phases 
 #define STEP_FROM_RAMP( Min, Max, t ) ( Min - ((( Min - Max ) * t ) >> RAMP_SHIFT))
 
 // Speed is in inch by minute, hence the 60M micro seconds
-#define SPEED_TO_STEP( sbi, s ) ( 60000000L / ( sbi * s ))
+#define SPEED_TO_STEP( sbi, s ) ( 60000000L / ((sbi) * (s)))
 
 #define NO_STEP_TIME  0xFFFFFFFF
 
 // Instantiation and configuration of the stepper motor controlers.
 //-----------------------------------------------------------------
-//           Step,Dir,End,Swap,    LimitFlag,      StepByInch
-Motor     X ( 11, 10, A3,  0, ERROR_LIMIT_X, 1.0f/X_AXIS_RES );
-Motor     Y ( 13, 12, A4,  1, ERROR_LIMIT_Y, 1.0f/Y_AXIS_RES );
-DualMotor Z (  7,  6, A5,
-               9,  8, -1,  0, ERROR_LIMIT_Z | REDUCED_RAPID_POSITIONING_SPEED,
-                                             1.0f/Z_AXIS_RES );
+//                   Step IO,  Direction IO,  EndMsk, Swap,    LimitFlag,      StepByInch
+DualMotor X ( MOTOR_X_L_STEP, MOTOR_X_L_DIR,  0x0004,
+              MOTOR_X_R_STEP, MOTOR_X_R_DIR,  0x0008,  0,   ERROR_LIMIT_X | REDUCED_RAPID_POSITIONING_SPEED, 1.0f/X_AXIS_RES );
+
+Motor     Y ( MOTOR_Y_STEP,    MOTOR_Y_DIR,   0x0010,  1,   ERROR_LIMIT_Y, 1.0f/Y_AXIS_RES );
+
+DualMotor Z ( MOTOR_Z_L_STEP,  MOTOR_Z_L_DIR, 0x0001,
+              MOTOR_Z_R_STEP,  MOTOR_Z_R_DIR, 0x0002,  0,   ERROR_LIMIT_Z | REDUCED_RAPID_POSITIONING_SPEED, 1.0f/Z_AXIS_RES );
 
 
 
@@ -39,11 +41,11 @@ unsigned long g_timeIdleUs = 0;
 
 unsigned long g_missedStepCount = 0;
 
-Motor::Motor( int sp, int dp, int ep, int rd, unsigned long flags, unsigned long sbi )
+Motor::Motor( int sp, int dp, uint32_t em, int rd, unsigned long flags, unsigned long sbi )
 {
   stepPin = sp;
   dirPin = dp;
-  endPin = ep;
+  endMask = em;
   reverseDir = rd;
   limitFlag = flags & ERROR_FLAG_MASK;
   stepByInch = sbi;
@@ -57,8 +59,8 @@ Motor::Motor( int sp, int dp, int ep, int rd, unsigned long flags, unsigned long
   else
   {
     // Reduced speed for axis with weak motors or lots of intertia
-    minSpeedStep = SPEED_TO_STEP( stepByInch, MIN_SPEED / 2 );
-    maxSpeedStep = SPEED_TO_STEP( stepByInch, MAX_SPEED / 3 );
+    minSpeedStep = SPEED_TO_STEP( stepByInch, MIN_SPEED ) * 2;
+    maxSpeedStep = SPEED_TO_STEP( stepByInch, MAX_SPEED ) * 4;
   }
 
   stepSetReg = digitalSetRegister( sp );
@@ -69,12 +71,12 @@ Motor::Motor( int sp, int dp, int ep, int rd, unsigned long flags, unsigned long
   endDetectionState = 0;
 }
 
-DualMotor::DualMotor( int sp, int dp, int ep, int sp2, int dp2, int ep2, int s, unsigned long flags, unsigned long sbi )
-: Motor( sp, dp, ep, s, flags, sbi )
+DualMotor::DualMotor( int sp, int dp, uint32_t em, int sp2, int dp2, uint32_t em2, int s, unsigned long flags, unsigned long sbi )
+: Motor( sp, dp, em, s, flags, sbi )
 {
   stepPin2 = sp2;
   dirPin2 = dp2;
-  endPin2 = ep2;
+  endMask2 = em2;
 
   step2SetReg = digitalSetRegister( sp2 );
   step2ClrReg = digitalClrRegister( sp2 );
@@ -96,9 +98,6 @@ void Motor::Reset( )
   digitalWrite(stepPin, LOW );
   pinMode( dirPin, OUTPUT );
   digitalWrite(dirPin, LOW );
-  if( endPin >= 0 ) {
-    pinMode( endPin, INPUT );
-  }
 }
 
 void DualMotor::Reset( )
@@ -112,10 +111,17 @@ void DualMotor::Reset( )
 
 #define AVG_SAMPLE_COUNT  100
 
-bool Motor::IsAtTheEnd( )
+int Motor::GetLimit( )
 {
-  return false;
+  return ( g_limitState & endMask ) ? 1 : 0;
+}
 
+int DualMotor::GetLimit( )
+{
+  int ret = 0;
+  if( g_limitState & endMask ) ret = 1;
+  if( g_limitState & endMask2 ) ret += 2;
+  return ret;
 }
 
 void Motor::SetDirection( int d )
@@ -524,9 +530,145 @@ long Motor::GetPos( )
 long Motor::FakeMove( long s )
 {
   curPos += s;
+  return curPos;
 }
 
-void Calibrate_Z( );
+void Motor::CalibrateStart( )
+{
+  cal_state = 1;
+}
+
+bool Motor::CalibrateTask( )
+{
+  // Todo
+  return true;
+}
+
+void UART_delay( unsigned long us )
+{
+    uint32_t waitUntil = micros( ) + us;
+    do {
+      while( Limit_Task( micros( )));
+    }
+    while( micros( ) <= waitUntil );
+}
+
+#define CALIB_Z_OFFSET   ((int)(0.2545f / Z_AXIS_RES ))
+
+#define CAL_STEP_SPEED   1000
+#define CAL_PAUSE        50000
+
+void DualMotor::CalibrateStart( )
+{
+  cal_state = 1;
+}
+
+bool DualMotor::CalibrateTask( )
+{
+  unsigned int p;
+  int offset = CALIB_Z_OFFSET;
+  uint32_t now = micros( );
+
+  switch( cal_state )
+  {
+    default:
+      cal_state = 0;
+    case 0 : // Idle
+      break;
+
+    case 1 : // Started
+      if( GetLimit( ) != 0 )
+      {
+        // If either side is already at the end, move away
+        // so that we can detect the edge
+        SetDirection( -1 ); // Down
+        cal_state = 2;
+        cal_count = stepByInch / 4; // Move 1/4in away
+      }
+      else
+      {
+        SetDirection( 1 ); // Up
+        cal_state = 3;
+        cal_count = CALIB_Z_OFFSET;
+      }
+      cal_time = now + CAL_PAUSE;
+      break;
+
+    case 2 : // Move until both sided are away from the end plus some
+      if( now >= cal_time )
+      {
+        p = GetLimit( );
+        if( p != 0 || cal_count != 0 )
+        {
+          if(( p & 1 ) != 0 ) StepL( );
+          if(( p & 2 ) != 0 ) StepR( );
+          if( p == 0 && cal_count > 0 )
+          {
+            StepL( );
+            StepR( );
+            cal_count--;
+          } 
+          cal_time = now + CAL_STEP_SPEED;
+        }
+        else
+        {
+          SetDirection( 1 ); // Up
+          cal_state = 3;
+          cal_time = now + CAL_PAUSE;
+          cal_count = CALIB_Z_OFFSET;
+        }
+      }
+      break;
+
+    case 3 : // Move towards the sensors and calibrate
+      if( now >= cal_time )
+      {
+        p = GetLimit( );
+        if( p != 3 || cal_count != 0 )
+        {
+          if(( p & 1 ) == 0 || cal_count > 0 )
+          {
+            if(( p & 1 ) && cal_count > 0 ) cal_count--;
+            StepL( );
+          } 
+          if(( p & 2 ) == 0 || cal_count < 0 )
+          {
+            if(( p & 2 ) && cal_count < 0 ) cal_count++;
+            StepR( );
+          }
+          cal_time = now + CAL_STEP_SPEED;
+        }
+        else
+        {
+          SetDirection( -1 ); // Down
+          cal_state = 4;
+          cal_count = stepByInch * 3; // Move away 3 inch from the reference position
+          cal_time = now + CAL_PAUSE;
+        }
+      }
+      break;
+
+    case 4 : // Move to the origin position (from the reference)
+      if( now >= cal_time )
+      {
+        if( cal_count >= 0 )
+        {
+          StepL( );
+          StepR( );
+          cal_count--;
+          cal_time = now + CAL_STEP_SPEED;
+        }
+        else
+        {
+          // Done! We're calibrated!
+          cal_state = 0;
+        }
+      }
+      break;
+  }
+  // Return true only if calibration is ongoing
+  return ( cal_state != 0 );
+}
 
 // Move the tool position by the specified # of steps for x,y,z directions.
 // Duration of the motion determines the speed. d is in microseconds
@@ -535,15 +677,18 @@ void Motor_Move( long x, long y, long z, long d )
   unsigned long tX,tY,tZ;
   
   // If in error state, dot not move
-  if( g_error != 0 )
+  if( g_error & ERROR_FLAG_MASK )
   {
     return;
   }
 
-  if( d < 0 )
+  if( d == -1 ) // Calibration!
   {
-    Calibrate_Z( );
-    return;    
+    Z.CalibrateStart( );
+    while( Z.CalibrateTask( ))
+    {
+      UART_Task( );
+    }
   }
 
   if( g_MoveStart == 0 )
@@ -559,6 +704,8 @@ void Motor_Move( long x, long y, long z, long d )
   avgStepTime = 0;
   avgStepCounter = 0;
 #endif
+
+  int slow = 8;
 
   // This calculates the interval between steps for each axis and returns the time
   // to the first step needs to occur ( NO_STEP_TIME if no move necessary).
@@ -628,7 +775,6 @@ void Motor_Move( long x, long y, long z, long d )
 
 void Motor_Init( )
 {  
-  g_error = 0;
   g_missedStepCount = 0;
   
   for( int i=0; i<MAX_DEBUG; i++ )
@@ -644,28 +790,16 @@ void Motor_Init( )
   Z.Reset( );
 }
 
-#define FILTER_IO  10
-
-unsigned int filterPin( )
+inline unsigned int filterPin( )
 {
-  int l = 0;
-  int r = 0;
-  for( int i=0; i<FILTER_IO; i++)
-  {
-    if( digitalRead( 4 ) == HIGH ) l++;
-    if( digitalRead( 3 ) == HIGH ) r++;
-  }
-  return ((l > FILTER_IO/2) ? 1 : 0 ) | 
-         ((r > FILTER_IO/2) ? 2 : 0 );
+  return (g_limitState & 3);
 }
 
 void Calibrate_Z( )
 {
   unsigned int p;
+  int offset = CALIB_Z_OFFSET;
   
-  pinMode( 3, INPUT );
-  pinMode( 4, INPUT );
-
   if( (filterPin( ) & 3) != 0 )
   {
     // If either side has tripped the sensor, move away
@@ -676,43 +810,49 @@ void Calibrate_Z( )
     {
       if(( p & 1 ) != 0 ) Z.StepL( );
       if(( p & 2 ) != 0 ) Z.StepR( );
-      UART_Task( );
-      delay( 1 );
+      UART_delay( 1000 );
     }
   }
   else
   {
     Z.SetDirection( 1 ); // Up
-    while(( p = filterPin( )) != 3 )
+    while(( p = filterPin( )) != 3 || offset != 0 )
     {
-      if(( p & 1 ) == 0 ) Z.StepL( );
-      if(( p & 2 ) == 0 ) Z.StepR( );
+      if(( p & 1 ) == 0 || offset > 0 )
+      {
+        if(( p & 1 ) && offset > 0 ) offset--;
+        Z.StepL( );
+      } 
+      if(( p & 2 ) == 0 || offset < 0 )
+      {
+        if(( p & 2 ) && offset < 0 ) offset++;
+        Z.StepR( );
+      }
   
-      UART_Task( );
-      delayMicroseconds( 250 );
+      UART_delay( 500 );
     }
   }
 
   Z.SetDirection( -1 );
-  delay( 50 );
+  UART_delay( 50000 );
 
-#define CALIB_Z_OFFSET ((int)(0.2566f / Z_AXIS_RES ))
+  return;
   
   // Apply the offset
   for( int i=0;i<CALIB_Z_OFFSET; i++)
   {
     Z.StepR( );
-    UART_Task( );
-    delay( 1 );
+    UART_delay( 1000 );
   }
 
-  // Back out by 0.5
-  for( int i=0; i<(int)(.25f / Z_AXIS_RES ); i++)
+  return;
+
+  // Back out by 0.25
+  for( int i=0; i<(int)(0.25f / Z_AXIS_RES ); i++)
   {
     Z.StepL( );
     Z.StepR( );
-    UART_Task( );
-    delay( 1 );
+    UART_delay( 1000 );
   }
 
 #define CALIB_Z_REPEAT 4
@@ -729,7 +869,7 @@ void Calibrate_Z( )
     backR = 0;
 
     Z.SetDirection( 1 ); // Up
-    delay( 50 );
+    UART_delay( 50000 );
 
     idleAtZero = 25;
     while(( p = filterPin( )) != 3 || idleAtZero != 0 )
@@ -747,8 +887,7 @@ void Calibrate_Z( )
       {
         idleAtZero--;
       }
-      UART_Task( );
-      delay( 1 );
+      UART_delay( 1000 );
     }
 
     if( n == (CALIB_Z_REPEAT - 1))
@@ -758,14 +897,13 @@ void Calibrate_Z( )
     }
     
     Z.SetDirection( -1 ); // Down
-    delay( 50 );
+    UART_delay( 50000 );
     
     while( backL > 0 || backR > 0 )
     {
       if( backL > 0 ) { Z.StepL( ); backL--; }
       if( backR > 0 ) { Z.StepR( ); backR--; }
-      UART_Task( );
-      delayMicroseconds( 500 );
+      UART_delay( 500 );
     }
   }
   
@@ -773,8 +911,7 @@ void Calibrate_Z( )
   {
     Z.StepL( );
     Z.StepR( );
-    UART_Task( );
-    delayMicroseconds( 250 );
+    UART_delay( 250 );
   }
   
 }

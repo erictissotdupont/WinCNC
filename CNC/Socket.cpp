@@ -84,6 +84,7 @@ long g_CncZ;
 #define STATUS_GOT_POSITION   0x40000000
 
 unsigned long g_Status;
+unsigned long g_CNC_Status;
 
 unsigned long g_TXcount = 0;
 unsigned long g_RXcount = 0;
@@ -522,7 +523,7 @@ void listen( SOCKET s )
 				g_msgStatus = (tCnCCmdStatus)status;
 				SetEvent(g_hAckReceived);
 
-				sprintf_s(statusStr, sizeof(statusStr), "X%ldY%ldZ%ld", x, y, z );
+				sprintf_s(statusStr, sizeof(statusStr), "X%ldY%ldZ%ldS%ld", x, y, z, status);
 				NOTIFY_CALLBACK(CNC_RESPONSE, statusStr)
 
 				//char str[100];
@@ -776,12 +777,14 @@ DWORD listenerThread(PVOID pParam)
 		if (strncmp(msg, "CNC,", 4 ) == 0)
 		{
 			unsigned long seq;
+			unsigned long S;
 			long x, y, z;
 
-			if (sscanf_s(msg + 4, "%lu,%ld,%ld,%ld,%lx",
+			if (sscanf_s(msg + 4, "%lu,%ld,%ld,%ld,%lx,%lx",
 				&seq,
 				&x, &y, &z,
-				&g_Status ) != 5)
+				&g_CNC_Status,
+				&g_Status ) != 6)
 			{
 				// Malformed message
 			}
@@ -800,7 +803,7 @@ DWORD listenerThread(PVOID pParam)
 					NOTIFY_CALLBACK(CNC_RESPONSE, statusStr)
 					// TODO : refresh status
 				}
-				else if (g_Status & STATUS_GOT_POSITION )
+				else if (g_Status & STATUS_GOT_POSITION)
 				{
 					memcpy(&g_CncAddr, &CncAddr, sizeof(g_CncAddr));
 					g_CncAddr.sin_port = htons(DATA_PORT);
@@ -817,7 +820,7 @@ DWORD listenerThread(PVOID pParam)
 					}
 
 					Addr.sin_port = htons(DATA_PORT);
-					if (bind(g_CNCSocket, (SOCKADDR*)&Addr, sizeof(Addr)) == SOCKET_ERROR )
+					if (bind(g_CNCSocket, (SOCKADDR*)&Addr, sizeof(Addr)) == SOCKET_ERROR)
 					{
 						iResult = WSAGetLastError();
 						OutputDebugStringA(__FUNCTION__"::Bailed out waiting for connection.");
@@ -829,10 +832,10 @@ DWORD listenerThread(PVOID pParam)
 					g_msgSeq = seq;
 					bConnected = true;
 					SetEvent(g_hConnected);
-				}
 
+					NOTIFY_CALLBACK(CNC_CONNECTED, &g_RXcount)
+				}
 				g_RXcount++;
-				NOTIFY_CALLBACK(CNC_CONNECTED, NULL)
 			}
 		}
 	}

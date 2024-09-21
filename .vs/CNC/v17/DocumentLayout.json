@@ -1,0 +1,120 @@
+{
+  "Version": 1,
+  "WorkspaceRootPath": "C:\\Users\\erict\\Documents\\Projects\\WinCNC\\",
+  "Documents": [
+    {
+      "AbsoluteMoniker": "D:0:0:{99141EDA-DB70-48BE-BD63-BDE0667655A3}|CNC\\CNC.vcxproj|C:\\Users\\erict\\Documents\\Projects\\WinCNC\\CNC\\socket.h||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}",
+      "RelativeMoniker": "D:0:0:{99141EDA-DB70-48BE-BD63-BDE0667655A3}|CNC\\CNC.vcxproj|solutionrelative:CNC\\socket.h||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{99141EDA-DB70-48BE-BD63-BDE0667655A3}|CNC\\CNC.vcxproj|C:\\Users\\erict\\Documents\\Projects\\WinCNC\\CNC\\CNC.cpp||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}",
+      "RelativeMoniker": "D:0:0:{99141EDA-DB70-48BE-BD63-BDE0667655A3}|CNC\\CNC.vcxproj|solutionrelative:CNC\\CNC.cpp||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{99141EDA-DB70-48BE-BD63-BDE0667655A3}|CNC\\CNC.vcxproj|C:\\Users\\erict\\Documents\\Projects\\WinCNC\\CNC\\CNC.rc||{177559E0-D141-11D0-92DF-00A0C9138C45}|,   b e g i n       % \u00A3 )$  \u0022     ",
+      "RelativeMoniker": "D:0:0:{99141EDA-DB70-48BE-BD63-BDE0667655A3}|CNC\\CNC.vcxproj|solutionrelative:CNC\\CNC.rc||{177559E0-D141-11D0-92DF-00A0C9138C45}|,   b e g i n       % \u00A3 )$  \u0022     "
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{99141EDA-DB70-48BE-BD63-BDE0667655A3}|CNC\\CNC.vcxproj|C:\\Users\\erict\\Documents\\Projects\\WinCNC\\CNC\\CNC.h||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}",
+      "RelativeMoniker": "D:0:0:{99141EDA-DB70-48BE-BD63-BDE0667655A3}|CNC\\CNC.vcxproj|solutionrelative:CNC\\CNC.h||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{99141EDA-DB70-48BE-BD63-BDE0667655A3}|CNC\\CNC.vcxproj|C:\\Users\\erict\\Documents\\Projects\\WinCNC\\CNC\\motor.h||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}",
+      "RelativeMoniker": "D:0:0:{99141EDA-DB70-48BE-BD63-BDE0667655A3}|CNC\\CNC.vcxproj|solutionrelative:CNC\\motor.h||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{99141EDA-DB70-48BE-BD63-BDE0667655A3}|CNC\\CNC.vcxproj|C:\\Users\\erict\\Documents\\Projects\\WinCNC\\CNC\\BitmapShape.cpp||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}",
+      "RelativeMoniker": "D:0:0:{99141EDA-DB70-48BE-BD63-BDE0667655A3}|CNC\\CNC.vcxproj|solutionrelative:CNC\\BitmapShape.cpp||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}"
+    }
+  ],
+  "DocumentGroupContainers": [
+    {
+      "Orientation": 0,
+      "VerticalTabListWidth": 256,
+      "DocumentGroups": [
+        {
+          "DockedWidth": 200,
+          "SelectedChildIndex": 0,
+          "Children": [
+            {
+              "$type": "Document",
+              "DocumentIndex": 0,
+              "Title": "socket.h",
+              "DocumentMoniker": "C:\\Users\\erict\\Documents\\Projects\\WinCNC\\CNC\\socket.h",
+              "RelativeDocumentMoniker": "CNC\\socket.h",
+              "ToolTip": "C:\\Users\\erict\\Documents\\Projects\\WinCNC\\CNC\\socket.h",
+              "RelativeToolTip": "CNC\\socket.h",
+              "ViewState": "AQIAAAAAAAAAAAAAAAAAACAAAAAAAAAA",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000680|",
+              "WhenOpened": "2024-09-14T21:28:44.452Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 4,
+              "Title": "motor.h",
+              "DocumentMoniker": "C:\\Users\\erict\\Documents\\Projects\\WinCNC\\CNC\\motor.h",
+              "RelativeDocumentMoniker": "CNC\\motor.h",
+              "ToolTip": "C:\\Users\\erict\\Documents\\Projects\\WinCNC\\CNC\\motor.h",
+              "RelativeToolTip": "CNC\\motor.h",
+              "ViewState": "AQIAABIAAAAAAAAAAAAAwCgAAAAcAAAA",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000680|",
+              "WhenOpened": "2024-05-27T22:49:58.838Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 3,
+              "Title": "CNC.h",
+              "DocumentMoniker": "C:\\Users\\erict\\Documents\\Projects\\WinCNC\\CNC\\CNC.h",
+              "RelativeDocumentMoniker": "CNC\\CNC.h",
+              "ToolTip": "C:\\Users\\erict\\Documents\\Projects\\WinCNC\\CNC\\CNC.h",
+              "RelativeToolTip": "CNC\\CNC.h",
+              "ViewState": "AQIAAA0AAAAAAAAAAAAlwCUAAAAIAAAA",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000680|",
+              "WhenOpened": "2024-05-27T22:49:52.924Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 1,
+              "Title": "CNC.cpp",
+              "DocumentMoniker": "C:\\Users\\erict\\Documents\\Projects\\WinCNC\\CNC\\CNC.cpp",
+              "RelativeDocumentMoniker": "CNC\\CNC.cpp",
+              "ToolTip": "C:\\Users\\erict\\Documents\\Projects\\WinCNC\\CNC\\CNC.cpp",
+              "RelativeToolTip": "CNC\\CNC.cpp",
+              "ViewState": "AQIAAL0BAAAAAAAAAAAAwOUBAAAZAAAA",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000677|",
+              "WhenOpened": "2024-05-27T22:49:37.34Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 2,
+              "Title": "CNC.rc - IDD_BITMAP_SHAPES - Dialog",
+              "DocumentMoniker": "C:\\Users\\erict\\Documents\\Projects\\WinCNC\\CNC\\CNC.rc",
+              "RelativeDocumentMoniker": "CNC\\CNC.rc",
+              "ToolTip": "C:\\Users\\erict\\Documents\\Projects\\WinCNC\\CNC\\CNC.rc - IDD_BITMAP_SHAPES - Dialog",
+              "RelativeToolTip": "CNC\\CNC.rc - IDD_BITMAP_SHAPES - Dialog",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001005|",
+              "WhenOpened": "2024-05-27T18:44:40.681Z",
+              "EditorCaption": " - IDD_BITMAP_SHAPES - Dialog"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 5,
+              "Title": "BitmapShape.cpp",
+              "DocumentMoniker": "C:\\Users\\erict\\Documents\\Projects\\WinCNC\\CNC\\BitmapShape.cpp",
+              "RelativeDocumentMoniker": "CNC\\BitmapShape.cpp",
+              "ToolTip": "C:\\Users\\erict\\Documents\\Projects\\WinCNC\\CNC\\BitmapShape.cpp",
+              "RelativeToolTip": "CNC\\BitmapShape.cpp",
+              "ViewState": "AQIAACoCAAAAAAAAAAAjwDgCAAATAAAA",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000677|",
+              "WhenOpened": "2024-05-25T23:37:24.498Z"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

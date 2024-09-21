@@ -27,6 +27,8 @@ typedef struct
 	tCarveMode contourOrCarve;
 	int bHorizontalCarveOnly;
 	float matrixPitch;
+	float matrixXoffset;
+	float matrixYoffset;
 
 } tBitmapShapeParam;
 
@@ -38,6 +40,8 @@ typedef struct
 } tCleanBmInfo;
 
 tBitmapShapeParam g_BmParams;
+float g_Xres = (1/64.0f);
+float g_Yres = (1/64.0f);
 
 void BitmapShapeInit(HWND hWnd)
 {
@@ -92,6 +96,9 @@ UINT BitmapShapeGetSet(BOOL get, HWND hWnd)
 	ShapeGetSetFloat(hWnd, IDC_BITMAP_MATRIX_PITCH, get, &g_BmParams.matrixPitch);
 
 	ShapeGetSetBool(hWnd, IDC_BITMAP_CARVE_HORIZONTAL_ONLY, get, &g_BmParams.bHorizontalCarveOnly);
+
+	ShapeGetSetFloat(hWnd, IDC_MATRIX_X_OFFSET, get, &g_BmParams.matrixXoffset);
+	ShapeGetSetFloat(hWnd, IDC_MATRIX_Y_OFFSET, get, &g_BmParams.matrixYoffset);
 
 	return 0;
 }
@@ -229,8 +236,11 @@ void BitmapShapeExecute(HWND hWnd)
 
 typedef enum {
 	resultNoOverlap = 0,
-	resultToolOverlap = 1,
-	resultEdgeContact = 2,
+	resultEdgeContact = 1,
+	resultToolPartialOverlap = 2,
+	resultToolHalfOverlap = 3,
+	resultToolFullOverlap = 4,
+	
 } toolPosResult_t;
 
 #define SMALL_OVELAP			(1/64.0f)
@@ -379,8 +389,13 @@ toolPosResult_t TestToolPosition(BITMAP* bm, int x, int y, t2DintPoint* pTool, i
 
 	for (int i = 0; i < nTool; i++)
 	{
-		if (GetPixel(bm, x + pTool[i].x, y + pTool[i].y)) return resultToolOverlap;
+		if (GetPixel(bm, x + pTool[i].x, y + pTool[i].y)) tCount++;
 	}
+
+	if (tCount >= nTool) return resultToolFullOverlap;
+	if (tCount >= (nTool / 2)) return resultToolHalfOverlap;
+	if (tCount > 0) return resultToolPartialOverlap;
+
 	for (int i = 0; i < nEdge; i++)
 	{
 		if (GetPixel(bm, x + pEdge[i].x, y + pEdge[i].y))
@@ -445,7 +460,7 @@ BOOL BitmapProcess(HWND hWnd)
 	t2DPoint contactPos;
 	t2DPoint V;
 	t2DPoint C;
-	double res, a, step, dive;
+	double Xres, Yres, a, step, dive;
 	int iContact;
 	char cmd[MAX_STR];
 	BOOL bCarving, bDone;
@@ -462,10 +477,11 @@ BOOL BitmapProcess(HWND hWnd)
 	GetObject(hBitmap, sizeof(BITMAP), &bm);
 
 	// Calculate the size of one pixel
-	res = g_BmParams.width / bm.bmWidth;
+	Xres = g_BmParams.width / bm.bmWidth;
+	Yres = g_BmParams.height / bm.bmHeight;
 
 	// Build the array of points that compose the tool and the edge of the tool.
-	toolRadiusInPixels = (int)(g_BmParams.tool.radius / res);
+	toolRadiusInPixels = (int)(g_BmParams.tool.radius / ((Xres + Yres) / 2));
 
 	// Estimate the # of points in the tool is the surface of the circle
 	maxToolCnt = (int)(PI * (toolRadiusInPixels + 4) * (toolRadiusInPixels + 4));
@@ -513,13 +529,17 @@ BOOL BitmapProcess(HWND hWnd)
 
 	if (g_BmParams.contourOrCarve == modeMatrix )
 	{
-		t2DPoint realPos = { 0.0, 0.0 };
+		t2DPoint realPos;
+		ULONG savedCount = -1;
+		ULONG count = 0;			
+		realPos = { 0.0, 0.0 };
+
 		// Move to first location to be tested
-		curPos.x = 0;
-		curPos.y = 0;
+		curPos.x = g_BmParams.matrixXoffset;
+		curPos.y = g_BmParams.matrixYoffset;
 		C.x = g_BmParams.matrixPitch;
 		C.y = g_BmParams.matrixPitch;
-		
+
 		bDone = FALSE;
 		while (!bDone)
 		{
@@ -528,39 +548,39 @@ BOOL BitmapProcess(HWND hWnd)
 			{
 				if (curPos.y + C.y > g_BmParams.height)
 				{
-//					sprintf_s(cmd, sizeof(cmd), "G0 X%f Y%f\r\n", -curPos.x, -curPos.y);
-//					doGcode(cmd);
+					// sprintf_s(cmd, sizeof(cmd), "G0 X%f Y%f\r\n", -curPos.x, -curPos.y);
+					// doGcode(cmd);
 					bDone = TRUE;
 					break;
 				}
-//				sprintf_s(cmd, sizeof(cmd), "G0 X%f Y%f\r\n", -curPos.x, C.y);
+				// sprintf_s(cmd, sizeof(cmd), "G0 X%f Y%f\r\n", -curPos.x, C.y);
 				curPos.y += C.y;
 				curPos.x = 0.0f;
-//				doGcode(cmd);
+				// doGcode(cmd);
 			}
 			else
 			{
-//				sprintf_s(cmd, sizeof(cmd), "G0 X%f\r\n", C.x);
+				// sprintf_s(cmd, sizeof(cmd), "G0 X%f\r\n", C.x);
 				curPos.x += C.x;
-//				doGcode(cmd);
+				// doGcode(cmd);
 			}
 
 			// Convert the current position in pixels
-			iX = (int)(curPos.x / res);
-			iY = (int)(curPos.y / res);
+			iX = (int)((curPos.x ) / Xres);
+			iY = (int)((curPos.y ) / Yres);
 
-			if (TestToolPosition(&bm, iX, iY, tool, toolPtCnt, edge, edgePtCnt, &a) == resultToolOverlap)
+			if (TestToolPosition(&bm, iX, iY, tool, toolPtCnt, edge, edgePtCnt, &a) >= resultToolHalfOverlap )
 			{
-				sprintf_s(cmd, sizeof(cmd), "G0 X%f Y%f\r\n", curPos.x - realPos.x, curPos.y - realPos.y );
+				sprintf_s(cmd, sizeof(cmd), "G0 X%f Y%f\r\n", curPos.x - realPos.x, curPos.y - realPos.y);
 				doGcode(cmd);
 				realPos = curPos;
 
-				sprintf_s(cmd, sizeof(cmd), "G0 Z%f\r\n", -g_BmParams.tool.safeTravel );
+				sprintf_s(cmd, sizeof(cmd), "G0 Z%f\r\n", -g_BmParams.tool.safeTravel);
 				doGcode(cmd);
 
 				float z = 0.0f;
-				float dz = 1.0; // 0.18; // g_BmParams.tool.radius * 4;
-				while( 1 )
+				float dz = g_BmParams.tool.radius * 2;
+				while (1)
 				{
 					if ((z + dz) > g_BmParams.depth) dz = g_BmParams.depth - z;
 					z += dz;
@@ -581,9 +601,8 @@ BOOL BitmapProcess(HWND hWnd)
 				}
 				sprintf_s(cmd, sizeof(cmd), "G0 Z%f\r\n", z + g_BmParams.tool.safeTravel);
 				doGcode(cmd);
+				update3DView();
 			}
-
-			update3DView();
 		}
 
 		// Return to origin
@@ -609,7 +628,7 @@ BOOL BitmapProcess(HWND hWnd)
 		C = { 0.0 , 0.0 };
 
 		// Start horizontally
-		V = { res, 0.0 };
+		V = { Xres, 0.0 };
 		fillState = fillRows;
 
 		// Carve in 1/2 tool radius slices minus a small bit to
@@ -711,7 +730,7 @@ BOOL BitmapProcess(HWND hWnd)
 						fillState = fillColumns;
 						curPos.x = g_BmParams.tool.radius;
 						curPos.y = g_BmParams.tool.radius;
-						V = { 0.0 , res };
+						V = { 0.0 , Yres };
 						sprintf_s(cmd, sizeof(cmd), "G0 X%f Y%f\r\n", curPos.x, curPos.y);
 						doGcode(cmd);
 					}
@@ -727,8 +746,8 @@ BOOL BitmapProcess(HWND hWnd)
 			}
 
 			// Convert the current position in pixels
-			iX = (int)(curPos.x / res);
-			iY = (int)(curPos.y / res);
+			iX = (int)(curPos.x / Xres);
+			iY = (int)(curPos.y / Yres);
 
 			switch (TestToolPosition(&bm, iX, iY, tool, toolPtCnt, edge, edgePtCnt, &a))
 			{
@@ -754,7 +773,9 @@ BOOL BitmapProcess(HWND hWnd)
 				break;
 
 			case resultEdgeContact:
-			case resultToolOverlap:
+			case resultToolPartialOverlap:
+			case resultToolHalfOverlap:
+			case resultToolFullOverlap:
 				if (bCarving)
 				{
 					// Back off to avoid denting the edges of the shape
@@ -805,7 +826,7 @@ BOOL BitmapProcess(HWND hWnd)
 
 			// Set the distance for each movement. Do no go less than res * 2 or the contour
 			// algorithm may get stuck in an infinite loop. Res is the size of one pixel.
-			step = res * 5;
+			step = Xres * 5;
 			// Start by scanning horizontally
 			V = { step, 0.0 };
 
@@ -824,8 +845,8 @@ BOOL BitmapProcess(HWND hWnd)
 				}
 
 				// Convert the current position in pixels
-				iX = (int)(curPos.x / res);
-				iY = (int)(curPos.y / res);
+				iX = (int)(curPos.x / Xres);
+				iY = (int)(curPos.y / Yres);
 
 				switch (TestToolPosition(&bm, iX, iY, tool, toolPtCnt, edge, edgePtCnt, &a))
 				{
@@ -881,7 +902,9 @@ BOOL BitmapProcess(HWND hWnd)
 					update3DView();
 					break;
 
-				case resultToolOverlap:
+				case resultToolPartialOverlap:
+				case resultToolHalfOverlap:
+				case resultToolFullOverlap:
 					if (iContact)
 					{
 						// Back off
@@ -955,8 +978,8 @@ BOOL BitmapProcess(HWND hWnd)
 				WaitForSingleObject(hThread, INFINITE);
 				CloseHandle(hThread);
 				*/
-				iX = (int)(contactPos.x / res);
-				iY = (int)(contactPos.y / res);
+				iX = (int)(contactPos.x / Xres);
+				iY = (int)(contactPos.y / Yres);
 				CleanBitmap(&bm, iX, iY);
 			}
 
@@ -996,6 +1019,31 @@ BOOL CALLBACK BitmapInterceptWndProc(HWND hWnd,
 	return g_oldBitmapDlgdProc(hWnd, message, wParam, lParam);
 }
 
+void Carve(HWND hWnd)
+{
+	BitmapShapeGetSet(TRUE, hWnd);
+	BitmapProcess(hWnd);
+}
+
+void Reset3dView(HWND hWnd)
+{
+	BitmapShapeGetSet(TRUE, hWnd);
+	init3DView(g_BmParams.width, g_BmParams.height);
+	resetBlockSurface();
+}
+
+void ResetAndRefeshIfAutoIsChecked(HWND hWnd)
+{
+	HWND hItem;
+	BitmapShapeGetSet(FALSE, hWnd);
+	hItem = GetDlgItem(hWnd, IDC_AUTO_REFRESH);
+	if (Button_GetCheck(hItem))
+	{
+		Reset3dView(hWnd);
+		Carve(hWnd);
+	}
+}
+
 BOOL CALLBACK BitmapShapesProc(HWND hWnd,
 	UINT message,
 	WPARAM wParam,
@@ -1027,17 +1075,37 @@ BOOL CALLBACK BitmapShapesProc(HWND hWnd,
 			switch (LOWORD(wParam))
 			{
 			case IDC_CARVE:
-				BitmapShapeGetSet(TRUE, hWnd);
-				BitmapProcess(hWnd);
+				Carve(hWnd);
 				break;
+/*
 			case IDC_EXECUTE:
 				BitmapShapeExecute(hWnd);
 				break;
+*/
 			case IDC_RESET_SIM2:
-				BitmapShapeGetSet(TRUE, hWnd);
-				init3DView(g_BmParams.width, g_BmParams.height);
-				resetBlockSurface();
+				Reset3dView(hWnd);
 				break;
+
+			case IDC_OFFSET_UP:
+				g_BmParams.matrixYoffset += g_Yres;
+				ResetAndRefeshIfAutoIsChecked(hWnd);
+				break;
+
+			case IDC_OFFSET_DOWN:
+				g_BmParams.matrixYoffset -= g_Yres;
+				ResetAndRefeshIfAutoIsChecked(hWnd);
+				break;
+
+			case IDC_OFFSET_LEFT:
+				g_BmParams.matrixXoffset -= g_Xres;
+				ResetAndRefeshIfAutoIsChecked(hWnd);
+				break;
+
+			case IDC_OFFSET_RIGHT:
+				g_BmParams.matrixXoffset += g_Xres;
+				ResetAndRefeshIfAutoIsChecked(hWnd);
+				break;
+
 			case IDOK:
 			case IDCANCEL:
 				EndDialog(hWnd, wParam);

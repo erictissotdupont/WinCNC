@@ -2,27 +2,28 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/gpio.h"
-#include <driver/adc.h>
-#include "esp_adc_cal.h"
-#include "hal/adc_types.h"
-#include "esp_log.h"
 
+#include "esp_adc/adc_oneshot.h"
+#include "esp_adc/adc_cali.h"
+#include "esp_adc/adc_cali_scheme.h"
+#include "esp_timer.h"
+#include "esp_log.h"
 #include "nvs_flash.h"
 #include "nvs.h"
 
 static const char* TAG = "Buttons";
 
-#define ADC_BATTERY         ADC1_CHANNEL_0
-#define ADC_X_AXIS          ADC1_CHANNEL_1
-#define ADC_Y_AXIS          ADC1_CHANNEL_2
+#define ADC_BATTERY         0
+#define ADC_X_AXIS          1
+#define ADC_Y_AXIS          2
 
-#define IO_RED_BUTTON       (5)
+#define IO_RED_BUTTON       5
 #define GPIO_RED_SEL        (1ULL<<IO_RED_BUTTON)
 
-#define IO_GREEN_BUTTON     (4)
+#define IO_GREEN_BUTTON     4
 #define GPIO_GREEN_SEL      (1ULL<<IO_GREEN_BUTTON)
 
-#define BUTTON_CNT          (2)
+#define BUTTON_CNT          2
 
 #define BUTTON_DEBOUCE_US   (30*1000) // 30ms
 
@@ -39,18 +40,21 @@ static const char* TAG = "Buttons";
 
 
 #define ADC_ATTENUATION       ADC_ATTEN_DB_6
+#define ADC_BIT_WIDTH         ADC_BITWIDTH_13
 #define ADC_AVG               8
 #define INPUT_CNT             3
 
 
 typedef struct analog_input_t {
   int idx;                                        // ADC channel index
-  adc1_channel_t channel;                         // ADC channel channel identifier
+  adc_oneshot_unit_handle_t channel;              // ADC channel channel identifier
   int offset;                                     // Zero offset
-  esp_adc_cal_characteristics_t characteristic;   // Factory calibration data
+  adc_cali_handle_t characteristic;               // Factory calibration data
   int rawIdx;                                     // Index in the raw sample table
   int raw[ADC_AVG];                               // Circular buffer of raw samples
   int rawSum;                                     // Current sum of the samples in the raw buffer
+  
+  adc_oneshot_unit_handle_t handle;
   unsigned long count;                            // Number of samples
 
   int rawMin;
@@ -82,18 +86,18 @@ static button_t button[BUTTON_CNT] = {
 };
 
 static analog_input_t input[INPUT_CNT] = {
-  { .idx = 0, 
-    .channel = ADC_BATTERY,
+  { .idx = ADC_BATTERY,
+    .channel = 0,
     .offset = 60,
-    .characteristic = {0},
+    .characteristic = 0,
     .rawIdx = 0,
     .raw = {0},
     .rawSum = 0,
   },
-  { .idx = 1, 
-    .channel = ADC_X_AXIS,
+  { .idx = ADC_X_AXIS,
+    .channel = 0,
     .offset = 0,
-    .characteristic = {0},
+    .characteristic = 0,
     .rawIdx = 0,
     .raw = {0},
     .rawSum = 0, 
@@ -104,10 +108,10 @@ static analog_input_t input[INPUT_CNT] = {
     .stepCount = 9,
     .curStep = 0,
   },
-  { .idx = 2, 
-    .channel = ADC_Y_AXIS,
+  { .idx = ADC_Y_AXIS,
+    .channel = 0,
     .offset = 0,
-    .characteristic = {0},
+    .characteristic = 0,
     .rawIdx = 0,
     .raw = {0},
     .rawSum = 0,
@@ -125,7 +129,10 @@ bool g_joyCalibrated = false;
 int GetRawInputAverage( analog_input_t* pInput )
 {
   int avg = ( pInput->rawSum / ADC_AVG );
-  return esp_adc_cal_raw_to_voltage(avg, &pInput->characteristic) - pInput->offset;
+  adc_cali_raw_to_voltage(pInput->characteristic, avg, &avg);
+  return avg;
+
+  //return esp_adc_cal_raw_to_voltage(avg, &pInput->characteristic) - pInput->offset;
 }
 
 int GetRawInput( int idx )
@@ -223,10 +230,64 @@ void CalibrationSave( )
   g_joyCalibrated = true;
 }
 
+#define ADC_CALI_SCHEME_CURVE_FITTING_SUPPORTED   0
+#define ADC_CALI_SCHEME_LINE_FITTING_SUPPORTED    1
+
+static bool adc_calibration_init(adc_unit_t unit, adc_channel_t channel, adc_atten_t atten, adc_cali_handle_t* out_handle)
+{
+    adc_cali_handle_t handle = NULL;
+    esp_err_t ret = ESP_FAIL;
+    bool calibrated = false;
+
+#if ADC_CALI_SCHEME_CURVE_FITTING_SUPPORTED
+    if (!calibrated) {
+        ESP_LOGI(TAG, "calibration scheme version is %s", "Curve Fitting");
+        adc_cali_curve_fitting_config_t cali_config = {
+            .unit_id = unit,
+            .chan = channel,
+            .atten = atten,
+            .bitwidth = ADC_BITWIDTH_DEFAULT,
+        };
+        ret = adc_cali_create_scheme_curve_fitting(&cali_config, &handle);
+        if (ret == ESP_OK) {
+            calibrated = true;
+        }
+    }
+#endif
+
+#if ADC_CALI_SCHEME_LINE_FITTING_SUPPORTED
+    if (!calibrated) {
+        ESP_LOGI(TAG, "calibration scheme version is %s", "Line Fitting");
+        adc_cali_line_fitting_config_t cali_config = {
+            .unit_id = unit,
+            .atten = atten,
+            .bitwidth = ADC_BIT_WIDTH,
+        };
+        ret = adc_cali_create_scheme_line_fitting(&cali_config, &handle);
+        if (ret == ESP_OK) {
+            calibrated = true;
+        }
+    }
+#endif
+
+    * out_handle = handle;
+    if (ret == ESP_OK) {
+        ESP_LOGI(TAG, "Calibration Success");
+    }
+    else if (ret == ESP_ERR_NOT_SUPPORTED || !calibrated) {
+        ESP_LOGW(TAG, "eFuse not burnt, skip software calibration");
+    }
+    else {
+        ESP_LOGE(TAG, "Invalid arg or no memory");
+    }
+
+    return calibrated;
+}
+
 void Buttons_Init( )
 {
   esp_err_t ret;
-  bool cali_enable = false;
+  //bool cali_enable = false;
   
     // Initialize NVS
   esp_err_t err = nvs_flash_init();
@@ -243,7 +304,7 @@ void Buttons_Init( )
   err = nvs_open( "calibration", NVS_READWRITE, &handle );
   if( err == ESP_OK )
   {
-    int tmp;
+    int32_t tmp;
     ESP_LOGI( TAG, "NVS Open( )");
     
     g_joyCalibrated = true;
@@ -257,6 +318,7 @@ void Buttons_Init( )
     nvs_close( handle );
   }
   
+  /*
   adc1_config_width(ADC_WIDTH_BIT_13);
   
   ret = esp_adc_cal_check_efuse(ADC_CALI_SCHEME);
@@ -273,6 +335,34 @@ void Buttons_Init( )
     }
   } else {
     ESP_LOGE(TAG, "Invalid arg");
+  }
+  */
+
+  adc_oneshot_unit_handle_t adc1_handle;
+  adc_oneshot_unit_init_cfg_t init_config1 = {
+      .unit_id = ADC_UNIT_1,
+  };
+  ESP_ERROR_CHECK(adc_oneshot_new_unit(&init_config1, &adc1_handle));
+
+  adc_oneshot_chan_cfg_t config = {
+        .bitwidth = ADC_BIT_WIDTH,
+        .atten = ADC_ATTENUATION,
+  };
+
+  for (int i = 0; i < INPUT_CNT;i++)
+  {
+      ret = adc_oneshot_config_channel(adc1_handle, input[i].idx, &config);
+      if (ret != ESP_OK) ESP_LOGW(TAG, "Init failed");
+      if (!adc_calibration_init(ADC_UNIT_1, input[i].idx, ADC_ATTENUATION, &(input[i].characteristic)))
+      {
+          ESP_LOGW(TAG, "Calibration failed");
+      }
+      input[i].channel = adc1_handle;
+
+      for (int n = 0; n < ADC_AVG; n++)
+      {
+//          SampleInput(&input[i]);
+      }
   }
 
   /* Configure Button GPIO */
@@ -291,14 +381,11 @@ void Buttons_Init( )
 void SampleInput( analog_input_t* pInput )
 {
   pInput->count++;
-  // For the battery ADC, only sample once every 64 since the battery 
-  // voltage does not changed than often
-  if( pInput->count >= ADC_AVG && pInput->idx == 0 && (pInput->count % 64) != 0 ) 
-  {
-    return;
-  }
   
-  pInput->raw[pInput->rawIdx] = adc1_get_raw(pInput->channel);
+  adc_oneshot_read(pInput->channel, pInput->idx, &(pInput->raw[pInput->rawIdx]));
+
+  //pInput->raw[pInput->rawIdx] = adc1_get_raw(pInput->channel);
+
   pInput->rawSum += pInput->raw[pInput->rawIdx];
   pInput->rawIdx++;
   if( pInput->rawIdx >= ADC_AVG ) pInput->rawIdx = 0;
@@ -348,10 +435,10 @@ void Buttons_Loop( )
 {
   uint64_t now = esp_timer_get_time( );
   
-  for( int i=0; i<INPUT_CNT;i++ )
-  {
-    SampleInput( &input[i] );
-  }
+  static int inputIdx = 0;
+  SampleInput(&input[inputIdx]);
+  inputIdx++;
+  if (inputIdx >= INPUT_CNT) inputIdx = 0;
   
   for( int i=0; i<BUTTON_CNT;i++ )
   {

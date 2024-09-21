@@ -47,11 +47,15 @@ long g_actualX,g_actualY,g_actualZ;
 unsigned short g_errorStatusFlags = 0;
 
 // Definition of the bits in the value returned by CNC "Status" (S)
-#define ERROR_LIMIT      0x0001
-#define ERROR_NUMBER     0x0002
-#define ERROR_SYNTAX     0x0004
-#define ERROR_MATH       0x0008
-#define ERROR_COMM       0x0010
+#define ERROR_LIMIT         0x00000001
+#define ERROR_NUMBER        0x00000002
+#define ERROR_SYNTAX        0x00000004
+#define ERROR_MATH          0x00000008
+#define ERROR_COMM          0x00000010
+
+extern unsigned long g_CNC_Status;
+
+#define ERROR_CALIBRATION   0x00010000
 
 // The values returned by the answer of the debug command
 // Those are NOT fetched by the release of the code.
@@ -203,7 +207,6 @@ void OnConnected(PVOID param)
 	else
 	{
 		InvalidateRgn(hMainWindow, NULL, false);
-		SetTimer(hMainWindow, 1, 220, NULL);
 		PostMessage(hMainWindow, WM_CHECK_INITIAL_STATUS, 0, 0);
 	}
 }
@@ -246,11 +249,16 @@ int APIENTRY _tWinMain(_In_ HINSTANCE hInstance,
 
 	// 1/16 step - 400 steps - 2.8in per turn = 0.0004375 per step
 	// Error of 0.32% (too far) = 0.0004393
+/*
 	initAxis(0, 0.00043821); // X
-	
 	initAxis(1, 0.00049271); // Y
-
 	initAxis(2, 0.0003925); // Z - 1/4 step - 400 steps - 0.5in per turn
+*/
+	initAxis(0, 0.00049213); // X
+	initAxis(1, 0.00049213); // Y
+	initAxis(2, 0.0003925);
+
+
 	
 	// Main message loop:
 	while (GetMessage(&msg, NULL, 0, 0))
@@ -447,7 +455,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
 		status = CheckStatus(true);
 
-		if( status == retCncError || g_errorStatusFlags )
+		if( status == retCncError )
 		{
 			WCHAR msg[MAX_PATH];
 			wsprintf(msg, L"CNC in error state 0x%02X (", g_errorStatusFlags);
@@ -469,6 +477,17 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		}
 		else if( status == retSuccess )
 		{
+			if (g_CNC_Status == ERROR_CALIBRATION)
+			{
+				if (MessageBox(hMainWindow, 
+					L"CNC position not calibrated. Do you want to initiate the calibration procedure now?",
+					L"Warning", MB_YESNO | MB_ICONWARNING) == IDYES)
+				{
+					CalibrateCNCPosition();
+					return 0;
+				}
+			}
+
 			if (g_actualX != 0 || g_actualY != 0 || g_actualZ != 0)
 			{
 				if (MessageBox( hMainWindow, 

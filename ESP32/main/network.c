@@ -482,6 +482,11 @@ void receiverTask(void *arg)
             {
               ESP_LOGI( TAG, "Debug Info" );
             }
+            else if( strncmp( pt, "CAL_Z", 5 ) == 0 )
+            {
+              ESP_LOGI( TAG, "Calibrate Z" );
+              Calibrate_Z( );
+            }
             else
             {
               ESP_LOGE( TAG, "Invalid command" );
@@ -601,6 +606,8 @@ void broadcastTask(void* arg)
       }
       else
       {
+        
+          
         if( Q == 0 && uxQueueMessagesWaiting( g_cmd_queue ) == 0 )
         {
           if( g_xPos != x || g_yPos != y || g_zPos != z )
@@ -625,11 +632,12 @@ void broadcastTask(void* arg)
       {
         char statusmsg[64];
         
-        sprintf( statusmsg, "CNC,%lu,%ld,%ld,%ld,%lx,%ld,%ld,%ld",
+        sprintf( statusmsg, "CNC,%lu,%ld,%ld,%ld,%lx,%lx,%ld,%ld,%ld",
           g_NextSeq,
           g_xPos,
           g_yPos,
           g_zPos,
+          S,
           g_Status,
           A0,
           A1,

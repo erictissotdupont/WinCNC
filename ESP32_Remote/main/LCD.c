@@ -9,6 +9,7 @@
 #include "driver/gpio.h"
 #include "esp_event.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "sdkconfig.h"
 
 // For UART
@@ -58,7 +59,7 @@ int g_Green;
 static esp_err_t TransmitLCD( uint8_t* data, unsigned int count )
 {
     int ret;
-    ret = i2c_master_write_to_device(I2C_MASTER_NUM, LCD_I2C_ADDRESS, data, count, I2C_MASTER_TIMEOUT_MS / portTICK_RATE_MS);
+    ret = i2c_master_write_to_device(I2C_MASTER_NUM, LCD_I2C_ADDRESS, data, count, I2C_MASTER_TIMEOUT_MS / portTICK_PERIOD_MS);
     return ret;
 }
 
@@ -89,8 +90,8 @@ const char* g_szCalStepString[CAL_STEP_COUNT] = {
 
 void LCD_Refresh( void )
 {
-  char LCD_buffer[LCD_LINE][LCD_COL];
-  static char prevBuf[LCD_LINE][LCD_COL];
+  char LCD_buffer[LCD_LINE][LCD_COL+21];
+  static char prevBuf[LCD_LINE][LCD_COL+21];
   
   if( g_bI2Cinitialized == false )
   {

@@ -2,13 +2,12 @@
 #include "UART.h"
 #include "Motor.h"
 
-#include "LCD.h"
-
 //extern HardwareSerial Serial1;
 //extern Uart Serial1;
 
 extern int g_debug[MAX_DEBUG];
-extern unsigned long g_error;
+extern uint32_t g_error;
+extern uint32_t g_limitState;
 // To know the current position
 extern Motor X;
 extern Motor Y;
@@ -29,7 +28,7 @@ char g_ACKchar = '0';
 #define ADC_SAMPLE_AVG    16
 
 uint32_t adc_sample[MAX_ADC][ADC_SAMPLE_AVG];
-int adc_pin[MAX_ADC] = {A1,A2,A0};
+int adc_pin[MAX_ADC] = {ANA_MOTOR_VOLT,ANA_FAN_VOLT,ANA_INTERNAL_TEMP};
 
 static const uint8_t crc8_table[256] = {
     0x00, 0xF7, 0xB9, 0x4E, 0x25, 0xD2, 0x9C, 0x6B,
@@ -81,8 +80,10 @@ void UART_Init( )
   g_fifoIn = 0;
   g_fifoOut = 0;
 
-  pinMode( 13, OUTPUT );
-  digitalWrite( 13, 0 );
+  pinMode(LIMIT_IN, INPUT);
+  pinMode(LIMIT_OUT, OUTPUT);
+  digitalWrite(LIMIT_OUT, LOW);
+
 }
 
 inline unsigned int fifoCount( )
@@ -293,6 +294,124 @@ bool ADC_Task( )
   return bRet;
 }
 
+
+// Limit clock half period in uS
+#define LHP                   100
+
+bool Limit_Task( uint32_t nowT )
+{
+  static int state = -1;
+  static uint32_t nextT = 0;
+  static uint32_t mask = 0;
+  static uint32_t data = 0;
+
+  switch( state )
+  {
+    default:
+      state = 0;
+      digitalWrite( LIMIT_OUT, LOW );
+      // fallthrough
+
+    case 0 : // Idle
+      if( digitalRead( LIMIT_IN ) == LOW )
+      {
+        // Acknowledge the interrupt state by driving the output low
+        digitalWrite( LIMIT_OUT, HIGH );
+        state = 1;
+        nextT = nowT + LHP;
+      }
+      break;
+
+    case 1: // Debounce interrupt state by checking signal stays low for half a period
+      if( digitalRead( LIMIT_IN ) == HIGH )
+      {
+        // Input signal didn't stay low, abort and go back to idle state 
+        state = -1;
+      }
+      else if( nowT >= nextT )
+      {
+        digitalWrite( LIMIT_OUT, LOW );
+        state = 2;
+        nextT = nowT + LHP;
+      }
+      break;
+
+    case 2: // Wait for half a period and check the limit sensor has released the interrupt state
+      if( nowT >= nextT )
+      {
+        if( digitalRead( LIMIT_IN ) == LOW )
+        {
+          // Interrupt state didn't clear
+          state = -1;
+        }
+        else
+        {
+          mask = 1;
+          data = 0;
+          digitalWrite( LIMIT_OUT, HIGH );
+          state = 3;
+          nextT = nowT + LHP;
+        }
+      }
+      break;
+
+    case 3:
+      if( nowT >= nextT )
+      {
+        digitalWrite( LIMIT_OUT, LOW );
+        state = 4;
+        nextT = nowT + LHP;
+      }
+      break;
+
+    case 4:
+      if( nowT >= nextT )
+      {
+        if( digitalRead( LIMIT_IN ) == LOW )
+        {
+          data = data | mask;
+        }
+        digitalWrite( LIMIT_OUT, HIGH );
+
+        mask = mask << 1;
+        if( mask )
+        {
+          state = 3;
+        }
+        else
+        {
+          uint8_t crc = 0xFF;
+          crc = crc8_table[((crc ^ ( data       )) & 0xFF) & 0xFF];
+          crc = crc8_table[((crc ^ ((data >> 8 ))) & 0xFF) & 0xFF];
+          crc = crc8_table[((crc ^ ((data >> 16))) & 0xFF) & 0xFF];
+          
+          if( crc == (( data >> 24 ) & 0xFF ))
+          {
+            g_limitState = data;
+            // Serial.printf("Limit %lx\n", data );
+          }
+
+          // if( data != 0xAAF0 ) while( 1 );
+          // GOT DATA !!!!
+
+          // Wait for the signal to go back high (last bit might be low)
+          state = 5;
+        }
+        nextT = nowT + LHP;
+      }
+      break;
+
+    case 5:
+      if( nowT >= nextT )
+      {
+        digitalWrite( LIMIT_OUT, LOW );
+        state = 0;
+      }
+      break;
+  }
+  return (state != 0);
+}
+
 bool UART_Task( )
 {
   static long sign = 0;
@@ -309,6 +428,8 @@ bool UART_Task( )
 #ifdef DISPLAY_TASK_TIME
   unsigned long timeItTook = now;
 #endif 
+
+  Limit_Task( now );
 
   // Flush out status
   UART_SendStatus(0);
@@ -351,7 +472,7 @@ bool UART_Task( )
       else if( c == '-' ) { sign = -1; }          
       else if( c == '\0' )
       {
-        if( g_error )
+        if( g_error & ERROR_FLAG_MASK )
         {
           // Report the Error state to the host.
           // Ignore the command.
@@ -546,7 +667,7 @@ bool UART_Task( )
   return ret;
 }
 
-extern tManualMode ManualMode;
+//extern tManualMode ManualMode;
 extern unsigned long g_MoveStart;
 
 void Motor_Task( )
@@ -557,7 +678,7 @@ void Motor_Task( )
   while( g_fifoIn != g_fifoOut )
   {
     // As soon as commands are received via UART, disable manual mode
-    ManualMode = Manual_Disabled;
+    //ManualMode = Manual_Disabled;
     
     // Update the state of the spindle if needed
     if( g_fifo[g_fifoOut].s >= 0 )
@@ -584,25 +705,21 @@ void Motor_Task( )
     if( ++g_fifoOut > MAX_FIFO_MOVE ) g_fifoOut = 0;
   }
 
-  X.IsAtTheEnd( );
-  Y.IsAtTheEnd( );
-  Z.IsAtTheEnd( );
-
   // Fifo is now empty, reset the timestamp for the start
   // of the next command so that the Motor_Move( ) function
   // will use the current time instead of previous command
   // plus its duration.
   g_MoveStart = 0;
 
-  if( g_error )
+  if( g_error & ERROR_FLAG_MASK )
   {
     sprintf( tmp, "E:%x", g_error );
-    LCD_SetStatus( tmp, 0 );
+    //LCD_SetStatus( tmp, 0 );
   }
   else if( g_CRCerror )
   {
     sprintf( tmp, "C:%d", g_CRCerror );
-    LCD_SetStatus( tmp, 0 );
+    //LCD_SetStatus( tmp, 0 );
   }
  
   //LCD_SetStatus( X.IsAtTheEnd( ) ? "X" : " ", 0 );

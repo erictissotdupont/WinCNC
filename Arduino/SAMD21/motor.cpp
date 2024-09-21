@@ -9,7 +9,7 @@ int g_debug[MAX_DEBUG];
 
 #define RAMP_TIME     400000L
 #define MIN_SPEED     60L
-#define MAX_SPEED     360L
+#define MAX_SPEED     180L // 360L
 #define IMP_TO_NS     24000L
 
 #define MIN_STEP      ( IMP_TO_NS / MIN_SPEED )

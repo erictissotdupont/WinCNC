@@ -17,7 +17,8 @@ const struct { WCHAR* str; float val; } TOOL_SIZES[] = {
 	{ L"0.5       (1/2)",0.5f },
 	{ L"0.25     (1/4)",0.25f },
 	{ L"0.125   (1/8)",0.125f },
-	{ L"0.0625 (1/16)",0.0625 } };
+	{ L"0.0625 (1/16)",0.0625f },
+	{ L"0.0312 (1/32)", 0.03125f } };
 
 const struct { WCHAR* str; int val; } CUT_SPEED[] = {
 	{ L"F10",10 },

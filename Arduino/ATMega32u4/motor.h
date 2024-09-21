@@ -3,7 +3,7 @@
 
 class Motor {
 public : 
-  Motor( int sp, int dp, int ep, int s, unsigned long flags, unsigned long sbi );
+  Motor( int sp, int dp, uint32_t em, int s, unsigned long flags, unsigned long sbi );
   void Reset( );
   
   // This is virtual to make sure the derived class
@@ -19,7 +19,9 @@ public :
   
   long GetPos( );
   long FakeMove( long s );
-  bool IsAtTheEnd( );  
+  int GetLimit( );
+  void CalibrateStart( );
+  bool CalibrateTask( );
   
 protected :
   long curPos;                // Current axis position in steps
@@ -31,7 +33,7 @@ protected :
   int stepPin;                // GPIO for stepping
   int dirPin;                 // GPIO for direction
   int reverseDir;             // Reverse the motor direction
-  int endPin;                 // Optional GPIO for limit detection
+  uint32_t endMask;           // Bitmask for limit detection
   unsigned int limitFlag;     // Flags to set when limit is reached
   
   long curDir;                // Current movement direction (+/- 1)
@@ -52,9 +54,14 @@ protected :
   long decelDist;             // Step in movement when deceleration starts
   unsigned long decelTime;    // Duration of the deceleration phase 
   unsigned long decelStart;   // Time when the deceleration has started
-  long minSpeedStep;          // Duration of a step at G0 min speed 
-  long maxSpeedStep;          // Same for max speed
-  long stepByInch;            // Number of steps for one inch (approx)
+  unsigned long minSpeedStep;          // Duration of a step at G0 min speed 
+  unsigned long maxSpeedStep;          // Same for max speed
+  unsigned long stepByInch;            // Number of steps for one inch (approx)
+
+  // Calibration
+  int cal_state;
+  long cal_count;
+  uint32_t cal_time;
 
   // Manual mode
   int manual;
@@ -65,12 +72,12 @@ protected :
 class DualMotor : public Motor 
 {
 public:
-  DualMotor( int sp, int dp, int ep, int sp2, int dp2, int ep2, int s, unsigned long flags, unsigned long sbi );
+  DualMotor( int sp, int dp, uint32_t em, int sp2, int dp2, uint32_t em2, int s, unsigned long flags, unsigned long sbi );
   
 private:
-  int stepPin2;
-  int dirPin2;
-  int endPin2;
+  int stepPin2;               // GPIO for stepping 2nd motor
+  int dirPin2;                // GPIO for direction of 2nd motor
+  uint32_t endMask2;          // Bitmask for limit detection for 2nd motor
 
   REG_TYPE* step2SetReg;      // Register to SET step pin
   REG_TYPE* step2ClrReg;      // Register to CLEAR the step pin
@@ -83,7 +90,9 @@ public:
   void Step( unsigned long& t );
   void Reset( );
   void SetDirection( int d );
- 
+  int GetLimit( );
+  void CalibrateStart( );
+  bool CalibrateTask( );
 };
 
 void Motor_Init( );

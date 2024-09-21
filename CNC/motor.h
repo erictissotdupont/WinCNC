@@ -38,6 +38,7 @@ tStatus doMove( void(*posAtStep)(t3DPoint*,int,int,void*), int stepCount, double
 
 int setSpindleState( int state );
 
+tStatus CalibrateCNCPosition( );
 tStatus CheckStatus( BOOL bWait );
 tStatus ResetCNCPosition( );
 tStatus ClearCNCError( );

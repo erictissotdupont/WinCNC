@@ -13,6 +13,7 @@
 #include "driver/gpio.h"
 #include "esp_event.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "sdkconfig.h"
 
 #include "Cnc.h"
@@ -28,25 +29,25 @@ char g_szStatus[20] = { 0 };
 
 void app_main(void)
 {
-	ESP_LOGI( TAG, "Started" );
+    ESP_LOGI( TAG, "Started" );
     
-  g_startTime = esp_timer_get_time( );
+    g_startTime = esp_timer_get_time( );
   
-  Buttons_Init( );
+    Buttons_Init( );
   
-  LCD_Init( );
+    LCD_Init( );
   
-	Wifi_Init( );
+    Wifi_Init( );
 	
-	while( 1 )
-  {
-    vTaskDelay( 10 / portTICK_PERIOD_MS);
+    while( 1 )
+    {
+        vTaskDelay( 10 / portTICK_PERIOD_MS);
     
-    Buttons_Loop( );
+        Buttons_Loop( );
     
-    LCD_Refresh( );
-  }
+        LCD_Refresh( );
+    }
 	
-	// Should never get out of the main loop
-	ESP_LOGE( TAG, "Stopped" );
+    // Should never get out of the main loop
+    ESP_LOGE( TAG, "Stopped" );
 }
