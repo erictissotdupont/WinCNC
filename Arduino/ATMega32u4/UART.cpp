@@ -296,7 +296,7 @@ bool ADC_Task( )
 
 
 // Limit clock half period in uS
-#define LHP                   100
+#define LHP                   50
 
 bool Limit_Task( uint32_t nowT )
 {
@@ -376,40 +376,61 @@ bool Limit_Task( uint32_t nowT )
         mask = mask << 1;
         if( mask )
         {
+          // More bits incoming. Keep clocking and receiving data
           state = 3;
         }
         else
         {
           uint8_t crc = 0xFF;
-          crc = crc8_table[((crc ^ ( data       )) & 0xFF) & 0xFF];
-          crc = crc8_table[((crc ^ ((data >> 8 ))) & 0xFF) & 0xFF];
-          crc = crc8_table[((crc ^ ((data >> 16))) & 0xFF) & 0xFF];
+          crc = crc8_table[ ( crc ^ ( data       )) & 0xFF ];
+          crc = crc8_table[ ( crc ^ ( data >> 8  )) & 0xFF ];
+          crc = crc8_table[ ( crc ^ ( data >> 16 )) & 0xFF ];
           
           if( crc == (( data >> 24 ) & 0xFF ))
           {
             g_limitState = data;
             // Serial.printf("Limit %lx\n", data );
+
+            // Got the correct CRC. Clock one more to let the limit sensor
+            // that we're okay.
+            state = 5;
           }
-
-          // if( data != 0xAAF0 ) while( 1 );
-          // GOT DATA !!!!
-
-          // Wait for the signal to go back high (last bit might be low)
-          state = 5;
+          else
+          {
+            // Skip the extra clock cycle and go back to idle. The sensor
+            // will timeout and retry
+            state = 7;
+          }          
         }
         nextT = nowT + LHP;
       }
       break;
 
     case 5:
-      if( nowT >= nextT )
-      {
-        digitalWrite( LIMIT_OUT, LOW );
-        state = 0;
-      }
+      if( nowT >= nextT ) { digitalWrite( LIMIT_OUT, LOW ); nextT = nowT + LHP; state = 6; }
+      break;
+    case 6:
+      if( nowT >= nextT ) { digitalWrite( LIMIT_OUT, HIGH ); nextT = nowT + LHP; state = 7; }
+      break;
+    case 7:
+      if( nowT >= nextT ) { digitalWrite( LIMIT_OUT, LOW ); state = 0; }
       break;
   }
   return (state != 0);
+}
+
+void AddMoveToFifo( long x, long y, long z, long d, long s )
+{
+    g_fifo[g_fifoIn].x = x;
+    g_fifo[g_fifoIn].y = y;
+    g_fifo[g_fifoIn].z = z;
+    g_fifo[g_fifoIn].d = d;
+    g_fifo[g_fifoIn].s = s;
+
+    // Move the FIFO input index to the next slot.
+    if( ++g_fifoIn > MAX_FIFO_MOVE ) g_fifoIn = 0;
+
+    // if( g_fifoIn == g_fifoOut ) // TODO : HANDLE FIFO OVERFLOW
 }
 
 bool UART_Task( )
@@ -601,15 +622,7 @@ bool UART_Task( )
             }
             else if( strcmp( rxBuffer, "CAL_Z" ) == 0 )
             {
-              g_fifo[g_fifoIn].x = 0;
-              g_fifo[g_fifoIn].y = 0;
-              g_fifo[g_fifoIn].z = 0;
-              g_fifo[g_fifoIn].d = -1;
-              g_fifo[g_fifoIn].s = 0;
-
-              // Move the FIFO input index to the next slot.
-              if( ++g_fifoIn > MAX_FIFO_MOVE ) g_fifoIn = 0;
-
+              AddMoveToFifo( 0, 0, 0, -1, 0 );
               UART_SendAck( );
             }
             /*

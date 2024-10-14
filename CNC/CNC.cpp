@@ -488,6 +488,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 				}
 			}
 
+			/*
 			if (g_actualX != 0 || g_actualY != 0 || g_actualZ != 0)
 			{
 				if (MessageBox( hMainWindow, 
@@ -503,6 +504,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 				CheckStatus(true);
 				PostMessage(hWnd, WM_CHECK_INITIAL_STATUS, 0, 0);
 			}
+			*/
 		}
 		else
 		{

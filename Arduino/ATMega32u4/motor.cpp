@@ -22,15 +22,19 @@ int g_debug[MAX_DEBUG];
 
 // Instantiation and configuration of the stepper motor controlers.
 //-----------------------------------------------------------------
-//                   Step IO,  Direction IO,  EndMsk, Swap,    LimitFlag,      StepByInch
+//                   Step IO,  Direction IO,  EndMsk,  Configuration flags,               StepByInch           Calibration
 DualMotor X ( MOTOR_X_L_STEP, MOTOR_X_L_DIR,  0x0004,
-              MOTOR_X_R_STEP, MOTOR_X_R_DIR,  0x0008,  0,   ERROR_LIMIT_X | REDUCED_RAPID_POSITIONING_SPEED, 1.0f/X_AXIS_RES );
+              MOTOR_X_R_STEP, MOTOR_X_R_DIR,  0x0008,  ERROR_LIMIT_X |
+                                                       CALIBRATION_REVERSED | 
+                                                       REDUCED_RAPID_POSITIONING_SPEED,   1.0f/X_AXIS_RES,     0.009f/X_AXIS_RES, 0.001f );
 
-Motor     Y ( MOTOR_Y_STEP,    MOTOR_Y_DIR,   0x0010,  1,   ERROR_LIMIT_Y, 1.0f/Y_AXIS_RES );
+Motor     Y ( MOTOR_Y_STEP,    MOTOR_Y_DIR,   0x0010,  ERROR_LIMIT_Y |
+                                                       CALIBRATION_REVERSED |
+                                                       DIRECTION_REVERSED,                1.0f/Y_AXIS_RES );
 
 DualMotor Z ( MOTOR_Z_L_STEP,  MOTOR_Z_L_DIR, 0x0001,
-              MOTOR_Z_R_STEP,  MOTOR_Z_R_DIR, 0x0002,  0,   ERROR_LIMIT_Z | REDUCED_RAPID_POSITIONING_SPEED, 1.0f/Z_AXIS_RES );
-
+              MOTOR_Z_R_STEP,  MOTOR_Z_R_DIR, 0x0002,  ERROR_LIMIT_Z | 
+                                                       REDUCED_RAPID_POSITIONING_SPEED,   1.0f/Z_AXIS_RES,    0.22197f / Z_AXIS_RES, 0.0277f * 2.0f );
 
 
 unsigned long g_MoveStart = 0;  // Time when the current move was started (uS)
@@ -41,14 +45,25 @@ unsigned long g_timeIdleUs = 0;
 
 unsigned long g_missedStepCount = 0;
 
-Motor::Motor( int sp, int dp, uint32_t em, int rd, unsigned long flags, unsigned long sbi )
+Motor::Motor( int sp, int dp, uint32_t em, unsigned long flags, unsigned long sbi )
 {
   stepPin = sp;
   dirPin = dp;
   endMask = em;
-  reverseDir = rd;
+  reverseDir = flags & DIRECTION_REVERSED;
   limitFlag = flags & ERROR_FLAG_MASK;
   stepByInch = sbi;
+
+  if( flags & CALIBRATION_REVERSED )
+  {
+    cal_toward = -1;
+    cal_away = 1;
+  }
+  else
+  {
+    cal_toward = 1;
+    cal_away = -1;
+  }
   
   if(( flags & REDUCED_RAPID_POSITIONING_SPEED ) == 0 )
   {
@@ -71,12 +86,15 @@ Motor::Motor( int sp, int dp, uint32_t em, int rd, unsigned long flags, unsigned
   endDetectionState = 0;
 }
 
-DualMotor::DualMotor( int sp, int dp, uint32_t em, int sp2, int dp2, uint32_t em2, int s, unsigned long flags, unsigned long sbi )
-: Motor( sp, dp, em, s, flags, sbi )
+DualMotor::DualMotor( int sp, int dp, uint32_t em, int sp2, int dp2, uint32_t em2, unsigned long flags, unsigned long sbi, long cof, float R )
+: Motor( sp, dp, em, flags, sbi )
 {
   stepPin2 = sp2;
   dirPin2 = dp2;
   endMask2 = em2;
+  cal_offset = cof;
+  cal_R = R;
+  cal_cycle = 1;
 
   step2SetReg = digitalSetRegister( sp2 );
   step2ClrReg = digitalClrRegister( sp2 );
@@ -119,8 +137,8 @@ int Motor::GetLimit( )
 int DualMotor::GetLimit( )
 {
   int ret = 0;
-  if( g_limitState & endMask ) ret = 1;
-  if( g_limitState & endMask2 ) ret += 2;
+  if( g_limitState & endMask ) ret |= 1;
+  if( g_limitState & endMask2 ) ret |= 2;
   return ret;
 }
 
@@ -538,35 +556,19 @@ void Motor::CalibrateStart( )
   cal_state = 1;
 }
 
-bool Motor::CalibrateTask( )
-{
-  // Todo
-  return true;
-}
-
-void UART_delay( unsigned long us )
-{
-    uint32_t waitUntil = micros( ) + us;
-    do {
-      while( Limit_Task( micros( )));
-    }
-    while( micros( ) <= waitUntil );
-}
-
-#define CALIB_Z_OFFSET   ((int)(0.2545f / Z_AXIS_RES ))
-
-#define CAL_STEP_SPEED   1000
-#define CAL_PAUSE        50000
-
 void DualMotor::CalibrateStart( )
 {
   cal_state = 1;
+  cal_cycle = 1;
 }
 
-bool DualMotor::CalibrateTask( )
+#define CAL_STEP_SPEED   1000
+#define CAL_PAUSE        50000
+#define CAL_STALL        100
+
+bool Motor::CalibrateTask( )
 {
   unsigned int p;
-  int offset = CALIB_Z_OFFSET;
   uint32_t now = micros( );
 
   switch( cal_state )
@@ -579,17 +581,144 @@ bool DualMotor::CalibrateTask( )
     case 1 : // Started
       if( GetLimit( ) != 0 )
       {
-        // If either side is already at the end, move away
-        // so that we can detect the edge
-        SetDirection( -1 ); // Down
+        // Already at the end, move away so that we can detect the edge
+        SetDirection( cal_away );
         cal_state = 2;
         cal_count = stepByInch / 4; // Move 1/4in away
       }
       else
       {
-        SetDirection( 1 ); // Up
+        SetDirection( cal_toward );
         cal_state = 3;
-        cal_count = CALIB_Z_OFFSET;
+      }
+      cal_time = now + CAL_PAUSE;
+      break;
+
+    case 2 : // Move until away from the ensor plus some
+      if( now >= cal_time )
+      {
+        p = GetLimit( );
+        if( p != 0 || cal_count != 0 )
+        {
+          Step( );
+          if( p == 0 ) cal_count--;
+          cal_time = now + CAL_STEP_SPEED;
+        }
+        else
+        {
+          SetDirection( cal_toward );
+          cal_state = 3;
+          cal_time = now + CAL_PAUSE;
+        }
+      }
+      break;
+
+    case 3 : // Move towards the sensors and calibrate
+      if( now >= cal_time )
+      {
+        p = GetLimit( );
+        if( p == 0 )
+        {
+          Step( );
+          cal_time = now + CAL_STEP_SPEED;
+          cal_stall = CAL_STALL;
+        }
+        else
+        {
+          if( cal_stall )
+          {
+             cal_time = now + CAL_STEP_SPEED; 
+             cal_stall--; 
+          }
+          else
+          {
+#if 1
+            // Done! We're calibrated!
+            cal_state = 0;
+#else
+            SetDirection( cal_away );
+            cal_state = 4;
+            cal_count = stepByInch * 0.5; // Move away 1/2 inch from the reference position
+            cal_time = now + CAL_PAUSE;
+#endif
+          }
+        }
+      }
+      break;
+
+    case 4 : // Move to the origin position (from the reference)
+      if( now >= cal_time )
+      {
+        if( cal_count >= 0 )
+        {
+          Step( );
+          cal_count--;
+          cal_time = now + CAL_STEP_SPEED;
+        }
+        else
+        {
+          SetDirection( cal_toward );
+          cal_time = now + CAL_PAUSE;
+          cal_state = 5;
+          cal_count = 0;
+        }
+      }
+      break;
+
+    case 5 :
+      if( now >= cal_time )
+      {
+        p = GetLimit( );
+        if( p == 0 )
+        {
+          cal_count++;
+          Step( );
+          cal_time = now + CAL_STEP_SPEED;
+        } 
+        else
+        {
+          SetDirection( cal_away ); // Down
+          cal_state = 1;
+          cal_count = stepByInch * 0.5; // Move away 3 inch from the reference position
+          cal_time = now + CAL_PAUSE;
+
+          Serial.printf("S:%lu \n", cal_count );
+        }
+      }
+      break;
+  }
+  // Return true only if calibration is ongoing
+  return ( cal_state != 0 );
+}
+
+bool DualMotor::CalibrateTask( )
+{
+  unsigned int p;
+  uint32_t now = micros( );
+
+  switch( cal_state )
+  {
+    default:
+      cal_state = 0;
+    case 0 : // Idle
+      cal_cycle = 1;
+      break;
+
+    case 1 : // Started
+      if( GetLimit( ) != 0 )
+      {
+        // If either side is already at the end, move away
+        // so that we can detect the edge
+        SetDirection( cal_away ); // Down
+        cal_state = 2;
+        cal_count = abs(cal_offset) + stepByInch / 4; // Move 1/4in away
+      }
+      else
+      {
+        SetDirection( cal_toward ); // Up
+        cal_state = 3;
+        cal_count = cal_offset;
+        cal_delta = 0;
       }
       cal_time = now + CAL_PAUSE;
       break;
@@ -600,22 +729,18 @@ bool DualMotor::CalibrateTask( )
         p = GetLimit( );
         if( p != 0 || cal_count != 0 )
         {
-          if(( p & 1 ) != 0 ) StepL( );
-          if(( p & 2 ) != 0 ) StepR( );
-          if( p == 0 && cal_count > 0 )
-          {
-            StepL( );
-            StepR( );
-            cal_count--;
-          } 
+          StepL( );
+          StepR( );
+          if( p == 0 ) cal_count--;
           cal_time = now + CAL_STEP_SPEED;
         }
         else
         {
-          SetDirection( 1 ); // Up
+          SetDirection( cal_toward ); // Up
           cal_state = 3;
           cal_time = now + CAL_PAUSE;
-          cal_count = CALIB_Z_OFFSET;
+          cal_count = cal_offset;
+          cal_delta = 0;
         }
       }
       break;
@@ -628,40 +753,123 @@ bool DualMotor::CalibrateTask( )
         {
           if(( p & 1 ) == 0 || cal_count > 0 )
           {
-            if(( p & 1 ) && cal_count > 0 ) cal_count--;
+            if(( p & 1 ) == 1 && cal_count > 0 ) cal_count--;
+            if(( p & 2 ) == 2 ) cal_delta++;
             StepL( );
           } 
           if(( p & 2 ) == 0 || cal_count < 0 )
           {
-            if(( p & 2 ) && cal_count < 0 ) cal_count++;
+            if(( p & 2 ) == 2 && cal_count < 0 ) cal_count++;
+            if(( p & 1 ) == 1 ) cal_delta--;
             StepR( );
           }
-          cal_time = now + CAL_STEP_SPEED;
+          cal_time = now + CAL_STEP_SPEED * cal_cycle;
+          cal_stall = 100;
         }
         else
         {
-          SetDirection( -1 ); // Down
-          cal_state = 4;
-          cal_count = stepByInch * 3; // Move away 3 inch from the reference position
-          cal_time = now + CAL_PAUSE;
+          if( cal_stall )
+          {
+             cal_time = now + CAL_STEP_SPEED; 
+             cal_stall--; 
+          }
+          else
+          {
+            cal_delta = cal_delta + cal_offset;
+
+            // Calculate as if Left axis was slanted further away
+            cal_dR = abs(cal_delta) * (cal_R - 1.0f) / (2.0f - ( 1.0f / cal_R )); // Positive (correction is to move away on the right side)
+            cal_dL = (abs(cal_delta) * cal_R) - cal_dR; // Negative (correction is to move toward on the left side)
+
+            //if( cal_dR == 0 && cal_dL == 0 )
+            if( abs(cal_delta) < 2 )
+            {
+              // Done! We're calibrated
+              cal_state = 0;
+            }
+            else
+            {              
+              if( cal_delta < 0 ) // Right was actually further away
+              {
+                // Then swap the axis corrections
+                long tmp = cal_dR;
+                cal_dR = cal_dL;
+                cal_dL = tmp;
+              }
+
+              Serial.printf("D:%ld dL:%ld dR:%ld\n", cal_delta, cal_dL, cal_dR );
+
+              SetDirection( cal_away );
+              cal_state = 4;
+              cal_time = now + CAL_PAUSE;
+            }
+          }
         }
       }
       break;
 
-    case 4 : // Move to the origin position (from the reference)
+    case 4 : // Correction of "d1" which is away from sensor on the opposite side which was furthest
       if( now >= cal_time )
       {
-        if( cal_count >= 0 )
+        cal_time = now + CAL_STEP_SPEED;
+        if( cal_dR > 0 )
+        {
+          StepR( );
+          cal_dR--;
+        }
+        else if( cal_dL > 0 )
         {
           StepL( );
+          cal_dL--;
+        }
+        else
+        {
+          SetDirection( cal_toward );
+          cal_time = now + CAL_PAUSE;
+          cal_state = 5;
+        }
+      }
+      break;
+
+    case 5 : // Correction of "d2" which is towards the sensor on the same side which was furthest
+      if( now >= cal_time )
+      {
+        cal_time = now + CAL_STEP_SPEED;
+        if( cal_dR < 0 )
+        {
           StepR( );
+          cal_dR++;
+        }
+        else if( cal_dL < 0 )
+        {
+          StepL( );
+          cal_dL++;
+        }
+        else
+        {
+          SetDirection( cal_away );
+          cal_time = now + CAL_PAUSE;
+          cal_state = 6;
+          cal_count = abs(cal_offset) + stepByInch / 4; // Move 1/4in away
+        }
+      }
+      break;
+
+    case 6 :
+      if( now >= cal_time )
+      {
+        if( cal_count > 0 )
+        {
           cal_count--;
+          StepL( );
+          StepR( );
           cal_time = now + CAL_STEP_SPEED;
         }
         else
         {
-          // Done! We're calibrated!
-          cal_state = 0;
+          // Let's start over. The process should end when cal_delta is small enough
+          cal_state = 1;
+          cal_cycle++;
         }
       }
       break;
@@ -684,11 +892,27 @@ void Motor_Move( long x, long y, long z, long d )
 
   if( d == -1 ) // Calibration!
   {
+    bool calibrated;
+    X.CalibrateStart( );
+    Y.CalibrateStart( );
     Z.CalibrateStart( );
-    while( Z.CalibrateTask( ))
+    do
     {
-      UART_Task( );
-    }
+      calibrated = true;
+
+      if( X.CalibrateTask( )) calibrated = false;
+      if( Y.CalibrateTask( )) calibrated = false;
+      if( Z.CalibrateTask( )) calibrated = false;
+    
+      Limit_Task( micros( ));
+
+       UART_Task( );
+
+    } while( !calibrated );
+
+    AddMoveToFifo( 6.0 / X_AXIS_RES, 6.0 / Y_AXIS_RES, -4.0 / Z_AXIS_RES, 0, 0 );
+    //AddMoveToFifo( 0, 0, -4.0 / Z_AXIS_RES, 0, 0 );
+
   }
 
   if( g_MoveStart == 0 )
@@ -729,6 +953,8 @@ void Motor_Move( long x, long y, long z, long d )
     }
     return;
   }
+
+    Serial.printf("Start Move %ld,%ld,%ld\n", x,y,z );
 
   do
   {
@@ -795,6 +1021,17 @@ inline unsigned int filterPin( )
   return (g_limitState & 3);
 }
 
+#define CALIB_Z_OFFSET (0.2545f / Z_AXIS_RES)
+
+void UART_delay( unsigned long us )
+{
+    uint32_t waitUntil = micros( ) + us;
+    do {
+      while( Limit_Task( micros( )));
+    }
+    while( micros( ) <= waitUntil );
+}
+
 void Calibrate_Z( )
 {
   unsigned int p;
@@ -838,13 +1075,6 @@ void Calibrate_Z( )
 
   return;
   
-  // Apply the offset
-  for( int i=0;i<CALIB_Z_OFFSET; i++)
-  {
-    Z.StepR( );
-    UART_delay( 1000 );
-  }
-
   return;
 
   // Back out by 0.25

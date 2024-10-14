@@ -13,7 +13,6 @@
 #include "freertos/task.h"
 #include "freertos/queue.h"
 #include "driver/gpio.h"
-
 #include "esp_timer.h"
 
 /**
@@ -60,9 +59,12 @@ static int low_max = 0;
 static int high_min = 1000;
 static int high_max = 0;
 
-int g_state = -0;
-uint32_t g_value = 0;
+int g_state = 0;
+uint64_t g_value = 0;
+uint64_t g_lastSent = -1;
 static xQueueHandle gpio_evt_queue = NULL;
+esp_timer_handle_t g_timer;
+unsigned long g_timeoutErr = 0;
 
 const uint8_t crc8_table[256] = {
     0x00, 0xF7, 0xB9, 0x4E, 0x25, 0xD2, 0x9C, 0x6B,
@@ -117,7 +119,7 @@ void signal_IO_changed( )
              (gpio_get_level( GPIO_LIMIT_XL ) << 2 ) |
              (gpio_get_level( GPIO_LIMIT_XR ) << 3 ) |
              (gpio_get_level( GPIO_LIMIT_Y )  << 4 );
-             
+                      
     // Calculate the CRC on the first 3 bytes
     uint32_t crc = 0xFF;
     crc = crc8_table[((crc ^ ( g_value       )) & 0xFF) & 0xFF];
@@ -126,10 +128,13 @@ void signal_IO_changed( )
     // Put it in the high byte
     crc = crc << 24;
     g_value |= crc;
+    
+    if( g_value == g_lastSent ) return;
         
     // Signal interrupt
     g_state = 1;
     gpio_set_level(GPIO_OUTPUT_IO_1, 1 );
+    esp_timer_start_once(g_timer, 16000 );
 }
 
 static void IRAM_ATTR gpio_isr_handler(void* arg)
@@ -137,7 +142,7 @@ static void IRAM_ATTR gpio_isr_handler(void* arg)
     uint32_t gpio_num = (uint32_t) arg;
 	uint64_t time = esp_timer_get_time( );
 	static int64_t endOfPrev = 0;
-	static uint32_t mask = 0;
+	static uint64_t mask = 0;
     static bool bPending = false;
     
     //static uint16_t prevIO = 0;
@@ -176,7 +181,7 @@ static void IRAM_ATTR gpio_isr_handler(void* arg)
         case 3 :
             if( gpio_get_level(GPIO_COMM_RX) == 0 )
             {
-                if( mask )
+                if( mask & 0x1FFFFFFFFLL )
                 {				
                     gpio_set_level(GPIO_OUTPUT_IO_1, g_value & mask );
                     mask = mask << 1;
@@ -184,13 +189,15 @@ static void IRAM_ATTR gpio_isr_handler(void* arg)
                 }
                 else
                 {
+                    esp_timer_stop(g_timer);
                     gpio_set_level(GPIO_OUTPUT_IO_1, 0 );                    
                     g_state = 0;
+                    g_lastSent = g_value;
                     endOfPrev = time;
+                    
                     if( bPending )
                     {
-                        xQueueSendFromISR(gpio_evt_queue, &gpio_num, NULL);
-                        bPending = false;
+                        esp_timer_start_once( g_timer, 1000 );
                     }
                 }
             }
@@ -206,7 +213,7 @@ static void IRAM_ATTR gpio_isr_handler(void* arg)
     }
     else
     {    
-        if( g_state == 0 && ( endOfPrev <= ( time - 1000 )))
+        if( g_state == 0 )
         {
             signal_IO_changed( );
         }
@@ -236,10 +243,50 @@ static void gpio_task_example(void* arg)
     }
 }
 
+static void timer_callback(void* arg)
+{
+    if( g_state == 0 )
+    {
+        signal_IO_changed( );
+    }
+    else
+    {
+        // Try again in 1ms
+        esp_timer_start_once( g_timer, 1000 );
+    }
+
+    /*
+    uint32_t gpio_num = 0;
+    
+    if( g_state != 0 )
+    {
+        gpio_set_level(GPIO_OUTPUT_IO_1, 0 );
+        g_timeoutErr++;
+        g_state = 0;
+        xQueueSend(gpio_evt_queue, &gpio_num, NULL);
+    }
+    */
+}
+
 void app_main(void)
 {
-    gpio_config_t io_conf = {};
+    //   T I M E R 
+    // --------------
+    esp_timer_early_init( );
+    esp_timer_init( );
     
+    esp_timer_create_args_t timer = { 0 };
+    
+    timer.callback = timer_callback;
+    timer.arg = NULL;
+    timer.dispatch_method = ESP_TIMER_TASK; // ESP_TIMER_ISR. Available only if CONFIG_ESP_TIMER_SUPPORTS_ISR_DISPATCH_METHOD is enabled (by default disabled).
+    timer.name = "timeout";
+    timer.skip_unhandled_events = false;    
+    esp_timer_create(&timer, &g_timer);
+
+    
+    //   E V E N T   Q U E U E
+    // --------------------------    
     //create a queue to handle gpio event from isr
     gpio_evt_queue = xQueueCreate(10, sizeof(uint32_t));
     //start gpio task
@@ -247,6 +294,7 @@ void app_main(void)
     
     //   O U T P U T 
     // ---------------- 
+    gpio_config_t io_conf = {};
     io_conf.intr_type = GPIO_INTR_DISABLE;
     io_conf.mode = GPIO_MODE_OUTPUT;
     io_conf.pin_bit_mask = GPIO_OUTPUT_PIN_SEL;
@@ -263,9 +311,10 @@ void app_main(void)
     io_conf.intr_type = GPIO_INTR_ANYEDGE;
     io_conf.pin_bit_mask = GPIO_INPUT_PIN_SEL;
     io_conf.mode = GPIO_MODE_INPUT;
-    io_conf.pull_up_en = 0;
-	io_conf.pull_down_en = 1;
+    io_conf.pull_up_en = 1;
+	io_conf.pull_down_en = 0;
     gpio_config(&io_conf);
+    
     //install gpio isr service
     gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
     //hook isr handler for specific gpio pin
@@ -277,10 +326,20 @@ void app_main(void)
     gpio_isr_handler_add(GPIO_LIMIT_Y , gpio_isr_handler, (void*) GPIO_LIMIT_Y );
 
     printf("Minimum free heap size: %d bytes\n", esp_get_minimum_free_heap_size());
+    
+    vTaskDelay(1000 / portTICK_RATE_MS);
+    if( g_state == 0 )
+    {
+        signal_IO_changed( );
+    }
 
-    while(1) {
-        printf("%x / low %d - %d - high %d - %d \n", g_value, low_min, low_max, high_min, high_max );
+    while(1) {    
         vTaskDelay(1000 / portTICK_RATE_MS);
-	
+        printf("%count:d tout:%lu state:%d\n", cnt, g_timeoutErr, g_state );
+        
+        if( g_state == 0 )
+        {
+            //signal_IO_changed( );
+        }
     }
 }

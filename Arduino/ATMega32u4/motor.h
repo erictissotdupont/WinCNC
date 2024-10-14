@@ -3,7 +3,7 @@
 
 class Motor {
 public : 
-  Motor( int sp, int dp, uint32_t em, int s, unsigned long flags, unsigned long sbi );
+  Motor( int sp, int dp, uint32_t em, unsigned long flags, unsigned long sbi );
   void Reset( );
   
   // This is virtual to make sure the derived class
@@ -61,7 +61,10 @@ protected :
   // Calibration
   int cal_state;
   long cal_count;
+  long cal_stall;
   uint32_t cal_time;
+  int cal_toward;
+  int cal_away;
 
   // Manual mode
   int manual;
@@ -72,12 +75,19 @@ protected :
 class DualMotor : public Motor 
 {
 public:
-  DualMotor( int sp, int dp, uint32_t em, int sp2, int dp2, uint32_t em2, int s, unsigned long flags, unsigned long sbi );
+  DualMotor( int sp, int dp, uint32_t em, int sp2, int dp2, uint32_t em2, unsigned long flags, unsigned long sbi, long cof, float R );
   
 private:
   int stepPin2;               // GPIO for stepping 2nd motor
   int dirPin2;                // GPIO for direction of 2nd motor
   uint32_t endMask2;          // Bitmask for limit detection for 2nd motor
+
+  // Calibration
+  long cal_offset;            // Position difference between the L and R calibration positions (in steps)
+  long cal_delta;             // Difference of steps required between the L and R motor to reach each sensor
+  long cal_dL, cal_dR;        // Number of steps to correct the slanting of the axis prior to calibration for L and R motors 
+  float cal_R;                // The ratio betweem the position of the sensors and the motors. Used to correct the slanting effect.
+  int cal_cycle;              // Number of calibration cycles. Echh cycle slows down to increase precision
 
   REG_TYPE* step2SetReg;      // Register to SET step pin
   REG_TYPE* step2ClrReg;      // Register to CLEAR the step pin

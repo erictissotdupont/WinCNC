@@ -18,3 +18,4 @@ void UART_Init( );
 bool UART_Task( );
 void Motor_Task( );
 bool Limit_Task( uint32_t nowT );
+void AddMoveToFifo( long x, long y, long z, long d, long s );

@@ -21,6 +21,8 @@
 #define STATUS_MANUAL_MODE   0x00000100l
 
 #define REDUCED_RAPID_POSITIONING_SPEED   0x80000000l
+#define CALIBRATION_REVERSED              0x40000000l
+#define DIRECTION_REVERSED                0x20000000l
 
 #define MAX_FIFO_MOVE        3
 #define MAX_DEBUG            4
