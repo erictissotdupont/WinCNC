@@ -40,8 +40,8 @@
 //------------
 // 0 : UART RX
 // 1 : UART TX
-#define TOOL_ON_REPLAY       (gpio_num_t)43
-#define LIMIT_OUT            (gpio_num_t)44
+#define TOOL_ON_RELAY        (gpio_num_t)1
+#define LIMIT_OUT            (gpio_num_t)2
 #define MOTOR_X_L_DIR        (gpio_num_t)42
 #define MOTOR_X_L_STEP       (gpio_num_t)6
 #define MOTOR_Z_L_DIR        (gpio_num_t)40
@@ -80,6 +80,8 @@
 //#define MEASURE_MOVE
 
 
+#define CMD_FLAG_SPINDLE_ON   0x00000001
+#define CMD_FLAG_CALIBRATION  0x00000002
 
 typedef struct _cmd_t
 {

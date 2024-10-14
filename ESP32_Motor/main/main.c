@@ -343,7 +343,6 @@ void app_main(void)
   esp_timer_early_init( );
   //ESP_ERROR_CHECK( esp_timer_init( ));
 
-  
   // Initialize NVS
   esp_err_t err = nvs_flash_init();
   if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -360,7 +359,7 @@ void app_main(void)
   
 	// Initialize the network and start the tasks
 	initSocketCom( );
-
+  
   // Initialize the UART to the ARDUINO  
   // initUART( );
   

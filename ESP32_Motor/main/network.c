@@ -282,7 +282,7 @@ tCnCCmdStatus MovementCommand( unsigned long seq, char* pt, struct sockaddr_in* 
     while( xQueueSend( g_cmd_queue, 
                        &cmd, 
                        nackCount == 0 ? 0 : ( NACK_INTERVAL_MS / portTICK_PERIOD_MS )) != pdPASS )
-    {
+    {      
       // The message was placed in the queue. If it has been more than
       // the nack interval or it's the first message we put in the queue,
       // send a NACK to the host.
@@ -293,6 +293,8 @@ tCnCCmdStatus MovementCommand( unsigned long seq, char* pt, struct sockaddr_in* 
         timeSinceLastNAK = esp_timer_get_time( ) + ( NACK_INTERVAL_MS * 1000 );
       }    
     }
+    
+    ESP_LOGI( TAG, "Cmd:%ld,%ld,%ld %lu %lx", cmd.dx,cmd.dy,cmd.dz,cmd.duration,cmd.flags );
   }
   return status;
 }
@@ -557,7 +559,7 @@ void broadcastTask(void* arg)
     // If there is nothing to process 
     if( xQueueReceive( g_cmd_queue, &cmd, 1000 / portTICK_PERIOD_MS))
     {
-      MotorMove( cmd.dx, cmd.dy, cmd.dz, cmd.duration );
+      MotorMoveFromIdle( &cmd );
     }
     else
     {
