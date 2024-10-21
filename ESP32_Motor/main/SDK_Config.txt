@@ -1,2 +1,15 @@
 
-GPTimer functions in IRAM
+Component config
+ ESP-Driver:GPIO Configurations
+  Place GPIO control functions into IRAM -> ENABLED
+
+Component config
+ ESP-Driver:GPTimer Configurations
+  Place GPTimer ISR handler into IRAM -> ENABLED
+  Place GPTimer control functions into IRAM -> ENABLED
+  GPTimer ISR IRAM-Safe -> ENABLED     
+
+Component config
+ Event Loop Library  
+  Support posting events from ISRs -> ENABLED
+  Support posting events from ISRs placed in IRAM -> ENABLED  

@@ -25,6 +25,7 @@
 #include "Cnc.h"
 #include "Events.h"
 #include "Motor.h"
+#include "Limits.h"
 
 static const char* TAG = "main";
 
@@ -225,26 +226,7 @@ bool OriginCommand( )
   return true;
 }
 
-bool Calibrate_Z( )
-{
-  int cbRet;
-  int cbCmd;
-  char szCmd[16];
-  bool bStatus;
-  
-  cbCmd = sprintf( szCmd, "CAL_Z" );
-  
-  bStatus = (( cbRet = UART_Command( szCmd )) == 1 && g_UARTrxData[0] == g_ACKchar ); 
-  if( !bStatus )
-  {
-    ESP_LOGE( TAG, "UART command[%d] '%s' failed (%d,%c).", cbCmd, szCmd, cbRet, g_UARTrxData[0] );
-  }
 
-  g_ACKchar++;
-  if( g_ACKchar > '9' ) g_ACKchar = '0';
-  
-  return true;
-}
 
 
 bool CheckMachineIsIdle( unsigned long seq, struct sockaddr_in* source )
@@ -364,6 +346,7 @@ void app_main(void)
   // initUART( );
   
   MotorInit( );
+  LimitsInit( );
 		
 	cnc_loop( );
 	

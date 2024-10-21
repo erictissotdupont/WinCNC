@@ -124,7 +124,7 @@ char* getMyMAC( )
   return myMAC;
 }
 
-static const unsigned char crc8_table[256] = {
+const unsigned char crc8_table[256] = {
 	0x00, 0xF7, 0xB9, 0x4E, 0x25, 0xD2, 0x9C, 0x6B,
 	0x4A, 0xBD, 0xF3, 0x04, 0x6F, 0x98, 0xD6, 0x21,
 	0x94, 0x63, 0x2D, 0xDA, 0xB1, 0x46, 0x08, 0xFF,
@@ -297,6 +297,19 @@ tCnCCmdStatus MovementCommand( unsigned long seq, char* pt, struct sockaddr_in* 
     ESP_LOGI( TAG, "Cmd:%ld,%ld,%ld %lu %lx", cmd.dx,cmd.dy,cmd.dz,cmd.duration,cmd.flags );
   }
   return status;
+}
+
+bool Calibrate_Z( )
+{
+  cmd_t cmd = { 0 };
+  int nackCount = 0;
+  static uint64_t timeSinceLastNAK = 0;
+    
+  cmd.flags = CMD_FLAG_CALIBRATION;
+
+  return( xQueueSend( g_cmd_queue, 
+                      &cmd, 
+                      nackCount == 0 ? 0 : ( NACK_INTERVAL_MS / portTICK_PERIOD_MS )) != pdPASS );
 }
 
 void receiverTask(void *arg)
@@ -568,7 +581,7 @@ void broadcastTask(void* arg)
       unsigned long A0,A1,A2;
       
       x = y = z = 0;
-      S = Q = 0;
+      S = Q = WARNING_CALIBRATION;
       A0 = A1 = A2 = 0;
       g_Status |= STATUS_GOT_POSITION;
       

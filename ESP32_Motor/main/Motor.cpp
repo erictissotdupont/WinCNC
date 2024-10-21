@@ -12,39 +12,39 @@ extern "C" {
 }
 
 uint32_t g_error = WARNING_CALIBRATION;
-uint32_t g_limitState = 0;
+extern uint32_t g_limitState;
 int g_debug[MAX_DEBUG];
 
-#define STEP_PULSE_US 100 // Duration of the motor step pulse
-#define RAMP_SHIFT    19 // 19=524ms
-#define RAMP_TIME     (1L << RAMP_SHIFT)
-#define MIN_SPEED     15L
-#define MAX_SPEED     150L
+#define STEP_PULSE_US     100 // Duration of the motor step pulse
+#define RAMP_SHIFT        19 // 19=524ms
+#define RAMP_TIME         (1L << RAMP_SHIFT)
+#define MIN_SPEED         15L
+#define MAX_SPEED         150L
+#define NO_STEP_TIME      (-1ULL)
+
 // Calculate the speed ramp for G0 accel / decel phases 
 #define STEP_FROM_RAMP( Min, Max, t ) ( Min - ((( Min - Max ) * t ) >> RAMP_SHIFT))
 // Speed is in inch by minute, hence the 60M micro seconds
 #define SPEED_TO_STEP( sbi, s ) ( 60000000L / ((sbi) * (s)))
-#define NO_STEP_TIME  (-1ULL)
 
 class Motor {
 public : 
   Motor( gpio_num_t sp, gpio_num_t dp, uint32_t em, unsigned long flags, unsigned long sbi );
-  void Reset( );
   
-  // This is virtual to make sure the derived class
+  // Virtual is to make sure the derived class
   // implementation gets called
-  virtual void SetDirection( int d );
+  virtual bool SetDirection( int d );
+  virtual void Step( );
+  virtual int GetLimit( );
+  virtual void CalibrateStart( );
+  virtual uint64_t CalibrateTask( uint64_t now );
   
+  // Those functions are not to overloaded
+  void Reset( );
+  long GetPos( );
   uint64_t InitMove( long s, unsigned long t, uint64_t now );
   uint64_t GetNextStepTime( );
   void PrepareNextStep( uint64_t now );
-  
-  void Step( );
-  
-  long GetPos( );
-  int GetLimit( );
-  void CalibrateStart( );
-  uint64_t CalibrateTask( uint64_t now );
   
 protected :
   long curPos;                // Current axis position in steps
@@ -63,6 +63,7 @@ protected :
   long stepModulo;            // The remainder of the division
   uint64_t nextStepTime;      // Time when the next half step should be made
   bool stepLevel;
+  bool dirLevel;
 //uint64_t currentStepTime;   // Time when the current step is happening
   long stepAcc;               // The fractional error accumulator
 
@@ -102,67 +103,40 @@ private:
   int cal_cycle;              // Number of calibration cycles. Echh cycle slows down to increase precision
 
 public:
-  void Step( );
+  virtual void Step( ) override;
+  virtual bool SetDirection( int d )override;
+  virtual int GetLimit( )override;
+  virtual uint64_t CalibrateTask( uint64_t now ) override;
+  virtual void CalibrateStart( )override;
+  
   void StepL( );
   void StepR( );
-  void Reset( );
-  void SetDirection( int d );
-  int GetLimit( );
-  void CalibrateStart( );
-  uint64_t CalibrateTask( uint64_t now );
-};
+  
+  
+  };
 
 // Instantiation and configuration of the stepper motor controlers.
 //-----------------------------------------------------------------
 //                   Step IO,  Direction IO,  EndMsk,  Configuration flags,               StepByInch           Calibration
 DualMotor X ( MOTOR_X_L_STEP, MOTOR_X_L_DIR,  0x0004,
               MOTOR_X_R_STEP, MOTOR_X_R_DIR,  0x0008,  ERROR_LIMIT_X |
-                                                       CALIBRATION_REVERSED | 
+                                                       CALIBRATION_REVERSED |
+                                                       DIRECTION_REVERSED |
                                                        REDUCED_RAPID_POSITIONING_SPEED,   1.0f/X_AXIS_RES,     0.009f/X_AXIS_RES, 0.001f );
 
 Motor     Y ( MOTOR_Y_STEP,    MOTOR_Y_DIR,   0x0010,  ERROR_LIMIT_Y |
-                                                       CALIBRATION_REVERSED |
-                                                       DIRECTION_REVERSED,                1.0f/Y_AXIS_RES );
+                                                       CALIBRATION_REVERSED,              1.0f/Y_AXIS_RES );
 
 DualMotor Z ( MOTOR_Z_L_STEP,  MOTOR_Z_L_DIR, 0x0001,
-              MOTOR_Z_R_STEP,  MOTOR_Z_R_DIR, 0x0002,  ERROR_LIMIT_Z | 
+              MOTOR_Z_R_STEP,  MOTOR_Z_R_DIR, 0x0002,  ERROR_LIMIT_Z |
+                                                       DIRECTION_REVERSED |
                                                        REDUCED_RAPID_POSITIONING_SPEED,   1.0f/Z_AXIS_RES,    0.22197f / Z_AXIS_RES, 0.0277f * 2.0f );
 
 
-Motor *g_pNextMotorToStep = NULL;
-gptimer_handle_t g_motorTimer = NULL;
-uint64_t g_MoveStart = 0;  // Time when the current move was started (uS)
-
-// For debug purpose, measures the time spent on idle task to estimate the
-// CPU load of the system (displayed on LCD screen).
-unsigned long g_timeIdleUs = 0;
-
+static Motor *g_pNextMotorToStep = NULL;
+static gptimer_handle_t g_motorTimer = NULL;
+static uint64_t g_MoveStart = 0;  // Time when the current move was started (uS)
 static const char* TAG = "motor";
-
-
-
-// ############################# MAKE IT BUILD #####################################
-
-uint32_t reg;
-
-#define OUTPUT 0
-#define LOW 0
-#define HIGH 1
-
-uint32_t* digitalSetRegister( uint32_t mask ) { return &reg; }
-uint32_t* digitalClrRegister( uint32_t mask ) { return &reg; }
-uint32_t digitalPinMask( uint32_t mask ) { return 0; }
-void pinMode( int pin, int mode ) { };
-void digitalWrite( int pin, int state ) { };
-uint32_t micros( ) { return 0; }
-void delayMicroseconds( uint32_t ) { };
-void interrupts( ) { };
-void noInterrupts( ) { };
-void UART_Task( ) { };
-bool Limit_Task( uint32_t t ) { return false; };
-void AddMoveToFifo( long x, long y, long z, long t, long s );
-
-// #################################################################################
 
 Motor::Motor( gpio_num_t sp, gpio_num_t dp, uint32_t em, unsigned long flags, unsigned long sbi )
 {
@@ -200,12 +174,16 @@ Motor::Motor( gpio_num_t sp, gpio_num_t dp, uint32_t em, unsigned long flags, un
   
   gpio_config_t io_conf = {};
   io_conf.intr_type = GPIO_INTR_DISABLE;
-  io_conf.mode = GPIO_MODE_OUTPUT; // GPIO_MODE_OUTPUT_OD
-  io_conf.pin_bit_mask = (1ULL<<sp) | (1ULL<<dp);
+  io_conf.mode = GPIO_MODE_OUTPUT_OD; // GPIO_MODE_OUTPUT_OD; // GPIO_MODE_OUTPUT; // GPIO_MODE_OUTPUT_OD
+  io_conf.pin_bit_mask = (1ULL<<stepPin) | (1ULL<<dirPin);
   io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
   io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
   ESP_ERROR_CHECK(gpio_config(&io_conf));
-    
+  
+  ESP_ERROR_CHECK(gpio_set_level( stepPin, OD_OPEN ));
+  ESP_ERROR_CHECK(gpio_set_level( dirPin, OD_OPEN ));
+  stepLevel = OD_OPEN;
+  dirLevel = OD_OPEN;
 }
 
 DualMotor::DualMotor( gpio_num_t sp, gpio_num_t dp, uint32_t em, gpio_num_t sp2, gpio_num_t dp2, uint32_t em2, unsigned long flags, unsigned long sbi, long cof, float R )
@@ -217,6 +195,17 @@ DualMotor::DualMotor( gpio_num_t sp, gpio_num_t dp, uint32_t em, gpio_num_t sp2,
   cal_offset = cof;
   cal_R = R;
   cal_cycle = 1;
+  
+  gpio_config_t io_conf = {};
+  io_conf.intr_type = GPIO_INTR_DISABLE;
+  io_conf.mode = GPIO_MODE_OUTPUT_OD; // GPIO_MODE_OUTPUT_OD; // GPIO_MODE_OUTPUT; // GPIO_MODE_OUTPUT_OD
+  io_conf.pin_bit_mask = (1ULL<<stepPin2) | (1ULL<<dirPin2);
+  io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+  io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
+  ESP_ERROR_CHECK(gpio_config(&io_conf));
+  
+  ESP_ERROR_CHECK(gpio_set_level( stepPin2, stepLevel ));
+  ESP_ERROR_CHECK(gpio_set_level( dirPin2, dirLevel ));
 }
 
 void Motor::Reset( )
@@ -226,15 +215,6 @@ void Motor::Reset( )
   moveLength = 0;
   moveStep = 0;
   moveDuration = 0;
-}
-
-void DualMotor::Reset( )
-{
-  pinMode( stepPin2, OUTPUT );
-  digitalWrite(stepPin2, LOW );
-  pinMode( dirPin2, OUTPUT );
-  digitalWrite(dirPin2, LOW );
-  Motor::Reset( );
 }
 
 #define AVG_SAMPLE_COUNT  100
@@ -252,45 +232,34 @@ int DualMotor::GetLimit( )
   return ret;
 }
 
-void Motor::SetDirection( int d )
+bool Motor::SetDirection( int d )
 {
-  if( !reverseDir )
-  {
-    gpio_set_level( dirPin, d < 0 ? LOW : HIGH );
-    //digitalWrite( dirPin, d < 0 ? LOW : HIGH );
-  }
-  else
-  {
-    gpio_set_level( dirPin, d < 0 ? HIGH : LOW );
-    //digitalWrite( dirPin, d < 0 ? HIGH : LOW );
-  }
-  
   if( curDir != d )
   {
     curDir = d;
+    if( reverseDir ) d = -d;
+    dirLevel = d < 0 ? OD_CLOSED : OD_OPEN;
+    gpio_set_level( dirPin, dirLevel );
+    return true;
   }
+  return false;
 }
 
-void DualMotor::SetDirection( int d )
+bool DualMotor::SetDirection( int d )
 {
-  if( !reverseDir )
+  if( Motor::SetDirection( d ))
   {
-    gpio_set_level( dirPin2, d < 0 ? LOW : HIGH );
-    //digitalWrite( dirPin2, d < 0 ? LOW : HIGH );
+    gpio_set_level( dirPin2, dirLevel );
+    return true;
   }
-  else
-  {
-    gpio_set_level( dirPin2, d < 0 ? HIGH : LOW );
-    //digitalWrite( dirPin2, d < 0 ? HIGH : LOW );
-  }
-  Motor::SetDirection( d );
+  return false;  
 }
 
 uint64_t Motor::InitMove( long s, unsigned long t, uint64_t now )
 {
   int d = 1;
   
-  if( stepLevel == HIGH )
+  if( stepLevel == OD_CLOSED )
   {
     ESP_LOGE( TAG, "Previous move did not clear the pulse" );
     assert(false);
@@ -372,7 +341,7 @@ inline uint64_t IRAM_ATTR Motor::GetNextStepTime( )
 
 void Motor::PrepareNextStep( uint64_t now )
 {
-  if( stepLevel == HIGH )
+  if( stepLevel == OD_CLOSED )
   {
     nextStepTime += STEP_PULSE_US;
   }
@@ -447,16 +416,16 @@ void Motor::PrepareNextStep( uint64_t now )
 
 void IRAM_ATTR Motor::Step( )
 {
-  if( stepLevel == LOW )
+  if( stepLevel == OD_OPEN )
   {
-    gpio_set_level( stepPin, HIGH );
-    stepLevel = HIGH;
+    gpio_set_level( stepPin, OD_CLOSED );
+    stepLevel = OD_CLOSED;
     curPos += curDir;
   }
   else
   {
-    gpio_set_level( stepPin, LOW );
-    stepLevel = LOW;
+    gpio_set_level( stepPin, OD_OPEN );
+    stepLevel = OD_OPEN;
   }
 }
 
@@ -496,7 +465,7 @@ void Motor::CalibrateStart( )
 
 void DualMotor::CalibrateStart( )
 {
-  cal_state = 1;
+  Motor::CalibrateStart( );
   cal_cycle = 1;
 }
 
@@ -920,7 +889,7 @@ extern "C" {
       g_pNextMotorToStep->PrepareNextStep( edata->alarm_value );
     }
     PrepareNextStep( edata->alarm_value );
-    return false;
+    return false; // No need to yield
   }
   
   // Move the tool position by the specified # of steps for x,y,z directions.
@@ -1033,13 +1002,14 @@ extern "C" {
     
     gpio_config_t io_conf = {};
     io_conf.intr_type = GPIO_INTR_DISABLE;
-    io_conf.mode = GPIO_MODE_OUTPUT; // GPIO_MODE_OUTPUT_OD
-    io_conf.pin_bit_mask = (1ULL<<TOOL_ON_RELAY);
+    io_conf.mode = GPIO_MODE_OUTPUT;
+    io_conf.pin_bit_mask = (1ULL<<TOOL_ON_RELAY | 1ULL<<MOTOR_ENABLE);
     io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
     io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
     ESP_ERROR_CHECK(gpio_config(&io_conf));
     
-    ESP_ERROR_CHECK(gpio_set_level( TOOL_ON_RELAY, LOW ));
+    ESP_ERROR_CHECK(gpio_set_level( TOOL_ON_RELAY, HIGH ));
+    ESP_ERROR_CHECK(gpio_set_level( MOTOR_ENABLE, HIGH ));
 
     X.Reset( );
     Y.Reset( );

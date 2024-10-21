@@ -3,5 +3,6 @@ idf_component_register(SRCS
 	"network.c"
   "Motor.cpp"
   "Events.c"
+  "Limits.c"
 	INCLUDE_DIRS ".")
 

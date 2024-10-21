@@ -30,30 +30,31 @@
 //-----------------------------------------------------------------------------
 // LEFT SIDE
 //-----------
+
+#define MOTOR_X_L_DIR        (gpio_num_t)4
+#define MOTOR_X_L_STEP       (gpio_num_t)5
+#define MOTOR_X_R_DIR        (gpio_num_t)6
+#define MOTOR_X_R_STEP       (gpio_num_t)7
+#define MOTOR_Z_L_DIR        (gpio_num_t)15
+#define MOTOR_Z_L_STEP       (gpio_num_t)16
+#define MOTOR_Z_R_DIR        (gpio_num_t)17
+#define MOTOR_Z_R_STEP       (gpio_num_t)18
+#define MOTOR_Y_DIR          (gpio_num_t)8
+#define MOTOR_Y_STEP         (gpio_num_t)3
+
+#define TOOL_ON_RELAY        (gpio_num_t)11
+#define MOTOR_ENABLE         (gpio_num_t)12
+#define LIMIT_IN             (gpio_num_t)13
+#define LIMIT_OUT            (gpio_num_t)14
+
 #define ANA_INTERNAL_TEMP    A0
 #define ANA_MOTOR_VOLT       A1
 #define ANA_FAN_VOLT         A2
-// A3 : AVAILABLE
-#define LIMIT_IN             19 // A5
 
-// RIGHT SIDE
-//------------
-// 0 : UART RX
-// 1 : UART TX
-#define TOOL_ON_RELAY        (gpio_num_t)1
-#define LIMIT_OUT            (gpio_num_t)2
-#define MOTOR_X_L_DIR        (gpio_num_t)42
-#define MOTOR_X_L_STEP       (gpio_num_t)6
-#define MOTOR_Z_L_DIR        (gpio_num_t)40
-#define MOTOR_Z_L_STEP       (gpio_num_t)39
-#define MOTOR_Z_R_DIR        (gpio_num_t)38
-#define MOTOR_Z_R_STEP       (gpio_num_t)37
-#define MOTOR_X_R_DIR        (gpio_num_t)36
-#define MOTOR_X_R_STEP       (gpio_num_t)35
-#define MOTOR_Y_DIR          (gpio_num_t)5
-#define MOTOR_Y_STEP         (gpio_num_t)4
-
-
+#define LOW                  0
+#define HIGH                 1
+#define OD_OPEN              HIGH
+#define OD_CLOSED            LOW
 
 // DISPLAY_TASK_TIME
 // -----------------
@@ -99,7 +100,6 @@ bool CheckMachineIsIdle( unsigned long seq, struct sockaddr_in* source );
 bool GetAnalogCommand( unsigned long* A0, unsigned long* A1, unsigned long* A2 );
 bool GetPositionCommand( long* pX, long* pY, long *pZ, unsigned long* pS, unsigned long *pQ );
 bool MoveCommand( cmd_t* pCmd );
-bool Calibrate_Z( );
 
 #define DEBUG_UDPx
 #define DEBUG_UARTx
