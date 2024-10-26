@@ -39,6 +39,13 @@ unsigned long g_Status = 0;
 char g_UARTrxData[UART_RX_BUF_SIZE];
 char g_ACKchar = '0';
 
+extern uint32_t g_CRCErrorCount;
+extern uint32_t g_ErrorA;
+extern uint32_t g_ErrorB;
+extern uint32_t g_ErrorC;
+extern uint32_t g_BadLimitData;
+extern uint32_t g_limitState;
+
 #define DEBUG_UARTx
 
 void cnc_loop( )
@@ -46,7 +53,9 @@ void cnc_loop( )
   while( 1 )
   {
     //LCD_Refresh( );
-    vTaskDelay( 1000 / portTICK_PERIOD_MS);  
+    vTaskDelay( 1000 / portTICK_PERIOD_MS);
+    ESP_LOGI( TAG, "Crc:%lu  A:%lu  B:%lu  C:%lu   Bad:%lx   Good:%lx", 
+      g_CRCErrorCount, g_ErrorA, g_ErrorB, g_ErrorC, g_BadLimitData, g_limitState );
   } 
 }
 

@@ -14,8 +14,15 @@
 static gptimer_handle_t g_limitsTimer = NULL;
 static int g_state = 0;
 uint32_t g_limitState = 0;
+uint32_t g_CRCErrorCount = 0;
+uint32_t g_ErrorA = 0;
+uint32_t g_ErrorB = 0;
+uint32_t g_ErrorC = 0;
+uint32_t g_BadLimitData = 0;
 
 extern unsigned char crc8_table[256];
+
+static void gpio_isr_handler(void* arg);
 
 bool IRAM_ATTR limits_timer_callback(gptimer_handle_t timer, const gptimer_alarm_event_data_t *edata, void *user_data)
 {
@@ -37,6 +44,7 @@ bool IRAM_ATTR limits_timer_callback(gptimer_handle_t timer, const gptimer_alarm
       {
         // Input signal didn't stay low, stop the timer and go back to idle g_state 
         g_state = 0;
+        g_ErrorA++;
       }
       else
       {  
@@ -50,6 +58,7 @@ bool IRAM_ATTR limits_timer_callback(gptimer_handle_t timer, const gptimer_alarm
       {
         // Interrupt g_state didn't clear, stop the timer and go back to idle
         g_state = 0;
+        g_ErrorB++;
       }
       else
       {
@@ -101,6 +110,8 @@ bool IRAM_ATTR limits_timer_callback(gptimer_handle_t timer, const gptimer_alarm
           // Skip the extra clock cycle and go back to idle. The sensor
           // will timeout and retry
           g_state = 7;
+          g_CRCErrorCount++;
+          g_BadLimitData = data;
         }          
       }
       nextT = LHP;
@@ -132,6 +143,7 @@ bool IRAM_ATTR limits_timer_callback(gptimer_handle_t timer, const gptimer_alarm
   {
     ESP_ERROR_CHECK(gptimer_stop(g_limitsTimer));
     ESP_ERROR_CHECK(gptimer_set_raw_count(g_limitsTimer,0));
+    gpio_isr_handler_add(LIMIT_IN, gpio_isr_handler, (void*)NULL);
   }
   
   // No need to yield
@@ -140,10 +152,12 @@ bool IRAM_ATTR limits_timer_callback(gptimer_handle_t timer, const gptimer_alarm
 
 static void IRAM_ATTR gpio_isr_handler(void* arg)
 {
-  if( g_state == 0 )
-  {
-    gptimer_alarm_config_t alarm_config = { 0 };
-    
+  assert( g_state == 0 );
+  
+  gptimer_alarm_config_t alarm_config = { 0 };
+  
+  if( gpio_get_level( LIMIT_IN ) == LOW )
+  {    
     g_state = 1;
     // Acknowledge the interrupt g_state by driving the output low
     gpio_set_level( LIMIT_OUT, HIGH );
@@ -152,6 +166,12 @@ static void IRAM_ATTR gpio_isr_handler(void* arg)
     alarm_config.alarm_count = LHP;
     gptimer_set_alarm_action(g_limitsTimer, &alarm_config);
     gptimer_start(g_limitsTimer);
+    
+    gpio_isr_handler_remove( LIMIT_IN );
+  }
+  else
+  {
+    g_ErrorC++;
   }
 }
 
