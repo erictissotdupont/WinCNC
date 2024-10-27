@@ -460,7 +460,7 @@ BOOL BitmapProcess(HWND hWnd)
 	t2DPoint contactPos;
 	t2DPoint V;
 	t2DPoint C;
-	double Xres, Yres, a, step, dive;
+	double Xres, Yres, a, step, dive, temp;
 	int iContact;
 	char cmd[MAX_STR];
 	BOOL bCarving, bDone;
@@ -675,17 +675,18 @@ BOOL BitmapProcess(HWND hWnd)
 				case fillRows:
 					if (curPos.y + step > g_BmParams.height - g_BmParams.tool.radius)
 					{
-						step = g_BmParams.height - g_BmParams.tool.radius - curPos.y;
+						temp = g_BmParams.height - g_BmParams.tool.radius - curPos.y;
 						fillState = topRow;
 					}
+					else temp = step;
 
 					sprintf_s(cmd, sizeof(cmd), "G0 X%f Y%f\r\n",
 						g_BmParams.tool.radius - curPos.x,
-						step);
+						temp);
 					doGcode(cmd);
 
 					curPos.x = g_BmParams.tool.radius;
-					curPos.y += step;
+					curPos.y += temp;
 
 					update3DView();
 					break;
@@ -697,16 +698,17 @@ BOOL BitmapProcess(HWND hWnd)
 					if ((curPos.x + step >= g_BmParams.width - g_BmParams.tool.radius) ||
 						(g_BmParams.bHorizontalCarveOnly))
 					{
-						step = g_BmParams.width - g_BmParams.tool.radius - curPos.x;
+						temp = g_BmParams.width - g_BmParams.tool.radius - curPos.x;
 						fillState = rightColumn;
 					}
+					else temp = step;
 
 					sprintf_s(cmd, sizeof(cmd), "G0 X%f Y%f\r\n",
-						step,
+						temp,
 						g_BmParams.tool.radius - curPos.y);
 					doGcode(cmd);
 
-					curPos.x += step;
+					curPos.x += temp;
 					curPos.y = g_BmParams.tool.radius;
 
 					update3DView();
@@ -806,13 +808,17 @@ BOOL BitmapProcess(HWND hWnd)
 		}
 	}
 
+	//--------------------------------------------------------
+	// Next follow contour of the surface to smoothen the
+	// edges. Surface can be either convexe of concave.
+	// Do this multiple times for each contiguous shape.
 	if (g_BmParams.contourOrCarve == modeContourOnly ||
 		g_BmParams.contourOrCarve == modeContourAndCenter )
 	{
-		//--------------------------------------------------------
-		// Next follow contour of the surface to smoothen the
-		// edges. Surface can be either convexe of concave.
-		// Do this multiple times for each contiguous shape.
+		double outerMostMove = g_BmParams.tool.radius;
+		contactPos.x = 0;
+		contactPos.y = 0;
+
 		do
 		{
 
@@ -820,7 +826,7 @@ BOOL BitmapProcess(HWND hWnd)
 			// surface by scanning the surface in horizontal passes.
 			// It doesn't really matter where this starts.
 			iContact = 0;
-			curPos.x = g_BmParams.tool.radius;
+			curPos.x = outerMostMove;
 			curPos.y = g_BmParams.tool.radius;
 			bDone = FALSE;
 
@@ -835,11 +841,13 @@ BOOL BitmapProcess(HWND hWnd)
 				// Test the boundaries
 				if (curPos.x > (g_BmParams.width - g_BmParams.tool.radius))
 				{
-					curPos.x = g_BmParams.tool.radius;
+					curPos.x = outerMostMove;
 					curPos.y += g_BmParams.tool.radius * 2 - SMALL_OVELAP;
 					if (curPos.y > g_BmParams.height - g_BmParams.tool.radius)
 					{
-						// Done. Found no contact... no shape. Weird
+						// Bring the tool back to the origin
+						sprintf_s(cmd, sizeof(cmd), "G0 X%f Y%f\r\n", -contactPos.x, -contactPos.y);
+						doGcode(cmd);
 						break;
 					}
 				}
@@ -854,16 +862,17 @@ BOOL BitmapProcess(HWND hWnd)
 					// Is it the first edge contact of the tool with the surface?
 					if (iContact++ == 0)
 					{
-						// Save the position of the contact point so that we can
-						// determine when the tool as returned.
-						contactPos = curPos;
-						// Bring the tool where the first contact point is. Right
-						// now it's at 0,0.
-						sprintf_s(cmd, sizeof(cmd), "G0 X%f Y%f\r\n", curPos.x, curPos.y);
+						// Bring the tool where the first contact point is from it's previous
+						// location (saved in contactPos)
+						sprintf_s(cmd, sizeof(cmd), "G0 X%f Y%f\r\n", curPos.x - contactPos.x, curPos.y - contactPos.y );
 						doGcode(cmd);
 						// Lower the tool to start carving
 						sprintf_s(cmd, "G1 Z%f\r\n", -dive);
 						doGcode(cmd);
+
+						// Save the position of the contact point so that we can
+						// determine when the tool as returned.
+						contactPos = curPos;
 					}
 					else
 					{
@@ -882,10 +891,8 @@ BOOL BitmapProcess(HWND hWnd)
 							// We're done. First, go back to safe altitude
 							sprintf_s(cmd, "G0 Z%f\r\n", dive);
 							doGcode(cmd);
-							// Bring the tool back to the origin
-							sprintf_s(cmd, sizeof(cmd), "G0 X%f Y%f\r\n", -curPos.x, -curPos.y);
-							doGcode(cmd);
 
+							contactPos = curPos;
 							bDone = TRUE;
 							continue;
 						}
@@ -946,6 +953,12 @@ BOOL BitmapProcess(HWND hWnd)
 					}
 					break;
 				}
+
+				if (iContact)
+				{
+					// Update the furtest X position following the contour took us
+					if (curPos.x > outerMostMove) outerMostMove = curPos.x;
+				}
 			}
 
 			// We found one surface in this pass. Remove it from the
@@ -978,9 +991,9 @@ BOOL BitmapProcess(HWND hWnd)
 				WaitForSingleObject(hThread, INFINITE);
 				CloseHandle(hThread);
 				*/
-				iX = (int)(contactPos.x / Xres);
-				iY = (int)(contactPos.y / Yres);
-				CleanBitmap(&bm, iX, iY);
+				//iX = (int)(contactPos.x / Xres);
+				//iY = (int)(contactPos.y / Yres);
+				//CleanBitmap(&bm, iX, iY);
 			}
 
 		} while (iContact);
