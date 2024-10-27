@@ -610,6 +610,9 @@ BOOL BitmapProcess(HWND hWnd)
 		doGcode(cmd);
 	}
 
+#if 1
+	/*   OLD WAY    */
+
 	if (g_BmParams.contourOrCarve == modeCenterOnly ||
 		g_BmParams.contourOrCarve == modeContourAndCenter )
 	{
@@ -808,6 +811,8 @@ BOOL BitmapProcess(HWND hWnd)
 		}
 	}
 
+#endif
+
 	//--------------------------------------------------------
 	// Next follow contour of the surface to smoothen the
 	// edges. Surface can be either convexe of concave.
@@ -998,6 +1003,225 @@ BOOL BitmapProcess(HWND hWnd)
 
 		} while (iContact);
 	}
+
+#if 0
+
+	if (g_BmParams.contourOrCarve == modeCenterOnly ||
+		g_BmParams.contourOrCarve == modeContourAndCenter)
+	{
+		// Move to first location to be tested
+		curPos.x = g_BmParams.tool.radius;
+		curPos.y = g_BmParams.tool.radius;
+		sprintf_s(cmd, sizeof(cmd), "G0 X%f Y%f\r\n", curPos.x, curPos.y);
+		doGcode(cmd);
+		update3DView();
+
+		bDone = FALSE;
+		bCarving = FALSE;
+		C = { 0.0 , 0.0 };
+
+		// Start horizontally
+		V = { Xres, 0.0 };
+		fillState = fillRows;
+
+		// Carve in 1/2 tool radius slices minus a small bit to
+		// avoid hitting the material dead on (not sure if it does
+		// anything but it won't hurt).
+		step = g_BmParams.tool.radius - SMALL_OVELAP;
+
+		while (!bDone)
+		{
+			// Have we reached the right side edge ?
+			if ( curPos.x > (g_BmParams.width - g_BmParams.tool.radius))
+			{
+				// Back off to stay within the boundary
+				C.x -= V.x;
+				C.y -= V.y;
+				curPos.x -= V.x;
+				curPos.y -= V.y;
+
+				if (bCarving)
+				{
+					if (C.x != 0.0 || C.y != 0.0)
+					{
+						sprintf_s(cmd, sizeof(cmd), "G1 X%f Y%f\r\n", C.x, C.y);
+						doGcode(cmd);
+						C = { 0.0,0.0 };
+					}
+
+					// Move up to the next row
+					V = { 0.0, step };
+					curPos.x += V.x;
+					curPos.y += V.y;
+
+					// Have we reached the top edge ?
+					if (curPos.y > (g_BmParams.height - g_BmParams.tool.radius))
+					{
+						// Back off to stay within the boundary
+						C.x -= V.x;
+						C.y -= V.y;
+						curPos.x -= V.x;
+						curPos.y -= V.y;
+					}
+
+
+
+
+					sprintf_s(cmd, MAX_STR, "G0 Z%f\r\n", dive);
+					doGcode(cmd);
+					bCarving = FALSE;
+				}
+				else
+				{
+					if (C.x != 0.0 || C.y != 0.0)
+					{
+						sprintf_s(cmd, sizeof(cmd), "G0 X%f Y%f\r\n", C.x, C.y);
+						doGcode(cmd);
+						C = { 0.0,0.0 };
+					}
+				}
+
+				switch (fillState)
+				{
+				case fillRows:
+					if (curPos.y + step > g_BmParams.height - g_BmParams.tool.radius)
+					{
+						temp = g_BmParams.height - g_BmParams.tool.radius - curPos.y;
+						fillState = topRow;
+					}
+					else temp = step;
+
+					sprintf_s(cmd, sizeof(cmd), "G0 X%f Y%f\r\n",
+						g_BmParams.tool.radius - curPos.x,
+						temp);
+					doGcode(cmd);
+
+					curPos.x = g_BmParams.tool.radius;
+					curPos.y += temp;
+
+					update3DView();
+					break;
+
+				case fillColumns:
+					// Either we've reached the right side column or we don't want
+					// to carve vertically. Going straigh here will take the tool to
+					// the right most column to clean the edge.
+					if ((curPos.x + step >= g_BmParams.width - g_BmParams.tool.radius) ||
+						(g_BmParams.bHorizontalCarveOnly))
+					{
+						temp = g_BmParams.width - g_BmParams.tool.radius - curPos.x;
+						fillState = rightColumn;
+					}
+					else temp = step;
+
+					sprintf_s(cmd, sizeof(cmd), "G0 X%f Y%f\r\n",
+						temp,
+						g_BmParams.tool.radius - curPos.y);
+					doGcode(cmd);
+
+					curPos.x += temp;
+					curPos.y = g_BmParams.tool.radius;
+
+					update3DView();
+					break;
+
+				case topRow:
+				case rightColumn:
+					// Bring the tool back to the origin...
+					if (bCarving)
+					{
+						// ... at a safe altitude if needed
+						sprintf_s(cmd, MAX_STR, "G0 Z%f\r\n", dive);
+						doGcode(cmd);
+						bCarving = FALSE;
+					}
+					sprintf_s(cmd, sizeof(cmd), "G0 X%f Y%f\r\n", -curPos.x, -curPos.y);
+					doGcode(cmd);
+
+					if (fillState == topRow)
+					{
+						fillState = fillColumns;
+						curPos.x = g_BmParams.tool.radius;
+						curPos.y = g_BmParams.tool.radius;
+						V = { 0.0 , Yres };
+						sprintf_s(cmd, sizeof(cmd), "G0 X%f Y%f\r\n", curPos.x, curPos.y);
+						doGcode(cmd);
+					}
+					else
+					{
+						bDone = TRUE;
+						continue;
+					}
+
+					update3DView();
+					break;
+				}
+			}
+
+			// Convert the current position in pixels
+			iX = (int)(curPos.x / Xres);
+			iY = (int)(curPos.y / Yres);
+
+			switch (TestToolPosition(&bm, iX, iY, tool, toolPtCnt, edge, edgePtCnt, &a))
+			{
+			case resultNoOverlap:
+				if (!bCarving)
+				{
+					if (C.x != 0.0 || C.y != 0.0)
+					{
+						sprintf_s(cmd, sizeof(cmd), "G0 X%f Y%f\r\n", C.x, C.y);
+						doGcode(cmd);
+						C = { 0.0, 0.0 };
+					}
+					sprintf_s(cmd, MAX_STR, "G1 Z%f\r\n", -dive);
+					doGcode(cmd);
+					bCarving = TRUE;
+
+					update3DView();
+				}
+				C.x += V.x;
+				C.y += V.y;
+				curPos.x += V.x;
+				curPos.y += V.y;
+				break;
+
+			case resultEdgeContact:
+			case resultToolPartialOverlap:
+			case resultToolHalfOverlap:
+			case resultToolFullOverlap:
+				if (bCarving)
+				{
+					// Back off to avoid denting the edges of the shape
+					C.x -= V.x;
+					C.y -= V.y;
+					curPos.x -= V.x;
+					curPos.y -= V.y;
+					// Execute the commited move
+					if (C.x != 0.0 || C.y != 0.0)
+					{
+						sprintf_s(cmd, sizeof(cmd), "G1 X%f Y%f\r\n", C.x, C.y);
+						doGcode(cmd);
+						C = { 0.0, 0.0 };
+					}
+					// Rise the tool to stop carving
+					sprintf_s(cmd, MAX_STR, "G0 Z%f\r\n", dive);
+					doGcode(cmd);
+					bCarving = FALSE;
+
+					update3DView();
+				}
+				C.x += V.x;
+				C.y += V.y;
+				curPos.x += V.x;
+				curPos.y += V.y;
+				break;
+			}
+		}
+	}
+
+#endif
+
+
 
 	// Return to zero altitude, turn OFF spindle (if needed)
 	sprintf_s(cmd, "G1 Z%f %s\r\n", 

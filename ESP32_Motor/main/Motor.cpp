@@ -915,15 +915,28 @@ extern "C" {
     }
     else
     {
-      uint64_t next_alarm = now;
-      
       // No Movement means "dwell"
       if( pCmd->duration > 0 )
       {
         // Check that the dwelve time is at least the duration of a step pulse.
         if( pCmd->duration < STEP_PULSE_US ) pCmd->duration = STEP_PULSE_US;
-        next_alarm += pCmd->duration;
+        
+        X.InitMove( 0, 0, now );
+        Y.InitMove( 0, 0, now );
+        Z.InitMove( 0, 0, now );
         g_pNextMotorToStep = NULL; 
+        
+        gptimer_alarm_config_t alarm_config1 = {
+          .alarm_count = now + pCmd->duration,
+          .reload_count = 0,
+          .flags = 0,
+        };
+
+        gptimer_event_callbacks_t cbs = {
+          .on_alarm = movement_timer_callback,
+        };
+        ESP_ERROR_CHECK(gptimer_register_event_callbacks(g_motorTimer, &cbs, NULL));
+        gptimer_set_alarm_action(g_motorTimer, &alarm_config1);
         
         // If this was started from idle,
         if( now == 0 )
@@ -944,6 +957,18 @@ extern "C" {
         Z.CalibrateStart( now );
         
         PrepareNextStep( now );
+      }
+      else
+      {
+        cmd_t cmd;
+        BaseType_t xTaskWokenByReceive = pdFALSE;
+        
+                     
+        // Pull next move command from the queue
+        if( xQueueReceiveFromISR( g_cmd_queue, &cmd, &xTaskWokenByReceive ))
+        {
+          MotorMove( &cmd, now );
+        }
       }
     }
   }

@@ -54,8 +54,11 @@ void cnc_loop( )
   {
     //LCD_Refresh( );
     vTaskDelay( 1000 / portTICK_PERIOD_MS);
-    ESP_LOGI( TAG, "Crc:%lu  A:%lu  B:%lu  C:%lu   Bad:%lx   Good:%lx", 
-      g_CRCErrorCount, g_ErrorA, g_ErrorB, g_ErrorC, g_BadLimitData, g_limitState );
+    if( g_CRCErrorCount ) 
+    {
+      ESP_LOGI( TAG, "Crc:%lu  A:%lu  B:%lu  C:%lu   Bad:%lx   Good:%lx", 
+        g_CRCErrorCount, g_ErrorA, g_ErrorB, g_ErrorC, g_BadLimitData, g_limitState );
+    }
   } 
 }
 

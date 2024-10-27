@@ -180,7 +180,7 @@ tStatus doMove( void(*posAtStep)(t3DPoint*,int,int,void*), int stepCount, double
 	x = calculateMove( &XMotor, End.x );
     y = calculateMove( &YMotor, End.y );
     z = calculateMove( &ZMotor, End.z );
-    s = getSpindleState( );
+	s = ( getSpindleState() == 3 ) ? 1 : 0;
 
 	if (g_pSimulation)
 	{
