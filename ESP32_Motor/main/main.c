@@ -30,6 +30,7 @@
 static const char* TAG = "main";
 
 uint64_t g_startTime = 0;
+
 unsigned long g_Status = 0;
 
 #define UART_TXD_PIN 			(GPIO_NUM_33)

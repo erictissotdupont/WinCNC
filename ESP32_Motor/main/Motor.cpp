@@ -11,7 +11,6 @@ extern "C" {
   #include "CNC.h"
 }
 
-uint32_t g_error = WARNING_CALIBRATION;
 extern uint32_t g_limitState;
 int g_debug[MAX_DEBUG];
 
@@ -21,6 +20,10 @@ int g_debug[MAX_DEBUG];
 #define MIN_SPEED         15L
 #define MAX_SPEED         150L
 #define NO_STEP_TIME      (-1ULL)
+
+#define REDUCED_RAPID_POSITIONING_SPEED   0x80000000l
+#define CALIBRATION_REVERSED              0x40000000l
+#define DIRECTION_REVERSED                0x20000000l
 
 // Calculate the speed ramp for G0 accel / decel phases 
 #define STEP_FROM_RAMP( Min, Max, t ) ( Min - ((( Min - Max ) * t ) >> RAMP_SHIFT))
@@ -54,7 +57,6 @@ protected :
   gpio_num_t dirPin;          // GPIO for direction
   int reverseDir;             // Reverse the motor direction
   uint32_t endMask;           // Bitmask for limit detection
-  unsigned int limitFlag;     // Flags to set when limit is reached
     
   long curDir;                // Current movement direction (+/- 1)
   unsigned long moveLength;   // Movement total length in steps
@@ -116,17 +118,14 @@ public:
 //-----------------------------------------------------------------
 //                   Step IO,  Direction IO,  EndMsk,  Configuration flags,               StepByInch           Calibration
 DualMotor X ( MOTOR_X_L_STEP, MOTOR_X_L_DIR,  0x0004,
-              MOTOR_X_R_STEP, MOTOR_X_R_DIR,  0x0008,  ERROR_LIMIT_X |
-                                                       CALIBRATION_REVERSED |
+              MOTOR_X_R_STEP, MOTOR_X_R_DIR,  0x0008,  CALIBRATION_REVERSED |
                                                        DIRECTION_REVERSED |
                                                        REDUCED_RAPID_POSITIONING_SPEED,   1.0f/X_AXIS_RES,     0.009f/X_AXIS_RES, 0.001f );
 
-Motor     Y ( MOTOR_Y_STEP,    MOTOR_Y_DIR,   0x0010,  ERROR_LIMIT_Y |
-                                                       CALIBRATION_REVERSED,              1.0f/Y_AXIS_RES );
+Motor     Y ( MOTOR_Y_STEP,    MOTOR_Y_DIR,   0x0010,  CALIBRATION_REVERSED,              1.0f/Y_AXIS_RES );
 
 DualMotor Z ( MOTOR_Z_L_STEP,  MOTOR_Z_L_DIR, 0x0001,
-              MOTOR_Z_R_STEP,  MOTOR_Z_R_DIR, 0x0002,  ERROR_LIMIT_Z |
-                                                       DIRECTION_REVERSED |
+              MOTOR_Z_R_STEP,  MOTOR_Z_R_DIR, 0x0002,  DIRECTION_REVERSED |
                                                        REDUCED_RAPID_POSITIONING_SPEED,   1.0f/Z_AXIS_RES,    0.22197f / Z_AXIS_RES, 0.0277f * 2.0f );
 
 
@@ -141,7 +140,6 @@ Motor::Motor( gpio_num_t sp, gpio_num_t dp, uint32_t em, unsigned long flags, un
   dirPin = dp;
   endMask = em;
   reverseDir = flags & DIRECTION_REVERSED;
-  limitFlag = flags & ERROR_FLAG_MASK;
   stepByInch = sbi;
   nextStepTime = NO_STEP_TIME;
 
@@ -894,7 +892,7 @@ extern "C" {
   static void IRAM_ATTR MotorMove( cmd_t *pCmd, uint64_t now )
   { 
     g_MoveStart = now;
-    
+        
     gpio_set_level( TOOL_ON_RELAY, pCmd->flags & CMD_FLAG_SPINDLE_ON );
       
     // Is this a movement command
@@ -958,12 +956,16 @@ extern "C" {
         
         PrepareNextStep( now );
       }
-      else
+      else // No movement commands
       {
         cmd_t cmd;
         BaseType_t xTaskWokenByReceive = pdFALSE;
         
-                     
+        if( pCmd->flags & CMD_CALIBRATION_COMPLETE )
+        {
+          g_Status &= ~STATUS_NEED_CALIBRATION;
+        }
+
         // Pull next move command from the queue
         if( xQueueReceiveFromISR( g_cmd_queue, &cmd, &xTaskWokenByReceive ))
         {

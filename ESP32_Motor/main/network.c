@@ -105,7 +105,7 @@ void ResetStatus( )
   uint16_t testEndian = 0x1234;
   
   // By default, zero
-  g_Status = 0;
+  g_Status = STATUS_GOT_POSITION | STATUS_NEED_CALIBRATION;
   
   // Test the system's endianness
   if( *((char*)&testEndian) == 0x34 )
@@ -302,14 +302,19 @@ tCnCCmdStatus MovementCommand( unsigned long seq, char* pt, struct sockaddr_in* 
 bool Calibrate_Z( )
 {
   cmd_t cmd = { 0 };
-  int nackCount = 0;
-  static uint64_t timeSinceLastNAK = 0;
-    
+  bool bStatus = false;
+ 
   cmd.flags = CMD_FLAG_CALIBRATION;
-
-  return( xQueueSend( g_cmd_queue, 
-                      &cmd, 
-                      nackCount == 0 ? 0 : ( NACK_INTERVAL_MS / portTICK_PERIOD_MS )) != pdPASS );
+  if( xQueueSend( g_cmd_queue, 
+                  &cmd, 
+                  1000 / portTICK_PERIOD_MS ) == pdPASS )
+  {                      
+    cmd.flags = CMD_CALIBRATION_COMPLETE;
+    bStatus = (xQueueSend( g_cmd_queue, 
+                           &cmd, 
+                           1000 / portTICK_PERIOD_MS ) != pdPASS );
+  }
+  return bStatus;
 }
 
 void receiverTask(void *arg)
@@ -576,57 +581,22 @@ void broadcastTask(void* arg)
     }
     else
     {
-      long x,y,z;
-      unsigned long S,Q;
       unsigned long A0,A1,A2;
       
-      x = y = z = 0;
-      S = Q = WARNING_CALIBRATION;
       A0 = A1 = A2 = 0;
-      g_Status |= STATUS_GOT_POSITION;
       
-#if 0             
-      GetAnalogCommand( &A0, &A1, &A2 );
-      if( !GetPositionCommand( &x, &y, &z, &S, &Q ))
-      {
-        ESP_LOGE( TAG, "Failed to get current position" );
-        g_Status &= ~STATUS_GOT_POSITION;
-      }
-      else
-      {          
-        if( Q == 0 && uxQueueMessagesWaiting( g_cmd_queue ) == 0 )
-        {
-          if( g_xPos != x || g_yPos != y || g_zPos != z )
-          {
-            ESP_LOGW( TAG, "Position forced from %ld,%ld,%ld to %ld,%ld,%ld",
-              g_xPos, g_yPos, g_zPos,
-              x,y,z );
-              
-            g_xPos = x;
-            g_yPos = y;
-            g_zPos = z;
-          }
-          g_Status |= STATUS_GOT_POSITION;
-        }           
-        else
-        {
-          ESP_LOGW( TAG, "Queues are not empty" );
-        }          
-      }      
-#endif   
-
       MotorGetPosition( &g_xPos, &g_yPos, &g_zPos );
   
       if( g_broadcastAddr.sin_addr.s_addr != 0 )
       {
         char statusmsg[64];
         
-        sprintf( statusmsg, "CNC,%lu,%ld,%ld,%ld,%lx,%lx,%ld,%ld,%ld",
+        //                        Seq  X   Y   Z Stat  A   B   C
+        sprintf( statusmsg, "CNC,%lu,%ld,%ld,%ld,%lx,%ld,%ld,%ld",
           g_NextSeq,
           g_xPos,
           g_yPos,
           g_zPos,
-          S,
           g_Status,
           A0,
           A1,

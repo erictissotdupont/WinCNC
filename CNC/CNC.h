@@ -16,7 +16,7 @@
 
 #include "resource.h"
 #include "status.h"
-
+#include "..\Status.h"
 
 typedef struct
 {

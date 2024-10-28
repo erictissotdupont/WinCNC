@@ -46,16 +46,7 @@ long g_actualX,g_actualY,g_actualZ;
 // various error condition of the CNC
 unsigned short g_errorStatusFlags = 0;
 
-// Definition of the bits in the value returned by CNC "Status" (S)
-#define ERROR_LIMIT         0x00000001
-#define ERROR_NUMBER        0x00000002
-#define ERROR_SYNTAX        0x00000004
-#define ERROR_MATH          0x00000008
-#define ERROR_COMM          0x00000010
-
-extern unsigned long g_CNC_Status;
-
-#define ERROR_CALIBRATION   0x00010000
+extern unsigned long g_Status;
 
 // The values returned by the answer of the debug command
 // Those are NOT fetched by the release of the code.
@@ -459,11 +450,11 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		{
 			WCHAR msg[MAX_PATH];
 			wsprintf(msg, L"CNC in error state 0x%02X (", g_errorStatusFlags);
-			if (g_errorStatusFlags & ERROR_LIMIT) wcscat_s(msg, MAX_PATH, L" Limit");
-			if( g_errorStatusFlags & ERROR_NUMBER ) wcscat_s(msg, MAX_PATH, L" Number");
-			if( g_errorStatusFlags & ERROR_SYNTAX ) wcscat_s(msg, MAX_PATH, L" Syntax");
-			if( g_errorStatusFlags & ERROR_MATH   ) wcscat_s(msg, MAX_PATH, L" Math");
-			if( g_errorStatusFlags & ERROR_COMM   ) wcscat_s(msg, MAX_PATH, L" Comm");
+			if (g_errorStatusFlags & STATUS_LIMIT) wcscat_s(msg, MAX_PATH, L" Limit");
+			if( g_errorStatusFlags & STATUS_NUMBER) wcscat_s(msg, MAX_PATH, L" Number");
+			if( g_errorStatusFlags & STATUS_SYNTAX) wcscat_s(msg, MAX_PATH, L" Syntax");
+			if( g_errorStatusFlags & STATUS_MATH) wcscat_s(msg, MAX_PATH, L" Math");
+			if( g_errorStatusFlags & STATUS_COMM) wcscat_s(msg, MAX_PATH, L" Comm");
 			wcscat_s(msg, MAX_PATH, L" ) \r\nClear error state?");
 
 			if (MessageBox(hMainWindow,
@@ -477,7 +468,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		}
 		else if( status == retSuccess )
 		{
-			if (g_CNC_Status == ERROR_CALIBRATION)
+			if (g_Status & STATUS_NEED_CALIBRATION)
 			{
 				if (MessageBox(hMainWindow, 
 					L"CNC position not calibrated. Do you want to initiate the calibration procedure now?",

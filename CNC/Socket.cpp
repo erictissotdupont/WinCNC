@@ -80,11 +80,7 @@ long g_CncX;
 long g_CncY;
 long g_CncZ;
 
-#define STATUS_LITLE_ENDIAN   0x80000000
-#define STATUS_GOT_POSITION   0x40000000
-
 unsigned long g_Status;
-unsigned long g_CNC_Status;
 
 unsigned long g_TXcount = 0;
 unsigned long g_RXcount = 0;
@@ -484,6 +480,7 @@ void listen( SOCKET s )
 		if (msg[cnt - 1] != 0)
 		{
 			OutputDebugStringA( __FUNCTION__"::Msg is not zero terminated.");
+			if (cnt >= OUT_MSG_BUF_SIZE) cnt = OUT_MSG_BUF_SIZE - 1;
 			msg[cnt] = 0;
 		}
 
@@ -777,16 +774,14 @@ DWORD listenerThread(PVOID pParam)
 		if (strncmp(msg, "CNC,", 4 ) == 0)
 		{
 			unsigned long seq;
-			unsigned long S;
 			long x, y, z;
 
-			if (sscanf_s(msg + 4, "%lu,%ld,%ld,%ld,%lx,%lx",
+			if (sscanf_s(msg + 4, "%lu,%ld,%ld,%ld,%lx",
 				&seq,
 				&x, &y, &z,
-				&g_CNC_Status,
-				&g_Status ) != 6)
+				&g_Status ) != 5)
 			{
-				// Malformed message
+				// Ignore malformed message
 			}
 			else
 			{
