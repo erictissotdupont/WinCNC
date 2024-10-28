@@ -104,15 +104,13 @@ private:
 
 public:
   virtual void Pulse( bool on ) override;
+  void PulseLeft( bool on );
+  void PulseRight( bool on );
   virtual bool SetDirection( int d )override;
-  virtual int GetLimit( )override;
+  virtual int GetLimit( ) override;
   virtual void CalibrateTask( uint64_t now ) override;
-  
-  void StepL( );
-  void StepR( );
-  
-  
-  };
+
+};
 
 // Instantiation and configuration of the stepper motor controlers.
 //-----------------------------------------------------------------
@@ -201,7 +199,7 @@ DualMotor::DualMotor( gpio_num_t sp, gpio_num_t dp, uint32_t em, gpio_num_t sp2,
   io_conf.mode = GPIO_MODE_OUTPUT_OD; // GPIO_MODE_OUTPUT_OD; // GPIO_MODE_OUTPUT; // GPIO_MODE_OUTPUT_OD
   io_conf.pin_bit_mask = (1ULL<<stepPin2) | (1ULL<<dirPin2);
   io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
-  io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
+  io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
   ESP_ERROR_CHECK(gpio_config(&io_conf));
   
   ESP_ERROR_CHECK(gpio_set_level( stepPin2, OD_OPEN ));
@@ -436,22 +434,15 @@ void IRAM_ATTR DualMotor::Pulse( bool on )
   gpio_set_level( stepPin2, on ? OD_CLOSED : OD_OPEN );
 }
 
-void DualMotor::StepL( )
+void DualMotor::PulseLeft( bool on )
 {
-  /*
-  *stepSetReg = stepPinMask;
-  delayMicroseconds(100);
-  *stepClrReg = stepPinMask;
-  */
+  // Call the parent call so that only the left motor gets the pulse
+  Motor::Pulse( on );
 }
 
-void DualMotor::StepR( )
+void DualMotor::PulseRight( bool on )
 {
-  /*
-  *step2SetReg = step2PinMask;
-  delayMicroseconds(100);
-  *step2ClrReg = step2PinMask;
-  */
+  gpio_set_level( stepPin2, on ? OD_CLOSED : OD_OPEN );
 }
 
 long Motor::GetPos( )
@@ -570,17 +561,14 @@ void Motor::CalibrateTask( uint64_t now )
 void DualMotor::CalibrateTask( uint64_t now )
 {
   unsigned int p;
-  
-  // TEMP : DISABLE DUAL MOTOR CALIBRATION
-  cal_state = 0;
-  
+    
   switch( cal_state )
   {
     default:
       cal_state = 0; // Idle
       nextStepTime = NO_STEP_TIME;
       break;
-/*
+
     case 1 : // Started
       if( GetLimit( ) != 0 )
       {
@@ -593,27 +581,21 @@ void DualMotor::CalibrateTask( uint64_t now )
       else
       {
         SetDirection( cal_toward ); // Up
-        cal_state = 3;
+        cal_state = 4;
         cal_count = cal_offset;
         cal_delta = 0;
       }
       nextStepTime = now + CAL_PAUSE;
       break;
       
-    case 2 :
-      Pulse( 1 );
-      nextStepTime = now + STEP_PULSE_US;
-      cal_state = 3;
-      break;
-
-    case 3 : // Move until both sided are away from the end plus some
-      Pulse( 0 );
+    case 2 : // Move until both sided are away from the end plus some
       p = GetLimit( );
       if( p != 0 || cal_count != 0 )
       {
-        cal_state = 2;
+        Pulse( 1 );
+        cal_state = 3;
         if( p == 0 ) cal_count--;
-        nextStepTime = now + CAL_STEP_SPEED;
+        nextStepTime = now + STEP_PULSE_US;
       }
       else
       {
@@ -624,6 +606,12 @@ void DualMotor::CalibrateTask( uint64_t now )
         cal_delta = 0;
       }
       break;
+      
+    case 3 :
+      Pulse( 0 );
+      nextStepTime = now + CAL_STEP_SPEED;
+      cal_state = 2;
+      break;
 
     case 4 : // Move towards the sensors and calibrate
       p = GetLimit( );
@@ -633,15 +621,16 @@ void DualMotor::CalibrateTask( uint64_t now )
         {
           if(( p & 1 ) == 1 && cal_count > 0 ) cal_count--;
           if(( p & 2 ) == 2 ) cal_delta++;
-          StepL( );
+          PulseLeft( 1 );
         } 
         if(( p & 2 ) == 0 || cal_count < 0 )
         {
           if(( p & 2 ) == 2 && cal_count < 0 ) cal_count++;
           if(( p & 1 ) == 1 ) cal_delta--;
-          StepR( );
+          PulseRight( 1 );
         }
-        nextStepTime = now + CAL_STEP_SPEED * cal_cycle;
+        nextStepTime = now + STEP_PULSE_US;
+        cal_state = 5;
         cal_stall = 100;
       }
       else
@@ -650,67 +639,70 @@ void DualMotor::CalibrateTask( uint64_t now )
         {
           nextStepTime = now + CAL_STEP_SPEED; 
           cal_stall--; 
-          // Faking the next step being down so that looping here
-          // will not cause spurious steps.
-          stepLevel = OD_CLOSED;
         }
         else
         {
-          cal_delta = cal_delta + cal_offset;
-
-          // Calculate as if Left axis was slanted further away
-          cal_dR = abs(cal_delta) * (cal_R - 1.0f) / (2.0f - ( 1.0f / cal_R )); // Positive (correction is to move away on the right side)
-          cal_dL = (abs(cal_delta) * cal_R) - cal_dR; // Negative (correction is to move toward on the left side)
-
-          //if( cal_dR == 0 && cal_dL == 0 )
-          if( abs(cal_delta) < 2 )
+          if( cal_cycle == 1 )
           {
-            // Done! We're calibrated
-            cal_state = 0;
+            cal_cycle = 3;
+            cal_state = 1;
+            nextStepTime = now + CAL_PAUSE;
           }
           else
-          {              
-            if( cal_delta < 0 ) // Right was actually further away
+          {
+            cal_delta = cal_delta + cal_offset;
+
+            // Calculate as if Left axis was slanted further away
+            cal_dR = abs(cal_delta) * (cal_R - 1.0f) / (2.0f - ( 1.0f / cal_R )); // Positive (correction is to move away on the right side)
+            cal_dL = (abs(cal_delta) * cal_R) - cal_dR; // Negative (correction is to move toward on the left side)
+
+            //if( cal_dR == 0 && cal_dL == 0 )
+            if( abs(cal_delta) < 2 )
             {
-              // Then swap the axis corrections
-              long tmp = cal_dR;
-              cal_dR = cal_dL;
-              cal_dL = tmp;
+              // Done! We're calibrated
+              cal_state = 0;
             }
+            else
+            {              
+              if( cal_delta < 0 ) // Right was actually further away
+              {
+                // Then swap the axis corrections
+                long tmp = cal_dR;
+                cal_dR = cal_dL;
+                cal_dL = tmp;
+              }
 
-            // Serial.printf("D:%ld dL:%ld dR:%ld\n", cal_delta, cal_dL, cal_dR );
+              // Serial.printf("D:%ld dL:%ld dR:%ld\n", cal_delta, cal_dL, cal_dR );
 
-            SetDirection( cal_away );
-            cal_state = 6;
-            nextStepTime = now + CAL_PAUSE;
+              SetDirection( cal_away );
+              cal_state = 6;
+              nextStepTime = now + CAL_PAUSE;
+            }
           }
         }
       }
       break;
       
     case 5 :
-      Pulse( 0 );
-      nextStepTime = now + STEP_PULSE_US;
+      PulseLeft( 0 );
+      PulseRight( 0 );
+      nextStepTime = now + CAL_STEP_SPEED * ( 1 << ( cal_cycle - 1));
       cal_state = 4;
       break;
       
-    case 6 :
-      Step( );
+    case 6 : // Correction of "d1" which is away from sensor on the opposite side which was furthest
       nextStepTime = now + STEP_PULSE_US;
-      cal_state = 7;
-      break;
-
-    case 7 : // Correction of "d1" which is away from sensor on the opposite side which was furthest
-      nextStepTime = now + CAL_STEP_SPEED;
       if( cal_dR > 0 )
       {
-        StepR( );
+        PulseRight( 1 );
         cal_dR--;
+        cal_state = 7;
       }
       else if( cal_dL > 0 )
       {
-        StepL( );
+        PulseLeft( 1 );
         cal_dL--;
+        cal_state = 7;
       }
       else
       {
@@ -720,23 +712,26 @@ void DualMotor::CalibrateTask( uint64_t now )
       }
       break;
       
-    case 8 :
-      Step( );
-      nextStepTime = now + STEP_PULSE_US;
-      cal_state = 9;
-      break;
-
-    case 9 : // Correction of "d2" which is towards the sensor on the same side which was furthest
+    case 7 :
+      PulseLeft( 0 );
+      PulseRight( 0 );
       nextStepTime = now + CAL_STEP_SPEED;
+      cal_state = 6;
+      break;
+      
+    case 8 : // Correction of "d2" which is towards the sensor on the same side which was furthest
+      nextStepTime = now + STEP_PULSE_US;
       if( cal_dR < 0 )
       {
-        StepR( );
+        PulseRight( 1 );
         cal_dR++;
+        cal_state = 9;
       }
       else if( cal_dL < 0 )
       {
-        StepL( );
+        PulseLeft( 1 );
         cal_dL++;
+        cal_state = 9;
       }
       else
       {
@@ -747,29 +742,34 @@ void DualMotor::CalibrateTask( uint64_t now )
       }
       break;
       
-    case 10 :
-      Step( );
-      nextStepTime = now + STEP_PULSE_US;
-      cal_state = 9;
+    case 9 :
+      PulseLeft( 0 );
+      PulseRight( 0 );
+      nextStepTime = now + CAL_STEP_SPEED;
+      cal_state = 8;
       break;
-
-    case 11 :
+      
+    case 10 :
       if( cal_count > 0 )
       {
         cal_count--;
-        StepL( );
-        StepR( );
-        nextStepTime = now + CAL_STEP_SPEED;
+        Pulse( 1 );
+        nextStepTime = now + STEP_PULSE_US;
+        cal_state = 11;
       }
       else
       {
         // Let's start over. The process should end when cal_delta is small enough
         cal_state = 1;
-        cal_cycle++;
+        //cal_cycle++;
       }
       break;
       
-  */   
+    case 11 :
+      Pulse( 0 );
+      nextStepTime = now + CAL_STEP_SPEED;
+      cal_state = 10;
+      break; 
   }
 }
 
@@ -1037,7 +1037,7 @@ extern "C" {
     io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
     ESP_ERROR_CHECK(gpio_config(&io_conf));
     
-    ESP_ERROR_CHECK(gpio_set_level( TOOL_ON_RELAY, HIGH ));
+    ESP_ERROR_CHECK(gpio_set_level( TOOL_ON_RELAY, LOW ));
     ESP_ERROR_CHECK(gpio_set_level( MOTOR_ENABLE, HIGH ));
 
     X.Reset( );
