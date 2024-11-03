@@ -253,13 +253,29 @@ typedef enum {
 BOOL GetPixel(BITMAP* bm, int x, int y)
 {
 	unsigned char* pt;
-	// Test if the point is within the bitmap
-	if (x < 0 || y < 0 || x >= bm->bmWidth || y >= bm->bmHeight) return FALSE;
+	// Test if the point is within the bitmap. Return TRUE as to create a boundary around
+	// the carving surface the tool will contour
+	if (x < 0 || y < 0 || x >= bm->bmWidth || y >= bm->bmHeight) return TRUE;
 	// Move pointer to byte that contains this pixel
 	//pt = (unsigned char*)bm->bmBits + (y * bm->bmWidthBytes) + (x / 8);
 	pt = GET_BYTE(bm->bmBits, bm->bmWidthBytes, x, y);
 	// Mask pixel in the byte
 	return (*pt & GET_MASK( x )) == 0;
+}
+
+unsigned long SetPixel(BITMAP* bm, int x, int y)
+{
+	long carved = 0;
+	unsigned char* pt;
+	// Test if the point is within the bitmap
+	if (x < 0 || y < 0 || x >= bm->bmWidth || y >= bm->bmHeight) return 0;
+	// Move pointer to byte that contains this pixel
+	//pt = (unsigned char*)bm->bmBits + (y * bm->bmWidthBytes) + (x / 8);
+	pt = GET_BYTE(bm->bmBits, bm->bmWidthBytes, x, y);
+	if (*pt & GET_MASK(x)) carved = 1;
+	// Mask pixel in the byte
+	*pt &= ~GET_MASK(x);
+	return carved;
 }
 
 BITMAP* g_bm;
@@ -352,7 +368,7 @@ void CleanBitmap( BITMAP* bm, int x, int y )
 }
 
 
-void AddPoint(int x, int y, t2DintPoint* list, int* count, int max)
+void AddPoint(int x, int y, t2DintPoint* list, unsigned long* count, unsigned long max)
 {
 	if (*count + 4 >= max)
 	{
@@ -446,15 +462,774 @@ typedef enum {
 	rightColumn
 } tFillState;
 
+
+
+typedef struct {
+	BITMAP originalBM;
+	BITMAP previousBM;
+	BITMAP halfCarvedBM;
+	BITMAP fullCarvedBM;
+
+	BITMAP* pTestedBM;
+	BITMAP* pFullCarved;
+
+	long iX, iY; // Current active position
+	long tX, tY; // Last tested position
+	double Xres, Yres;
+
+	unsigned long toolRadiusInPixels;
+
+	t2DintPoint* tool;
+	unsigned long toolPtCnt;
+	t2DintPoint* edge;
+	unsigned long edgePtCnt;
+	t2DintPoint* halfTool;
+	unsigned long halfToolPtCount;
+
+	BOOL bCleanup;
+	BOOL bCarving;
+
+	unsigned long carvingCount;
+	double totalTravelDistance;
+	double totalCarvingDistance;
+
+
+} CarvingContext_t;
+
+tStatus GCode(const char* szFormat, ...)
+{
+	va_list ptr;
+	tStatus ret;
+	char buffer[MAX_STR];
+	va_start(ptr, szFormat);
+	vsprintf_s(buffer, MAX_STR, szFormat, ptr);
+
+	if (strlen(buffer) >= 2 && (buffer[strlen(buffer) - 2] != '\r' || buffer[strlen(buffer) - 1] != '\n'))
+	{
+		strcat_s(buffer, "\r\n");
+	}
+
+	ret = doGcode(buffer);
+	va_end(ptr);
+	return ret;
+}
+
+toolPosResult_t TestToolPosition(CarvingContext_t *pCtx, int x, int y, double* tangeant)
+{
+	float sX = 0.0;
+	float sY = 0.0;
+	int tCount = 0;
+
+	for (int i = 0; i < pCtx->toolPtCnt; i++)
+	{
+		int dX = x + pCtx->tool[i].x;
+		int dY = y + pCtx->tool[i].y;
+
+		if (GetPixel(pCtx->pTestedBM, dX, dY ))
+		{
+			tCount++;
+		}
+	}
+
+	if (tCount >= pCtx->toolPtCnt) return resultToolFullOverlap;
+	if (tCount >= (pCtx->toolPtCnt / 2)) return resultToolHalfOverlap;
+	if (tCount > 0) return resultToolPartialOverlap;
+
+	for (int i = 0; i < pCtx->edgePtCnt; i++)
+	{
+		int dX = x + pCtx->edge[i].x;
+		int dY = y + pCtx->edge[i].y;
+
+		if ( GetPixel(pCtx->pTestedBM, dX, dY ))
+		{
+			sX += pCtx->edge[i].x;
+			sY += pCtx->edge[i].y;
+			tCount++;
+		}
+	}
+	if (tCount)
+	{
+		double a;
+		if (sX != 0.0)
+		{
+			a = atan(sY / sX);
+			// Results of atan( ) are +/- PI/2. 
+			// Adjust angle when X is negative
+			if (sX < 0) a += PI;
+		}
+		else
+		{
+			// If sX is zero, the angle is either +90 or
+			// -90 degree depending on the sign of y 
+			if (sY > 0)
+				a = PI / 2.0;
+			else
+				a = (3.0 * PI) / 2.0;
+		}
+		// Make sure all angle are positive so that the
+		// average angle is correct
+		if (a < 0.0)
+		{
+			a += 2.0 * PI;
+		}
+		*tangeant = a;
+		return resultEdgeContact;
+	}
+	else
+	{
+		return resultNoOverlap;
+	}
+}
+
+void FollowPath(CarvingContext_t* pCtx, int iX, int iY, double tangeant)
+{
+	int dX, dY;
+	int contactX = iX;
+	int contactY = iY;
+	int contactCount = 0;
+	toolPosResult_t res;
+	bool bDone = false;
+
+	do
+	{
+		// The direction to follow the contour is 90 degrees
+		// from the direction of the average contact points
+		double a = tangeant + (PI / 2.0);
+		int step;
+		do
+		{
+			step = 0;
+			do
+			{
+				step++;
+				dX = cos(a) * step;
+				dY = sin(a) * step;
+
+				res = TestToolPosition( pCtx, iX + dX, iY + dY, &tangeant);
+
+				// Check if we got back to the starting point
+				if (contactCount > 2 && 
+					res == resultEdgeContact && 
+					iX + dX == contactX && 
+					iY + dY == contactY )
+				{
+					bDone = true;
+					step++;
+					break;
+				}
+
+			} while (res == resultEdgeContact);
+			
+			// Go back to the previous step which was still having contact
+			step--;
+			dX = cos(a) * step;
+			dY = sin(a) * step;
+
+			if (res == resultNoOverlap)
+				a -= SMALL_ANGLE;
+			else if (res == resultToolPartialOverlap)
+				a += SMALL_ANGLE;
+
+		} while (dX == 0 && dY == 0);
+
+		// Make the move that follows the tangeant direction
+		// to the average direction (angle 'a')
+		GCode("G1 X%f Y%f", dX * pCtx->Xres, dY * pCtx->Yres);
+		update3DView();
+		iX += dX;
+		iY += dY;
+
+		contactCount++;
+
+	} while (!bDone);
+}
+
+// Returns the direction of a vector in the -PI / +PI range
+// Note that a 0,0 vector will return pointing "up" (PI/2)
+double vectorDirection(int x, int y)
+{
+	// Vertical
+	if (x == 0)
+	{
+		// Pointing up
+		if (y >= 0) return (PI / 2.0);
+		// Pointing down
+		else return -(PI / 2.0);
+	}
+	// Horizontal
+	else if (y == 0)
+	{
+		// Pointing right
+		if (x >= 0) return 0.0;
+		// Pointing left
+		else return PI;
+	}
+	// No special direction...
+	double ret = atan((double)y / (double)x);
+	// Result only gives angle +/- PI/2
+	// If the vector is pointing backward
+	if (x < 0)
+	{
+		// Down
+		if (y > 0) ret += PI;
+		// Up
+		else ret -= PI;
+	}
+	return ret;
+}
+
+unsigned long MarkToolLocationAsCarved(BITMAP* pBitmap, int x, int y, t2DintPoint* pTool, unsigned long count, bool bSimulate )
+{
+	unsigned long carvedCount = 0;
+	if (!bSimulate)
+		for (int i = 0; i < count; i++) carvedCount += SetPixel(pBitmap, x + pTool[i].x, y + pTool[i].y);
+	else
+		for (int i = 0; i < count; i++) carvedCount += GetPixel(pBitmap, x + pTool[i].x, y + pTool[i].y);
+
+	return carvedCount;
+}
+
+unsigned long MarkToolLocationAsCarved(CarvingContext_t* pCtx, int x, int y, bool bSimulate)
+{
+	unsigned long carved = 0;
+	MarkToolLocationAsCarved(&pCtx->halfCarvedBM, x, y, pCtx->halfTool, pCtx->halfToolPtCount, bSimulate);
+	carved += MarkToolLocationAsCarved(pCtx->pFullCarved, x, y, pCtx->tool, pCtx->toolPtCnt, bSimulate);
+	if (pCtx->bCleanup) carved += MarkToolLocationAsCarved(pCtx->pFullCarved, x, y, pCtx->edge, pCtx->edgePtCnt, bSimulate);
+	return carved;
+}
+
+unsigned long MarkToolPathAsCarved(CarvingContext_t* pCtx, int iX, int iY, int dX, int dY, bool bSimulate )
+{
+	unsigned long carved = 0;
+
+	pCtx->halfToolPtCount = 0;
+
+	pCtx->pFullCarved = bSimulate ? &pCtx->originalBM : &pCtx->fullCarvedBM;
+
+	if (dY == 0)
+	{
+		// Left (-1) or right (1) ?
+		int d = dX > 0 ? 1 : -1;
+
+		if (!pCtx->bCleanup)
+		{
+			for (int i = 0; i < pCtx->toolPtCnt; i++)
+			{
+				if (dX > 0 && pCtx->tool[i].y < 0) pCtx->halfTool[pCtx->halfToolPtCount++] = pCtx->tool[i];
+				else if (dX < 0 && pCtx->tool[i].y > 0) pCtx->halfTool[pCtx->halfToolPtCount++] = pCtx->tool[i];
+			}
+		}
+		for (int i = 0; i <= abs(dX); i++)
+		{
+			carved += MarkToolLocationAsCarved( pCtx, iX + (i * d), iY, bSimulate);
+		}
+	}
+	else if (dX == 0)
+	{
+		// Up (1) or down (-1) ?
+		int d = dY > 0 ? 1 : -1;
+
+		if (!pCtx->bCleanup)
+		{
+			for (int i = 0; i < pCtx->toolPtCnt; i++)
+			{
+				if (dY > 0 && pCtx->tool[i].x > 0) pCtx->halfTool[pCtx->halfToolPtCount++] = pCtx->tool[i];
+				else if (dY < 0 && pCtx->tool[i].x < 0) pCtx->halfTool[pCtx->halfToolPtCount++] = pCtx->tool[i];
+			}
+		}
+		for (int i = 0; i <= abs(dY); i++)
+		{
+			carved += MarkToolLocationAsCarved( pCtx, iX, iY + (i * d), bSimulate);
+		}
+	}
+	else
+	{
+		double slope = (double)dY / (double)dX;
+
+		if (!pCtx->bCleanup)
+		{
+			double direction = vectorDirection(dX, dY);
+			for (int i = 0; i < pCtx->toolPtCnt; i++)
+			{
+				double toolDirection = vectorDirection(pCtx->tool[i].x, pCtx->tool[i].y);
+
+				if (direction > 0)
+				{
+					if (toolDirection > 0 && toolDirection < direction) pCtx->halfTool[pCtx->halfToolPtCount++] = pCtx->tool[i];
+					else if (toolDirection < 0 && toolDirection >(direction - PI)) pCtx->halfTool[pCtx->halfToolPtCount++] = pCtx->tool[i];
+				}
+				else
+				{
+					if (toolDirection > 0 && toolDirection > (direction + PI)) pCtx->halfTool[pCtx->halfToolPtCount++] = pCtx->tool[i];
+					else if (toolDirection < 0 && toolDirection < direction) pCtx->halfTool[pCtx->halfToolPtCount++] = pCtx->tool[i];
+				}
+			}
+		}
+
+		if (abs(dX) >= abs(dY))
+		{
+			if (dX > 0) for (int i = 0; i <= dX; i++)
+			{
+				carved += MarkToolLocationAsCarved( pCtx, iX + i, iY + (double)i * slope, bSimulate );
+			}
+			else if (dX < 0) for (int i = 0; i >= dX; i--)
+			{
+				carved += MarkToolLocationAsCarved( pCtx, iX + i, iY + (double)i * slope, bSimulate);
+			}
+		}
+		else
+		{
+			if (dY > 0) for (int i = 0; i <= dY; i++)
+			{
+				carved += MarkToolLocationAsCarved( pCtx, iX + (double)i / slope, iY + i, bSimulate);
+			}
+			else if (dY < 0) for (int i = 0; i >= dY; i--)
+			{
+				carved += MarkToolLocationAsCarved( pCtx, iX + (double)i / slope, iY + i, bSimulate);
+			}
+		}
+	}
+
+	return carved;
+}
+
+unsigned long CarveThisMoveInPixels(CarvingContext_t* pCtx, long dX, long dY)
+{
+	unsigned long carvedPixelsCount;
+
+	GCode("G1 X%f Y%f", dX * pCtx->Xres, dY * pCtx->Yres);
+	carvedPixelsCount = MarkToolPathAsCarved(pCtx, pCtx->iX, pCtx->iY, dX, dY, false );
+	update3DView();
+	
+	//Sleep(sqrt(dX*dX + dY*dY));
+
+	pCtx->iX += dX;
+	pCtx->iY += dY;
+
+	pCtx->totalCarvingDistance += sqrt(dX * dX + dY * dY);
+
+	return carvedPixelsCount;
+}
+
+BOOL CarveBitmapContour(CarvingContext_t *pCtx)
+{
+	bool bDone;
+	double tangeant;
+	long dX, dY;
+	unsigned long totalCarvedPixels;
+	double distanceTravelled;
+	toolPosResult_t res;
+	long TR = pCtx->toolRadiusInPixels;
+	double dive = g_BmParams.tool.safeTravel + g_BmParams.depth;
+
+	bDone = false;
+
+	// Size of a equare that fits inside the tool sqrt(1/2)
+	int sqInT = 0.7 * pCtx->toolRadiusInPixels;
+
+	dX = pCtx->tX;
+	dY = pCtx->tY;
+
+	if (pCtx->bCleanup)
+	{
+		bool bGotSpot = false;
+
+		// Check the too position against the original shape
+		pCtx->pTestedBM = &pCtx->originalBM;
+
+		do
+		{
+			// Look for a white (not carved) location
+			if( GetPixel( &pCtx->fullCarvedBM, dX, dY ) == FALSE )
+			{
+				int entrapped = 0;
+				if (GetPixel(&pCtx->fullCarvedBM, dX-1, dY) == TRUE) entrapped++;
+				if (GetPixel(&pCtx->fullCarvedBM, dX+1, dY) == TRUE) entrapped++;
+				if (GetPixel(&pCtx->fullCarvedBM, dX, dY+1) == TRUE) entrapped++;
+				if (GetPixel(&pCtx->fullCarvedBM, dX, dY-1) == TRUE) entrapped++;
+
+				// This pixel not trapped in between non carvable pixels.
+				if (entrapped < 4)
+				{
+					// Save the pixel we just tested
+					pCtx->tX = dX;
+					pCtx->tY = dY;
+
+					for (int i = -TR + 1; i < TR && !bGotSpot; i++)
+						for (int n = -TR + 1; n < TR && !bGotSpot; n++)
+						{
+							if (sqrt(i * i + n * n) < (TR - 1))
+							{
+								res = TestToolPosition(pCtx, dX + i, dY + n, &tangeant);
+								if (res == resultEdgeContact)
+								{
+									dX += i;
+									dY += n;
+									bGotSpot = true;
+								}
+							}
+						}
+					if (!bGotSpot)
+					{
+						res = TestToolPosition(pCtx, dX, dY, &tangeant);
+						if (res == resultNoOverlap)
+						{
+							bGotSpot = true;
+						}
+						else
+						{
+							// Can't carve this spot. Mark as carved so we don't
+							// come back here again
+							SetPixel(&pCtx->fullCarvedBM, dX, dY);
+						}
+					}
+				}
+			}
+
+			if (!bGotSpot)
+			{
+				dX += 1;
+				if (dX >= (pCtx->originalBM.bmWidth - TR))
+				{
+					dX = TR;
+					dY += 1;
+					if (dY >= (pCtx->originalBM.bmHeight - TR))
+					{
+						bDone = true;
+					}
+				}
+			}
+		} while (!bDone && !bGotSpot);
+
+		if (bDone)
+		{
+			if (pCtx->bCarving)
+			{
+				// Go back to safe travel height
+				GCode("G0 Z%f", dive);
+				pCtx->bCarving = FALSE;
+			}
+
+			// Return to origin
+			GCode( "G0 X%f Y%f", -pCtx->iX * pCtx->Xres, -pCtx->iY * pCtx->Yres);		
+			return FALSE;
+		}
+	}
+	else
+	{
+		pCtx->pTestedBM = &pCtx->previousBM;
+
+		do
+		{
+			// Check the tool status in the "carved" bitmap
+			res = TestToolPosition(pCtx, dX, dY, &tangeant);
+			if (res == resultEdgeContact)
+			{
+				pCtx->tX = dX;
+				pCtx->tY = dY;
+				break;
+			}
+
+			// If there is no overlap with any previous carving, go
+			if (res == resultNoOverlap || res == resultToolFullOverlap)
+			{
+				// Go fast over here
+				dX += TR;
+			}
+			else
+			{
+				dX += 1;
+			}
+
+			if (dX >= (pCtx->originalBM.bmWidth - TR))
+			{
+				dX = TR;
+				dY += TR;
+				if (dY >= (pCtx->originalBM.bmHeight - TR))
+				{
+					bDone = true;
+				}
+			}
+		} while (!bDone);
+
+		if (bDone)
+		{
+			pCtx->tX = TR;
+			pCtx->tY = TR;
+			pCtx->bCleanup = TRUE;
+			return TRUE;
+		}
+	}
+	
+	dX = dX - pCtx->iX;
+	dY = dY - pCtx->iY;
+
+	if (dX || dY)
+	{
+		if (pCtx->bCarving)
+		{
+			unsigned long test;
+			test = MarkToolPathAsCarved(pCtx, pCtx->iX, pCtx->iY, dX, dY, true);
+
+			if ( test == 0)
+			{
+				GCode("G1 X%f Y%f", dX* pCtx->Xres, dY* pCtx->Yres);
+				MarkToolPathAsCarved(pCtx, pCtx->iX, pCtx->iY, dX, dY, false);
+				update3DView();
+			}
+			else
+			{
+				GCode("G1 Z%f", dive);
+				pCtx->bCarving = FALSE;
+				pCtx->carvingCount++;
+				GCode("G0 X%f Y%f", dX* pCtx->Xres, dY* pCtx->Yres);
+			}
+		}
+		else
+		{
+			GCode("G0 X%f Y%f", dX * pCtx->Xres, dY * pCtx->Yres);
+		}
+
+		pCtx->iX += dX;
+		pCtx->iY += dY;
+		pCtx->totalTravelDistance += sqrt(dX * dX + dY * dY);
+	}
+
+	const int Vx[4] = { 1, 0, -1, 0 };
+	const int Vy[4] = { 0, 1, 0, -1 };
+	int dir = 0;
+
+	int startX = pCtx->iX;
+	int startY = pCtx->iY;
+
+	dX = dY = 0;
+	totalCarvedPixels = 0;
+	distanceTravelled = 0.0;
+
+	int contactCount = 0;
+	bool bFullCircle;
+	int prevX, prevY;
+
+	prevX = prevY = 0;
+
+	do
+	{
+		int step;
+		bFullCircle = false;
+
+		// The direction to follow the contour is 90 degrees
+		// from the direction of the average contact points
+		// Tool rotates clockwise.
+		double a = tangeant + (PI / 2.0);
+		double oldTangeant = tangeant;
+
+		dX = dY = 0;
+
+		do
+		{
+			step = 0;
+			do
+			{
+				step++;
+				dX = cos(a) * step;
+				dY = sin(a) * step;
+
+				oldTangeant = tangeant;
+				res = TestToolPosition( pCtx, pCtx->iX + dX, pCtx->iY + dY, &tangeant);
+
+				if (contactCount > 2 &&
+					res == resultEdgeContact &&
+					abs(pCtx->iX + dX - startX) <= 1 &&
+					abs(pCtx->iY + dY - startY) <= 1)
+				{
+					bDone = true;
+				}
+
+			} while (res == resultEdgeContact && !bDone);
+
+			// Go back to the previous step which was still having contact
+			step--;
+			dX = cos(a) * step;
+			dY = sin(a) * step;
+			tangeant = oldTangeant;
+
+			if (res == resultNoOverlap)
+				a -= SMALL_ANGLE;
+			else if (res == resultToolPartialOverlap)
+				a += SMALL_ANGLE;
+
+			// We've tried in all directions and couln't find a way out
+			if ((a > (PI * 4)) || (a < (-PI * 4.0)))
+			{
+				// If we're not carving, carve
+				if (!pCtx->bCarving)
+				{
+					pCtx->bCarving = TRUE;
+					GCode("G1 Z%f", -dive);
+				}
+
+				// Carve this spot so we won't come back again
+				MarkToolLocationAsCarved(&pCtx->halfCarvedBM, pCtx->iX, pCtx->iY, pCtx->tool, pCtx->toolPtCnt, false );
+				MarkToolLocationAsCarved(&pCtx->fullCarvedBM, pCtx->iX, pCtx->iY, pCtx->tool, pCtx->toolPtCnt, false );
+				update3DView();
+				bDone = true;
+			}
+
+		} while (dX == 0 && dY == 0 && !bDone);
+
+		if (dX != 0 || dY != 0)
+		{
+			// If we're not carving, carve
+			if (!pCtx->bCarving)
+			{
+				pCtx->bCarving = TRUE;
+				GCode("G1 Z%f", -dive);
+			}
+
+			// Make the move that follows the tangeant direction
+			// to the average direction (angle 'a')
+			unsigned long carvedPixels = CarveThisMoveInPixels(pCtx, dX, dY);
+
+			// If this move didn't carve anything, remember it's location
+			if (carvedPixels == 0 && prevX == 0 && prevY == 0 && contactCount > 2)
+			{
+				prevX = pCtx->iX;
+				prevY = pCtx->iY;
+			}
+			else
+			{
+				// We're back to a point that didn't carve
+				if (prevX == pCtx->iX && prevY == pCtx->iY)
+				{
+					// We're stuck in a loop
+					bDone = true;
+				}
+			}
+
+			totalCarvedPixels += carvedPixels;
+		}
+
+		contactCount++;
+
+	} while ( !bDone);
+
+	if (!pCtx->bCleanup)
+	{
+		memcpy(pCtx->previousBM.bmBits, pCtx->halfCarvedBM.bmBits, pCtx->originalBM.bmHeight * pCtx->originalBM.bmWidthBytes);
+	}
+	else
+	{
+		if (totalCarvedPixels == 0)
+		{
+			// Mark this pixel which caused us to carve without any result so 
+			// that we don't come back to it again.
+			SetPixel( &pCtx->fullCarvedBM, pCtx->tX, pCtx->tY);
+		}
+	}
+
+	return TRUE;
+}
+
+void CopyBitmap(BITMAP* pDst, BITMAP* pSrc)
+{
+	size_t bitsSize = pSrc->bmWidthBytes * pSrc->bmHeight;
+	*pDst = *pSrc;
+	pDst->bmBits = malloc(bitsSize);
+	memcpy(pDst->bmBits, pSrc->bmBits, bitsSize);
+}
+
+void CarveBitmapContour( )
+{
+	char cmd[MAX_STR];
+	CarvingContext_t ctx = { 0 };
+
+	HANDLE hOriginalBM = LoadImage( NULL, g_BmParams.szFilePath, IMAGE_BITMAP, 0, 0,
+		LR_CREATEDIBSECTION | LR_LOADFROMFILE | LR_DEFAULTSIZE | LR_MONOCHROME);
+
+	GetObject(hOriginalBM, sizeof(BITMAP), &ctx.originalBM);
+
+	CopyBitmap(&ctx.previousBM, &ctx.originalBM);
+	CopyBitmap(&ctx.halfCarvedBM, &ctx.originalBM);
+	CopyBitmap(&ctx.fullCarvedBM, &ctx.originalBM);
+
+	// Calculate the size of one pixel
+	ctx.Xres = g_BmParams.width / (double)ctx.originalBM.bmWidth;
+	ctx.Yres = g_BmParams.height / (double)ctx.originalBM.bmHeight;
+
+	// Build the array of points that compose the tool and the edge of the tool.
+	ctx.toolRadiusInPixels = (int)(g_BmParams.tool.radius / ((ctx.Xres + ctx.Yres) / 2));
+
+	// Estimate the # of points in the tool is the surface of the circle
+	unsigned long maxToolCnt = (int)(PI * (ctx.toolRadiusInPixels + 4) * (ctx.toolRadiusInPixels + 4));
+	ctx.tool = (t2DintPoint*)malloc(maxToolCnt * sizeof(t2DintPoint));
+
+	// Estimate that the # of points in the edge twice the length of the circle
+	unsigned long maxEdgeCnt = (int)(4 * PI * (ctx.toolRadiusInPixels + 2));
+	ctx.edge = (t2DintPoint*)malloc(maxEdgeCnt * sizeof(t2DintPoint));
+
+	ctx.toolPtCnt = 0;
+	ctx.edgePtCnt = 0;
+	for (int iX = 0; iX <= ctx.toolRadiusInPixels + 1; iX++) 
+	for (int iY = 0; iY <= ctx.toolRadiusInPixels + 1; iY++)
+	{
+		double d = sqrt((iX * iX) + (iY * iY));
+		// Points which are within the tool
+		if (d <= ctx.toolRadiusInPixels)
+		{
+			AddPoint(iX, iY, ctx.tool, &ctx.toolPtCnt, maxToolCnt);
+		}
+		// Points which are within a ring around the tool. Make
+		// this 2 pixels thick so that shapes must cross this area
+		// before touching the tool itself
+		else if (d < (ctx.toolRadiusInPixels + 2))
+		{
+			AddPoint(iX, iY, ctx.edge, &ctx.edgePtCnt, maxEdgeCnt);
+		}
+	}
+
+	ctx.halfTool = (t2DintPoint*)malloc(ctx.toolPtCnt * sizeof(t2DintPoint));
+	ctx.halfToolPtCount = 0;
+
+	ctx.iX = 0;
+	ctx.iY = 0;
+
+	ctx.totalCarvingDistance = 0.0;
+	ctx.totalTravelDistance = 0.0;
+	ctx.carvingCount = 0;
+	
+	// Where we start testing first
+	ctx.tX = ctx.toolRadiusInPixels;
+	ctx.tY = ctx.toolRadiusInPixels;
+
+	ctx.bCarving = FALSE;
+	ctx.bCleanup = FALSE;
+
+	GCode( "G91 F%d %s",
+		g_BmParams.tool.cutSpeed,
+		g_BmParams.tool.motorControl ? "M3 G4 P1" : "");
+
+	// Travel at safe altitude (starts from zero)
+	GCode( "G0 Z%f", g_BmParams.tool.safeTravel);
+
+	while (CarveBitmapContour(&ctx));
+
+	// Return to zero
+	GCode("G0 Z%f", -g_BmParams.tool.safeTravel);
+
+}
+
+
+
+
 BOOL BitmapProcess(HWND hWnd)
 {
 	BITMAP  bm;
 	HANDLE hBitmap;
 	int iX, iY;
 	int toolRadiusInPixels;
-	int maxToolCnt, toolPtCnt;
+	unsigned long maxToolCnt, toolPtCnt;
 	t2DintPoint *tool;
-	int maxEdgeCnt, edgePtCnt;
+	unsigned long maxEdgeCnt, edgePtCnt;
 	t2DintPoint *edge;
 	t2DPoint curPos;
 	t2DPoint contactPos;
@@ -465,6 +1240,9 @@ BOOL BitmapProcess(HWND hWnd)
 	char cmd[MAX_STR];
 	BOOL bCarving, bDone;
 	tFillState fillState;
+
+	CarveBitmapContour();
+	return TRUE;
 
 	hBitmap = LoadImage(
 		NULL,
