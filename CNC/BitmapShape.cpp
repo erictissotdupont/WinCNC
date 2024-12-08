@@ -12,7 +12,8 @@ typedef enum {
 	modeContourOnly,
 	modeCenterOnly,
 	modeContourAndCenter,
-	modeMatrix
+	modeMatrix,
+	modeHoneycomb,
 } tCarveMode;
 
 typedef struct
@@ -54,21 +55,17 @@ void BitmapShapeInit(HWND hWnd)
 	hItem = GetDlgItem(hWnd, IDC_CUT_SPEED);
 	for (i = 0; i < ITEM_CNT(CUT_SPEED); i++) ComboBox_AddString(hItem, CUT_SPEED[i].str);
 
+	ShapeInitToolInfo(&g_BmParams.tool);
+	g_BmParams.width = 3.25;
+	g_BmParams.height = 3.25;
+
 	HKEY hKey;
 	if (RegOpenKey(HKEY_CURRENT_USER, L"SOFTWARE", &hKey) == ERROR_SUCCESS)
 	{
 		DWORD cbData = sizeof(g_BmParams);
-		if (RegGetValue(hKey, L"WinCNC", L"BitmapShape", RRF_RT_REG_BINARY, NULL, &g_BmParams, &cbData) != ERROR_SUCCESS)
-		{
-			g_BmParams.width = 3.25;
-			g_BmParams.height = 3.25;
-			//g_BmParams.X = 2;
-			//g_BmParams.Y = 2;
-		}
+		RegGetValue(hKey, L"WinCNC", L"BitmapShape", RRF_RT_REG_BINARY, NULL, &g_BmParams, &cbData);
 		RegCloseKey(hKey);
 	}
-
-	ShapeInitToolInfo(&g_BmParams.tool);
 }
 
 void BitmapShapeSave()
@@ -87,7 +84,7 @@ UINT BitmapShapeGetSet(BOOL get, HWND hWnd)
 	ShapeGetSetString(hWnd, IDC_BITMAP_PATH, get, g_BmParams.szFilePath, MAX_PATH);
 
 	int tmp = g_BmParams.contourOrCarve;
-	ShapeGetSetRadio(hWnd, IDC_BITMAP_CONTOUR_CARVE, 4, get, &tmp );
+	ShapeGetSetRadio(hWnd, IDC_BITMAP_CONTOUR_CARVE, 5, get, &tmp );
 	g_BmParams.contourOrCarve = (tCarveMode)tmp;
 
 	ShapeGetSetFloat(hWnd, IDC_BITMAP_WIDTH, get, &g_BmParams.width);
@@ -462,7 +459,7 @@ typedef enum {
 	rightColumn
 } tFillState;
 
-
+#define MAX_POINTS_IN_PATH	1024
 
 typedef struct {
 	BITMAP originalBM;
@@ -488,10 +485,16 @@ typedef struct {
 
 	BOOL bCleanup;
 	BOOL bCarving;
+	double carvingDepth;
+	double safeToolHeight;
+	double currentHeight;
 
 	unsigned long carvingCount;
 	double totalTravelDistance;
 	double totalCarvingDistance;
+
+	unsigned long pathCount;
+	t2DintPoint path[MAX_POINTS_IN_PATH];
 
 
 } CarvingContext_t;
@@ -579,69 +582,6 @@ toolPosResult_t TestToolPosition(CarvingContext_t *pCtx, int x, int y, double* t
 	{
 		return resultNoOverlap;
 	}
-}
-
-void FollowPath(CarvingContext_t* pCtx, int iX, int iY, double tangeant)
-{
-	int dX, dY;
-	int contactX = iX;
-	int contactY = iY;
-	int contactCount = 0;
-	toolPosResult_t res;
-	bool bDone = false;
-
-	do
-	{
-		// The direction to follow the contour is 90 degrees
-		// from the direction of the average contact points
-		double a = tangeant + (PI / 2.0);
-		int step;
-		do
-		{
-			step = 0;
-			do
-			{
-				step++;
-				dX = cos(a) * step;
-				dY = sin(a) * step;
-
-				res = TestToolPosition( pCtx, iX + dX, iY + dY, &tangeant);
-
-				// Check if we got back to the starting point
-				if (contactCount > 2 && 
-					res == resultEdgeContact && 
-					iX + dX == contactX && 
-					iY + dY == contactY )
-				{
-					bDone = true;
-					step++;
-					break;
-				}
-
-			} while (res == resultEdgeContact);
-			
-			// Go back to the previous step which was still having contact
-			step--;
-			dX = cos(a) * step;
-			dY = sin(a) * step;
-
-			if (res == resultNoOverlap)
-				a -= SMALL_ANGLE;
-			else if (res == resultToolPartialOverlap)
-				a += SMALL_ANGLE;
-
-		} while (dX == 0 && dY == 0);
-
-		// Make the move that follows the tangeant direction
-		// to the average direction (angle 'a')
-		GCode("G1 X%f Y%f", dX * pCtx->Xres, dY * pCtx->Yres);
-		update3DView();
-		iX += dX;
-		iY += dY;
-
-		contactCount++;
-
-	} while (!bDone);
 }
 
 // Returns the direction of a vector in the -PI / +PI range
@@ -795,18 +735,67 @@ unsigned long MarkToolPathAsCarved(CarvingContext_t* pCtx, int iX, int iY, int d
 
 unsigned long CarveThisMoveInPixels(CarvingContext_t* pCtx, long dX, long dY)
 {
-	unsigned long carvedPixelsCount;
+	char szDive[MAX_PATH];
+	unsigned long carvedPixelsCount = 0;
+	double x = dX * pCtx->Xres;
+	double y = dY * pCtx->Yres;
+	double length = sqrt(x * x + y * y);
 
-	GCode("G1 X%f Y%f", dX * pCtx->Xres, dY * pCtx->Yres);
-	carvedPixelsCount = MarkToolPathAsCarved(pCtx, pCtx->iX, pCtx->iY, dX, dY, false );
-	update3DView();
+	// If we're not carving, then carve
+	if (!pCtx->bCarving)
+	{
+		// If we're above the carving altitude
+		if (pCtx->currentHeight > 0)
+		{
+			// Let's go down to zero rapidely
+			GCode("G0 Z%f", -pCtx->currentHeight);
+			update3DView();
+			pCtx->currentHeight = 0.0;
+		}
+
+		if (pCtx->bCleanup)
+		{
+			GCode("G1 Z%f", -pCtx->carvingDepth);
+			update3DView();
+			pCtx->currentHeight = -pCtx->currentHeight;
+			pCtx->bCarving = TRUE;
+
+			GCode("G1 X%f Y%f ", x, y );
+			update3DView();
+			carvedPixelsCount = MarkToolPathAsCarved(pCtx, pCtx->iX, pCtx->iY, dX, dY, false);
+		}
+		else
+		{
+			double dive = pCtx->carvingDepth + pCtx->currentHeight;
+
+			if (length < dive / 2.0)
+			{
+				dive = length / 2.0;
+			}
+
+			GCode("G1 X%f Y%f Z%f", x, y, -dive);
+			update3DView();
+			pCtx->currentHeight -= dive;
+
+			// Calculate the new height
+			dive = pCtx->carvingDepth + pCtx->currentHeight;
+
+			if (dive > -0.0000001 && dive < 0.0000001)
+			{
+				pCtx->bCarving = TRUE;
+			}
+		}
+	}
+	else
+	{
+		GCode("G1 X%f Y%f", x, y);
+		carvedPixelsCount = MarkToolPathAsCarved(pCtx, pCtx->iX, pCtx->iY, dX, dY, false);
+		update3DView();
+	}
 	
-	//Sleep(sqrt(dX*dX + dY*dY));
-
 	pCtx->iX += dX;
 	pCtx->iY += dY;
-
-	pCtx->totalCarvingDistance += sqrt(dX * dX + dY * dY);
+	pCtx->totalCarvingDistance += length;
 
 	return carvedPixelsCount;
 }
@@ -817,7 +806,6 @@ BOOL CarveBitmapContour(CarvingContext_t *pCtx)
 	double tangeant;
 	long dX, dY;
 	unsigned long totalCarvedPixels;
-	double distanceTravelled;
 	toolPosResult_t res;
 	long TR = pCtx->toolRadiusInPixels;
 	double dive = g_BmParams.tool.safeTravel + g_BmParams.depth;
@@ -829,6 +817,12 @@ BOOL CarveBitmapContour(CarvingContext_t *pCtx)
 
 	dX = pCtx->tX;
 	dY = pCtx->tY;
+
+	const int Vx[4] = { 1, 0, -1, 0 };
+	const int Vy[4] = { 0, 1, 0, -1 };
+	int dir = 0;
+	int V = 1;
+	int v = 1;
 
 	if (pCtx->bCleanup)
 	{
@@ -907,6 +901,7 @@ BOOL CarveBitmapContour(CarvingContext_t *pCtx)
 			{
 				// Go back to safe travel height
 				GCode("G0 Z%f", dive);
+				pCtx->currentHeight = pCtx->safeToolHeight;
 				pCtx->bCarving = FALSE;
 			}
 
@@ -930,26 +925,53 @@ BOOL CarveBitmapContour(CarvingContext_t *pCtx)
 				break;
 			}
 
+			/*
 			// If there is no overlap with any previous carving, go
 			if (res == resultNoOverlap || res == resultToolFullOverlap)
 			{
-				// Go fast over here
-				dX += TR;
+				// Check location with a coarse resolution
+				dX += Vx[dir] * TR * V;
+				dY += Vy[dir] * TR * V;
 			}
 			else
+			*/
 			{
-				dX += 1;
+				dX += Vx[dir];
+				dY += Vy[dir];
 			}
 
 			if (dX >= (pCtx->originalBM.bmWidth - TR))
 			{
+				dX = pCtx->originalBM.bmWidth - TR;
+			}
+			else if (dX <= TR)
+			{
 				dX = TR;
-				dY += TR;
-				if (dY >= (pCtx->originalBM.bmHeight - TR))
+			}
+			if (dY >= (pCtx->originalBM.bmHeight - TR))
+			{
+				dY = pCtx->originalBM.bmHeight - TR;
+			} 
+			else if (dY <= TR)
+			{
+				dY = TR;
+			}
+
+			v--;
+			if (v == 0)
+			{
+				dir++;
+				if (dir > 3) dir = 0;
+				if (dir == 0) V++;
+				if (dir == 2) V++;
+				v = V;
+
+				if (V > pCtx->originalBM.bmWidth && V > pCtx->originalBM.bmHeight)
 				{
 					bDone = true;
 				}
 			}
+
 		} while (!bDone);
 
 		if (bDone)
@@ -960,10 +982,12 @@ BOOL CarveBitmapContour(CarvingContext_t *pCtx)
 			return TRUE;
 		}
 	}
-	
+
+	// Get the movement needed to go to the next carving location
 	dX = dX - pCtx->iX;
 	dY = dY - pCtx->iY;
 
+	// If we're not already there
 	if (dX || dY)
 	{
 		if (pCtx->bCarving)
@@ -979,7 +1003,8 @@ BOOL CarveBitmapContour(CarvingContext_t *pCtx)
 			}
 			else
 			{
-				GCode("G1 Z%f", dive);
+				GCode("G0 Z%f", dive);
+				pCtx->currentHeight = pCtx->safeToolHeight;
 				pCtx->bCarving = FALSE;
 				pCtx->carvingCount++;
 				GCode("G0 X%f Y%f", dX* pCtx->Xres, dY* pCtx->Yres);
@@ -995,27 +1020,13 @@ BOOL CarveBitmapContour(CarvingContext_t *pCtx)
 		pCtx->totalTravelDistance += sqrt(dX * dX + dY * dY);
 	}
 
-	const int Vx[4] = { 1, 0, -1, 0 };
-	const int Vy[4] = { 0, 1, 0, -1 };
-	int dir = 0;
-
-	int startX = pCtx->iX;
-	int startY = pCtx->iY;
-
+	pCtx->pathCount = 0;
 	dX = dY = 0;
 	totalCarvedPixels = 0;
-	distanceTravelled = 0.0;
-
-	int contactCount = 0;
-	bool bFullCircle;
-	int prevX, prevY;
-
-	prevX = prevY = 0;
 
 	do
 	{
 		int step;
-		bFullCircle = false;
 
 		// The direction to follow the contour is 90 degrees
 		// from the direction of the average contact points
@@ -1037,14 +1048,6 @@ BOOL CarveBitmapContour(CarvingContext_t *pCtx)
 				oldTangeant = tangeant;
 				res = TestToolPosition( pCtx, pCtx->iX + dX, pCtx->iY + dY, &tangeant);
 
-				if (contactCount > 2 &&
-					res == resultEdgeContact &&
-					abs(pCtx->iX + dX - startX) <= 1 &&
-					abs(pCtx->iY + dY - startY) <= 1)
-				{
-					bDone = true;
-				}
-
 			} while (res == resultEdgeContact && !bDone);
 
 			// Go back to the previous step which was still having contact
@@ -1065,6 +1068,7 @@ BOOL CarveBitmapContour(CarvingContext_t *pCtx)
 				if (!pCtx->bCarving)
 				{
 					pCtx->bCarving = TRUE;
+					pCtx->currentHeight = -pCtx->carvingDepth;
 					GCode("G1 Z%f", -dive);
 				}
 
@@ -1079,37 +1083,39 @@ BOOL CarveBitmapContour(CarvingContext_t *pCtx)
 
 		if (dX != 0 || dY != 0)
 		{
-			// If we're not carving, carve
-			if (!pCtx->bCarving)
-			{
-				pCtx->bCarving = TRUE;
-				GCode("G1 Z%f", -dive);
-			}
-
 			// Make the move that follows the tangeant direction
 			// to the average direction (angle 'a')
 			unsigned long carvedPixels = CarveThisMoveInPixels(pCtx, dX, dY);
 
-			// If this move didn't carve anything, remember it's location
-			if (carvedPixels == 0 && prevX == 0 && prevY == 0 && contactCount > 2)
+			if (carvedPixels == 0)
 			{
-				prevX = pCtx->iX;
-				prevY = pCtx->iY;
-			}
-			else
-			{
-				// We're back to a point that didn't carve
-				if (prevX == pCtx->iX && prevY == pCtx->iY)
+				for (int i = 0; i < pCtx->pathCount && !bDone; i++)
 				{
-					// We're stuck in a loop
+					// Been here before!
+					if (pCtx->path[i].x == pCtx->iX && pCtx->path[i].y == pCtx->iY)
+					{
+						bDone = true;
+					}
+				}
+			}
+
+			if( !bDone )
+			{
+				if (pCtx->pathCount >= MAX_POINTS_IN_PATH)
+				{
+					// This is too long of a path. Just start a new one
 					bDone = true;
+				}
+				else
+				{
+					pCtx->path[pCtx->pathCount].x = pCtx->iX;
+					pCtx->path[pCtx->pathCount].y = pCtx->iY;
+					pCtx->pathCount++;
 				}
 			}
 
 			totalCarvedPixels += carvedPixels;
 		}
-
-		contactCount++;
 
 	} while ( !bDone);
 
@@ -1196,6 +1202,9 @@ void CarveBitmapContour( )
 	ctx.totalCarvingDistance = 0.0;
 	ctx.totalTravelDistance = 0.0;
 	ctx.carvingCount = 0;
+
+	ctx.carvingDepth = g_BmParams.depth;
+	ctx.safeToolHeight = g_BmParams.tool.safeTravel;
 	
 	// Where we start testing first
 	ctx.tX = ctx.toolRadiusInPixels;
@@ -1209,21 +1218,20 @@ void CarveBitmapContour( )
 		g_BmParams.tool.motorControl ? "M3 G4 P1" : "");
 
 	// Travel at safe altitude (starts from zero)
-	GCode( "G0 Z%f", g_BmParams.tool.safeTravel);
+	GCode( "G0 Z%f", ctx.safeToolHeight);
+	ctx.currentHeight = ctx.safeToolHeight;
 
 	while (CarveBitmapContour(&ctx));
 
-	// Return to zero
-	GCode("G0 Z%f", -g_BmParams.tool.safeTravel);
+	// Return to zero, turn OFF the motor
+	GCode("G0 Z%f M0", -g_BmParams.tool.safeTravel);
 
 }
 
 
-
-
 BOOL BitmapProcess(HWND hWnd)
 {
-	BITMAP  bm;
+	BITMAP bm = { 0 };
 	HANDLE hBitmap;
 	int iX, iY;
 	int toolRadiusInPixels;
@@ -1241,8 +1249,8 @@ BOOL BitmapProcess(HWND hWnd)
 	BOOL bCarving, bDone;
 	tFillState fillState;
 
-	CarveBitmapContour();
-	return TRUE;
+	//CarveBitmapContour();
+	//return TRUE;
 
 	hBitmap = LoadImage(
 		NULL,
@@ -1251,12 +1259,20 @@ BOOL BitmapProcess(HWND hWnd)
 		0, 0,
 		LR_CREATEDIBSECTION | LR_LOADFROMFILE | LR_DEFAULTSIZE | LR_MONOCHROME);
 
-	// Get the color depth of the DIBSection
-	GetObject(hBitmap, sizeof(BITMAP), &bm);
+	if (hBitmap != NULL)
+	{
+		// Get the color depth of the DIBSection
+		GetObject(hBitmap, sizeof(BITMAP), &bm);
 
-	// Calculate the size of one pixel
-	Xres = g_BmParams.width / bm.bmWidth;
-	Yres = g_BmParams.height / bm.bmHeight;
+		// Calculate the size of one pixel
+		Xres = g_BmParams.width / bm.bmWidth;
+		Yres = g_BmParams.height / bm.bmHeight;
+	}
+	else
+	{
+		Xres = 1.0;
+		Yres = 1.0;
+	}
 
 	// Build the array of points that compose the tool and the edge of the tool.
 	toolRadiusInPixels = (int)(g_BmParams.tool.radius / ((Xres + Yres) / 2));
@@ -1305,18 +1321,28 @@ BOOL BitmapProcess(HWND hWnd)
 	doGcode(cmd);
 	bCarving = FALSE;
 
-	if (g_BmParams.contourOrCarve == modeMatrix )
+	if (g_BmParams.contourOrCarve == modeMatrix ||
+		g_BmParams.contourOrCarve == modeHoneycomb )
 	{
 		t2DPoint realPos;
 		ULONG savedCount = -1;
 		ULONG count = 0;			
 		realPos = { 0.0, 0.0 };
+		int rowOffset = 0;
 
 		// Move to first location to be tested
 		curPos.x = g_BmParams.matrixXoffset;
 		curPos.y = g_BmParams.matrixYoffset;
 		C.x = g_BmParams.matrixPitch;
-		C.y = g_BmParams.matrixPitch;
+		if (g_BmParams.contourOrCarve == modeHoneycomb)
+		{
+			// Height of the equilateral triangle of side 'matrixPitch'
+			C.y = (sqrt(3.0) * g_BmParams.matrixPitch ) / 2.0;
+		}
+		else
+		{
+			C.y = g_BmParams.matrixPitch;
+		}
 
 		bDone = FALSE;
 		while (!bDone)
@@ -1333,7 +1359,14 @@ BOOL BitmapProcess(HWND hWnd)
 				}
 				// sprintf_s(cmd, sizeof(cmd), "G0 X%f Y%f\r\n", -curPos.x, C.y);
 				curPos.y += C.y;
-				curPos.x = 0.0f;
+				curPos.x = g_BmParams.matrixXoffset;
+
+				// In honeycomb mode, offset every other row by half the pitch
+				rowOffset++;
+				if (g_BmParams.contourOrCarve == modeHoneycomb && (rowOffset & 1))
+				{
+					curPos.x += (g_BmParams.matrixPitch / 2.0);
+				}
 				// doGcode(cmd);
 			}
 			else

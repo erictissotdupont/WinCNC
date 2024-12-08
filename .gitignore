@@ -214,5 +214,4 @@ $RECYCLE.BIN/
 *.msp
 
 ESP32/build/
-
 .vs/
