@@ -17,6 +17,7 @@ typedef enum {
 	retBufferMutexTimeout = -13,
 	retStopRequested = -14,
 	retInternalError = -15,
+	retNotImplemented = -16,
 
 	retPreParseComplete = -98,
 	retQuit = -99,

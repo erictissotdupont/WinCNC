@@ -5,6 +5,7 @@
 #include "Commctrl.h"
 #include "resource.h"
 #include "3Dview.h"
+#include "socket.h"
 
 typedef struct {
 	char* buffer;
@@ -93,7 +94,8 @@ DWORD ParserThread(PVOID pParam)
 
 	if (pJob->status == retSuccess )
 	{
-		pJob->status = pJob->cmd("M114\n");
+		// Not implemented
+		// pJob->status = pJob->cmd("M114\n");
 	}
 
 	if (pJob->hDialog) PostMessage(pJob->hDialog, WM_UPDATE_PROGRESS, PROGRESS_RES, 0);
@@ -184,6 +186,7 @@ BOOL CALLBACK FileParserProc(HWND hWnd,
 					L"GCode",
 					MB_YESNO | MB_ICONEXCLAMATION) == IDYES)
 				{
+					ForceStop( );
 					job.bStop = true;
 					WaitForSingleObject(job.hThread, 5000);
 					EndDialog(hWnd, wParam);

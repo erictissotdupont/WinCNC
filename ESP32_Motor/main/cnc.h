@@ -6,7 +6,7 @@
 #define Y_AXIS_RES                0.00049213f
 #define Z_AXIS_RES                0.0003925f
 
-#include "..\..\Status.h"
+#include "..\..\CNC_Protocol.h"
 
 #define MAX_FIFO_MOVE        3
 #define MAX_DEBUG            4
@@ -24,7 +24,7 @@
 #define MOTOR_Z_L_DIR        (gpio_num_t)15
 #define MOTOR_Z_L_STEP       (gpio_num_t)16
 #define MOTOR_Z_R_DIR        (gpio_num_t)17
-#define MOTOR_Z_R_STEP       (gpio_num_t)18
+#define MOTOR_Z_R_STEP       (gpio_num_t)9  // TODO: Move from 18 to 9
 #define MOTOR_Y_DIR          (gpio_num_t)8
 #define MOTOR_Y_STEP         (gpio_num_t)3
 
@@ -32,6 +32,7 @@
 #define MOTOR_ENABLE         (gpio_num_t)12
 #define LIMIT_IN             (gpio_num_t)13
 #define LIMIT_OUT            (gpio_num_t)14
+#define BLINK_GPIO           (gpio_num_t)18
 
 #define ANA_INTERNAL_TEMP    A0
 #define ANA_MOTOR_VOLT       A1
@@ -66,11 +67,6 @@
 //
 //#define MEASURE_MOVE
 
-
-#define CMD_FLAG_SPINDLE_ON       0x00000001L
-#define CMD_FLAG_CALIBRATION      0x00000002L
-#define CMD_CALIBRATION_COMPLETE  0x00000004L
-
 typedef struct _cmd_t
 {
   long dx;
@@ -80,15 +76,5 @@ typedef struct _cmd_t
   unsigned long flags;
 } cmd_t;
 
-
-bool ResetCommand( );
-bool OriginCommand( );
-bool CheckMachineIsIdle( unsigned long seq, struct sockaddr_in* source );
-bool GetAnalogCommand( unsigned long* A0, unsigned long* A1, unsigned long* A2 );
-bool GetPositionCommand( long* pX, long* pY, long *pZ, unsigned long* pS, unsigned long *pQ );
-bool MoveCommand( cmd_t* pCmd );
-
 #define DEBUG_UDPx
 #define DEBUG_UARTx
-
-extern unsigned long g_Status;

@@ -1,10 +1,8 @@
 
 typedef enum
 {
-	CNC_CONNECTED = 0,
-	CNC_RESPONSE,
-	CNC_ACKNOWLEDGE,
-	CND_MAX_EVENT
+	CNC_MACHINE_UPDATE = 0,
+	CNC_MAX_EVENT
 } CNC_SOCKET_EVENT;
 
 
@@ -18,15 +16,12 @@ typedef enum {
 	cncStatus_SequenceError = -6,
 } tCnCCmdStatus;
 
-int isCncConnected( );
-int getLastErrorStatus( );
-long getCncErrorCount( );
-
-unsigned char GetPosCRC(long x, long y, long z);
+unsigned char GetPosCRC(long x, long y, long z, unsigned long t, unsigned long flags);
+bool LockMachinePosition(bool bLock);
 void registerSocketCallback(CNC_SOCKET_EVENT event, void(*pCallback)(PVOID));
 int initSocketCom( );
+void ForceStop( );
 tStatus postCommand( char* cmd );
-tStatus sendCommand( char* cmd, char* rsp, size_t cbRsp );
-tStatus waitForStatus( unsigned long timeout );
-void getSocketStatusString(char* szBuffer, unsigned int cbBuffer);
+void getSocketStatusString(char* szBuffer, size_t cbBuffer);
+void getCNCStateString(char* szBuffer, size_t cbBuffer);
 

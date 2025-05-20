@@ -16,7 +16,7 @@
 
 #include "resource.h"
 #include "status.h"
-#include "..\Status.h"
+#include "..\CNC_Protocol.h"
 
 typedef struct
 {
@@ -35,5 +35,4 @@ typedef struct
 
 #define WM_UPDATE_POSITION	     WM_USER
 #define WM_UPDATE_PROGRESS	     (WM_USER + 1)
-#define WM_CHECK_INITIAL_STATUS  (WM_USER + 2)
-#define WM_REDRAW				 (WM_USER + 3)
+#define WM_REDRAW				 (WM_USER + 2)

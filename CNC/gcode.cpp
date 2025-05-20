@@ -711,7 +711,8 @@ tStatus doGcode(char* cmd)
         break;
 	  // M114 : Get Position
 	  case 114 :
-		  return CheckStatus(true);
+          // TODO
+		  return retNotImplemented;
       default:
         return retInvalidParam;
     } 

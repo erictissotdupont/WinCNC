@@ -35,7 +35,7 @@ void OnPaint(HWND hWnd)
 	RECT view;
 	RECT rect;
 	HFONT font;
-	CHAR str[100];
+	CHAR str[1000];
 	HDC hdcMem;
 	HBITMAP hbmMem;
 	HANDLE hOld;
@@ -128,14 +128,7 @@ void OnPaint(HWND hWnd)
 	current.y -= inPipe.y;
 	current.z -= inPipe.z;
 
-	sprintf_s(str, sizeof(str), "X:%.3f Y:%.3f Z:%.3f\r\nA:%d\r\nB:%d\r\nC:%d\r\nD:%d",
-		current.x,
-		current.y,
-		current.z,
-		g_debug[0],
-		g_debug[1],
-		g_debug[2],
-		g_debug[3]);
+	getCNCStateString(str, sizeof(str));
 	DrawTextA(hdcMem, str, -1, &rect, 0);
 	DeleteObject(font);
 

@@ -6,6 +6,7 @@
 #include "motor.h"
 #include "keyboard.h"
 #include "socket.h"
+#include "gcode.h"
 
 
 #define MAX_DURATION_IN_PIPE	  1000 // 1 second
@@ -15,7 +16,7 @@
 #define COMMAND_RESET_ORIGIN   "RST"
 #define COMMAND_GET_POSITION   "POS"
 #define COMMAND_GET_DEBUG	   "DBG"
-#define COMMAND_CALIBRATE      "CAL_Z"
+#define COMMAND_CALIBRATE      "CALIBRATE"
 
 HANDLE exportFile = NULL;
 tAxis XMotor,YMotor,ZMotor;
@@ -67,8 +68,6 @@ void getRawStepPos( long* x, long* y, long* z )
   if( z ) *z = ZMotor.step;
 }
 
-void resetTheoricalPosition( );
-
 void setRawStepPos(long x, long y, long z)
 {
 	XMotor.step = x;
@@ -88,7 +87,7 @@ void addCompensation( double x, double y, double z )
 void initAxis( int a, double scale )
 {
   tAxis* pA = pMotor[a];
-  pA->step = 0;
+  // pA->step = 0;
   pA->scale = scale;
   pA->cutComp = 0.0;
 }
@@ -161,6 +160,8 @@ tStatus doMove( void(*posAtStep)(t3DPoint*,int,int,void*), int stepCount, double
   duration = duration / stepCount;
   // Convert that in uS for the CNC
   d = (unsigned long)(duration * 1000);
+
+  LockMachinePosition(true);
  
   for( i=1; i<=stepCount; i++ )
   {
@@ -172,15 +173,10 @@ tStatus doMove( void(*posAtStep)(t3DPoint*,int,int,void*), int stepCount, double
     // Get the position we should be at for step i of stepCount
     posAtStep( &End, i, stepCount, pArg );
 
-	// Calculate the CRC of the current position for all 3 axis so
-	// that the machine can check if its current position corresponds
-	// to what the host is expecting
-    int posCRC = GetPosCRC(XMotor.step, YMotor.step, ZMotor.step);
-
 	x = calculateMove( &XMotor, End.x );
     y = calculateMove( &YMotor, End.y );
     z = calculateMove( &ZMotor, End.z );
-	s = ( getSpindleState() == 3 ) ? 1 : 0;
+	s = ( getSpindleState() == 3 ) ? CMD_FLAG_SPINDLE_ON : 0;
 
 	if (g_pSimulation)
 	{
@@ -188,10 +184,20 @@ tStatus doMove( void(*posAtStep)(t3DPoint*,int,int,void*), int stepCount, double
 	}
 	else
 	{
-		sprintf_s(str, sizeof(str), "@%ld,%ld,%ld,%lu,%lu,%x",
-			x, y, z, d, s, posCRC );
+		// Calculate the CRC of the position at the end of the movement
+        // so that the machine can check if its position and distance 
+		// corresponds to what the host wants. Includes duration and
+		// flags
+		s = s | GetPosCRC(XMotor.step, YMotor.step, ZMotor.step, d, s );
+
+		sprintf_s(str, sizeof(str), "@" CNC_CMD_PARAMS, x, y, z, d, s );
 
 		status = postCommand( str );
+
+		if (status != retSuccess)
+		{
+			break;
+		}
 	}
 
     if( exportFile )
@@ -204,71 +210,21 @@ tStatus doMove( void(*posAtStep)(t3DPoint*,int,int,void*), int stepCount, double
     }
   }
 
-  CheckStatus(false);
+  LockMachinePosition(false);
 
   return status;
 }
 
-tStatus CalibrateCNCPosition()
-{
-	tStatus ret = retSuccess;
-	if (g_pSimulation == NULL)
-	{
-		ret = sendCommand(COMMAND_CALIBRATE, NULL, 0);
-	}
-	return ret;
-}
-
 tStatus ResetCNCPosition( )
 {
-	tStatus ret = retSuccess;
-	if (g_pSimulation == NULL)
-	{
-		ret = sendCommand( COMMAND_RESET_ORIGIN, NULL, 0 );
-	}
-	return ret;
+	// TODO
+	return retNotImplemented;
 }
 
 tStatus ClearCNCError()
 {
-	tStatus ret = retSuccess;
-	if (g_pSimulation == NULL)
-	{
-		ret = sendCommand(COMMAND_RESET_ORIGIN, NULL, 0 );
-	}
-	return ret;
-}
-
-tStatus CheckStatus( BOOL bWait )
-{
-	static DWORD count = 0;
-	static DWORD lastCheck = 0;
-	tStatus ret = retSuccess;
-
-	//if (bWait == false) return retSuccess;
-
-	if (g_pSimulation == NULL)
-	{
-		/*
-		char rsp[100];
-		DWORD now = GetTickCount();
-		if( bWait || (( getDurationOfCommandsInPipe( ) == 0 ) && (( now - lastCheck ) > 200 )))
-		{
-			lastCheck = now;
-			if((( count & 0x01 ) != 0 ) || bWait )
-			{
-				ret = sendCommand( COMMAND_GET_POSITION, rsp, sizeof( rsp ));
-			}
-			else if(( count & 0x01 ) == 0 )
-			{
-				ret = sendCommand( COMMAND_GET_DEBUG, rsp, sizeof( rsp ));
-			}
-			count++;
-		}
-		else ret = retBusy;
-	    */
-	}
-	return ret;
+	// TODO
+	return retNotImplemented;
 }
 
 void motorInit()

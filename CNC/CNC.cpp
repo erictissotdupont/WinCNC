@@ -10,6 +10,7 @@
 #include "socket.h"
 #include "3Dview.h"
 #include "fileParser.h"
+#include "..\CNC_Protocol.h"
 
 #define MAX_LOADSTRING 100
 
@@ -38,10 +39,6 @@ tMetaData g_MetaData;
 // updated by the return of the "get status" commands
 t3DPoint g_displayPos;
  
-// The last motor step count received by the answer of the get status
-// command ("S\n")
-long g_actualX,g_actualY,g_actualZ;
-
 // The value following the status information. This bitfield indicates
 // various error condition of the CNC
 unsigned short g_errorStatusFlags = 0;
@@ -51,15 +48,6 @@ extern unsigned long g_Status;
 // The values returned by the answer of the debug command
 // Those are NOT fetched by the release of the code.
 int g_debug[4];
-
-
-tStatus GetCncStatus()
-{
-	if (!isCncConnected()) return retCncNotConnected;
-	if (g_errorStatusFlags) return retCncError;
-	if (getCncErrorCount() != 0 ) return retCncError;
-	return retSuccess;
-}
 
 tStatus parseLine(char* cmd)
 {
@@ -176,10 +164,6 @@ void OnCncStatus( HWND hWnd, char* str )
 		g_errorStatusFlags = s;
 	}
 
-	if (gotWhat & 0x01) g_actualX = x;
-	if (gotWhat & 0x02) g_actualY = y;
-	if (gotWhat & 0x04) g_actualZ = z;
-	
 	if (( gotWhat & 0x07 ) == 0x07 )
 	{
 		stepToPos(x, y, z, &g_displayPos);
@@ -189,22 +173,9 @@ void OnCncStatus( HWND hWnd, char* str )
 	if( gotWhat ) PostMessage(hWnd, WM_REDRAW, 0, 0);
 }
 
-void OnConnected(PVOID param)
+void OnMachineUpdate(PVOID param)
 {
-	if (param == NULL)
-	{
-		InvalidateRgn(hMainWindow, NULL, false);
-	}
-	else
-	{
-		InvalidateRgn(hMainWindow, NULL, false);
-		PostMessage(hMainWindow, WM_CHECK_INITIAL_STATUS, 0, 0);
-	}
-}
-
-void OnResponse(PVOID param)
-{
-	OnCncStatus(hMainWindow, (char*)param);
+	PostMessage(hMainWindow, WM_UPDATE_POSITION, 0, 0);
 }
 
 int APIENTRY _tWinMain(_In_ HINSTANCE hInstance,
@@ -233,8 +204,7 @@ int APIENTRY _tWinMain(_In_ HINSTANCE hInstance,
 	hAccelTable = LoadAccelerators(hInstance, MAKEINTRESOURCE(IDC_CNC));
 
 	initSocketCom();
-	registerSocketCallback(CNC_CONNECTED, OnConnected);
-	registerSocketCallback(CNC_RESPONSE, OnResponse);
+	registerSocketCallback(CNC_MACHINE_UPDATE, OnMachineUpdate);
 
 	motorInit();
 
@@ -245,11 +215,6 @@ int APIENTRY _tWinMain(_In_ HINSTANCE hInstance,
 	initAxis(1, 0.00049271); // Y
 	initAxis(2, 0.0003925); // Z - 1/4 step - 400 steps - 0.5in per turn
 */
-	initAxis(0, 0.00049213); // X
-	initAxis(1, 0.00049213); // Y
-	initAxis(2, 0.0003925);
-
-
 	
 	// Main message loop:
 	while (GetMessage(&msg, NULL, 0, 0))
@@ -386,6 +351,15 @@ void OnRunGCode(HWND hWnd,BOOL bDebug)
 	}
 }
 
+void MachineCalibrate(HWND hWnd)
+{
+	tStatus status = postCommand(CNC_CMD_CALIBRATE);
+	if (status != retSuccess)
+	{
+		MessageBoxA(hWnd, "Calibration command failed.", "CNC", MB_ICONERROR);
+	}
+}
+
 //
 //  FUNCTION: WndProc(HWND, UINT, WPARAM, LPARAM)
 //
@@ -398,7 +372,6 @@ void OnRunGCode(HWND hWnd,BOOL bDebug)
 //
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
-	tStatus status;
 	int wmId, wmEvent;
 
 	switch (message)
@@ -417,6 +390,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			break;
 		case IDM_SIMULATE_GCODE:
 			Start3DSimulator(hWnd);
+			break;
+		case IDM_MACHINE_CALIBRATE:
+			MachineCalibrate(hWnd);
 			break;
 		case IDM_BASIC_SHAPE:
 			BasicShapes(hWnd);
@@ -442,69 +418,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		OnPaint(hWnd);
 		break;
 
-	case WM_CHECK_INITIAL_STATUS:
-
-		status = CheckStatus(true);
-
-		if( status == retCncError )
-		{
-			WCHAR msg[MAX_PATH];
-			wsprintf(msg, L"CNC in error state 0x%02X (", g_errorStatusFlags);
-			if (g_errorStatusFlags & STATUS_LIMIT) wcscat_s(msg, MAX_PATH, L" Limit");
-			if( g_errorStatusFlags & STATUS_NUMBER) wcscat_s(msg, MAX_PATH, L" Number");
-			if( g_errorStatusFlags & STATUS_SYNTAX) wcscat_s(msg, MAX_PATH, L" Syntax");
-			if( g_errorStatusFlags & STATUS_MATH) wcscat_s(msg, MAX_PATH, L" Math");
-			if( g_errorStatusFlags & STATUS_COMM) wcscat_s(msg, MAX_PATH, L" Comm");
-			wcscat_s(msg, MAX_PATH, L" ) \r\nClear error state?");
-
-			if (MessageBox(hMainWindow,
-				msg, L"Error", MB_YESNO | MB_ICONERROR) == IDYES)
-			{
-				ClearCNCError();
-				ResetCNCPosition();
-				CheckStatus(true);
-				PostMessage(hWnd, WM_CHECK_INITIAL_STATUS, 0, 0);
-			}
-		}
-		else if( status == retSuccess )
-		{
-			if (g_Status & STATUS_NEED_CALIBRATION)
-			{
-				if (MessageBox(hMainWindow, 
-					L"CNC position not calibrated. Do you want to initiate the calibration procedure now?",
-					L"Warning", MB_YESNO | MB_ICONWARNING) == IDYES)
-				{
-					CalibrateCNCPosition();
-					return 0;
-				}
-			}
-
-			/*
-			if (g_actualX != 0 || g_actualY != 0 || g_actualZ != 0)
-			{
-				if (MessageBox( hMainWindow, 
-					            L"CNC is not at origin position.\r\n\r\nDo you want to reset the CNC? If you select 'No' the remote location will be used.", 
-					            L"Warning", MB_YESNO | MB_ICONWARNING ) == IDYES)
-				{
-					ResetCNCPosition( );
-				}
-				else
-				{
-					resetMotorPosition(g_actualX, g_actualY, g_actualZ);
-				}
-				CheckStatus(true);
-				PostMessage(hWnd, WM_CHECK_INITIAL_STATUS, 0, 0);
-			}
-			*/
-		}
-		else
-		{
-			WCHAR msg[MAX_PATH];
-			wsprintf(msg, L"Unable to fetch CNC status. Reason: %s.", GetCNCErrorString(status));
-			MessageBox(hMainWindow, msg, L"Error", MB_ICONERROR);
-		}
-		break;
-
 	case WM_UPDATE_POSITION:
 		getCurPos(&g_displayPos);
 		InvalidateRgn(hWnd, NULL, false);
@@ -524,10 +437,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		break;
 
 	case WM_TIMER :
-		if( CheckStatus(false) != retSuccess )
-		{
-			InvalidateRgn(hWnd, NULL, false);
-		}
 		break;
 
 	default:
