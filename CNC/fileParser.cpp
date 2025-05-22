@@ -202,34 +202,27 @@ WCHAR* GetCNCErrorString(tStatus status)
 {
 	switch (status)
 	{
-	case retInvalidParam:
-		return(L"Invalid parameter.");
-	case retSyntaxError:
-		return(L"GCode syntax error.");
-	case retFileNotFound:
-		return(L"File not found.");
-	case retUserAborted:
-		return(L"User interruption.");
-	case retNoOutputFound:
-		return(L"No output.");
-	case retCncNotConnected:
-		return(L"CNC not connected.");
-	case retBufferBusyTimeout:
-		return(L"CNC Output buffer overflow (timeout).");
-	case retCncStatusTimeout:
-		return(L"CNC Status request timeout.");
-	case retCncError:
-		return(L"CNC in error state.");
-	case retCncCommunicationError:
-		return(L"CNC communication error.");
-	case retBufferMutexTimeout:
-		return(L"Buffer mutex timeout.");
-	case retQuit:
-		return(L"Quit.");
-	case retUnknownErr:
-		return(L"Unexpected error.");
-	default:
-		return(L"Unknown error.");
+	case retSuccess: return L"No error";
+	case retInvalidParam: return L"Invalid parameter";
+	case retSyntaxError: return L"Syntax error";
+	case retFileNotFound: return L"File not found";
+	case retUserAborted: return L"User aborted";
+	case retNoOutputFound: return L"No output found";
+	case retCncNotConnected: return L"Cnc not connected";
+	case retCncStatusTimeout: return L"Cnc status timeout";
+	case retCncError: return L"Cnc error";
+	case retOutOfMemory: return L"Out of memory";
+	case retBusy: return L"Busy";
+	case retBufferBusyTimeout: return L"Buffer busy timeout";
+	case retCncCommunicationError: return L"Cnc communication error";
+	case retBufferMutexTimeout: return L"Buffer mutex timeout";
+	case retStopRequested: return L"Stop requested";
+	case retInternalError: return L"Internal error";
+	case retNotImplemented: return L"Not implemented";
+	case retPreParseComplete: return L"Pre-parse complete";
+	case retQuit: return L"Quit";
+	case retUnknownErr: return L"Unknown error";
+	default: return(L"Unknown error (Case).");
 	}
 }
 

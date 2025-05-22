@@ -60,11 +60,6 @@ int EventInit( )
   return 0;
 }
 
-void SignalIPConnected( )
-{
-  xEventGroupSetBits(g_eventGroupHandle, WIFI_CONNECTED_BIT);
-}
-
 void IRAM_ATTR SignalMotorIdleFromISR( )
 {
   BaseType_t xHigherPriorityTaskWoken = pdFALSE;
@@ -90,11 +85,7 @@ bool IsMotorIdle( )
   return(( xEventGroupWaitBits( g_eventGroupHandle, MOTOR_IDLE_BIT, pdFALSE, pdFALSE, 0 ) & MOTOR_IDLE_BIT ) == MOTOR_IDLE_BIT ); 
 }
 
-void WaitForMotorIdle( )
+bool WaitForMotorIdle( unsigned long timeoutMs )
 {
-  while(( xEventGroupWaitBits( g_eventGroupHandle, MOTOR_IDLE_BIT, pdTRUE, pdFALSE, 1000 / portTICK_PERIOD_MS ) & MOTOR_IDLE_BIT ) == 0 )
-  {
-    // ESP_LOGI( TAG, "Waiting for movement to complete..." ); 
-  }
-  ESP_LOGI( TAG, "Motors are idle" );
+  return(( xEventGroupWaitBits( g_eventGroupHandle, MOTOR_IDLE_BIT, pdFALSE, pdFALSE, timeoutMs / portTICK_PERIOD_MS ) & MOTOR_IDLE_BIT ) == MOTOR_IDLE_BIT );
 }

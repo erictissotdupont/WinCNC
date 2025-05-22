@@ -360,6 +360,14 @@ void MachineCalibrate(HWND hWnd)
 	}
 }
 
+void MachineReboot(HWND hWnd)
+{
+	if (MessageBoxA(hWnd, "The reboot will lose position and calibration. Are you sure?", "CNC", MB_YESNO | MB_ICONEXCLAMATION) == IDYES)
+	{
+		postCommand(CNC_CMD_REBOOT);
+	}
+}
+
 //
 //  FUNCTION: WndProc(HWND, UINT, WPARAM, LPARAM)
 //
@@ -393,6 +401,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			break;
 		case IDM_MACHINE_CALIBRATE:
 			MachineCalibrate(hWnd);
+			break;
+		case IDM_MACHINE_REBOOT:
+			MachineReboot(hWnd);
 			break;
 		case IDM_BASIC_SHAPE:
 			BasicShapes(hWnd);

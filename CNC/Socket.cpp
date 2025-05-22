@@ -149,6 +149,10 @@ unsigned char GetPosCRC(long x, long y, long z, unsigned long d, unsigned long f
 	return crc8((unsigned char*)posForCRC, sizeof(posForCRC), 0xFF);
 }
 
+// Called while a movement is being prepared from the motor position
+// until it has been submitted to the machine. This is to prevent
+// an idle position report to reset the host position after the CRC
+// has been computed.
 bool LockMachinePosition(bool bLock)
 {
 	if (bLock)
@@ -396,6 +400,16 @@ tStatus postCommand(char* cmd)
 void ForceStop( )
 {
 	SetEvent(g_hStop);
+	if (WaitForSingleObject(g_hBufferEmpty, INFINITE) == WAIT_OBJECT_0)
+	{
+		char msg[64];
+		int msgLen = sprintf_s(msg, sizeof(msg), CNC_HEADER CNC_CMD_HEADER "," CNC_CMD_HEADER_PARAMS "|%s|",
+			g_msgSeq,
+			1,
+			CNC_CMD_FLUSH );
+		sendToCNC(msg, msgLen);
+		//sendAndWaitForAck(msg, cbHeader + g_outCharCount + 1);
+	}
 }
 
 DWORD senderThread(PVOID pParam)

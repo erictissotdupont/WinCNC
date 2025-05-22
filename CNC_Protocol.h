@@ -7,6 +7,9 @@
 // How often the CNC sends a ping (POS) to the host when idle to
 // keep the connection alive
 #define CNC_IDLE_POS_TIMEOUT_MS           1000
+
+// How long for waiting for the motors to go idle after flushing the queue
+#define MOTOR_IDLE_TIMEOUT_MS             10000
                                           
 #define CNC_HEADER                        "CNC-"
 #define CNC_HEADER_LEN                    4
@@ -17,8 +20,15 @@
 #define CNC_CMD_HEADER_PARAMS             "%lu,%lu"
 //                                           x,  y,  z,  d,flags
 #define CNC_CMD_PARAMS                    "%ld,%ld,%ld,%lu,%lx" 
+
 #define CNC_CMD_CALIBRATE                 "CALIBRATE"
 #define CNC_CMD_CALIBRATE_LEN             9
+
+#define CNC_CMD_FLUSH                     "FLUSH"
+#define CNC_CMD_FLUSH_LEN                 5
+
+#define CNC_CMD_REBOOT                    "REBOOT"
+#define CNC_CMD_REBOOT_LEN                6
                                           
 #define CNC_INFO_HEADER                   "INFO"
 #define CNC_INFO_HEADER_LEN               4
@@ -46,6 +56,7 @@
 #define CNC_STATE_LIMIT_ERROR             0x20000000L
 #define CNC_STATE_CALIBRATION_FAILED      0x10000000L
 #define CNC_STATE_COMMUNICATION_ERROR     0x08000000L
+#define CNC_STATE_IDLE_TIMEOUT_ERROR      0x04000000L
                                       
 #define CNC_STATE_COMMAND_QUEUE_FULL      0x00002000L
 #define CNC_STATE_POS_SENSOR_XL           0x00001000L

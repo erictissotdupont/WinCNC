@@ -97,6 +97,7 @@ static char g_szPassword[MAX_WIFI_PASSWORD];
 static bool g_bSmartConfig = false;
 unsigned long g_NextSeq = 0;
 long g_NetworkPosition[5];
+bool g_bReboot = false;
 
 unsigned long g_nackCounter = 0;
 
@@ -224,19 +225,21 @@ bool MovementCommand( unsigned long seq, char* pt, bool bIgnoreCRC )
 bool Calibrate( )
 {
   cmd_t cmd = { 0 };
-  bool bStatus = false;
- 
   cmd.flags = CMD_FLAG_CALIBRATION;
   if( xQueueSend( g_cmd_queue, 
                   &cmd, 
-                  1000 / portTICK_PERIOD_MS ) == pdPASS )
-  {                      
-    cmd.flags = CMD_CALIBRATION_COMPLETE;
-    bStatus = (xQueueSend( g_cmd_queue, 
-                           &cmd, 
-                           1000 / portTICK_PERIOD_MS ) == pdPASS );
+                  1000 / portTICK_PERIOD_MS ) != pdPASS )
+  {
+    return false;
   }
-  return bStatus;
+  cmd.flags = CMD_CALIBRATION_COMPLETE;
+  if( xQueueSend( g_cmd_queue, 
+                  &cmd, 
+                  1000 / portTICK_PERIOD_MS ) != pdPASS )
+  {
+    return false;
+  }
+  return true;
 }
 
 int Respond( const char* rsp, unsigned long seq, unsigned int inQueue, char* outBuf )
@@ -321,13 +324,31 @@ int ParseMessage( char* msgbuf, int nbytes, char* outBuf )
         {
           // TODO : Reset the position to origin
         }           
-        else if( strncmp( pt, "RST", 3 ) == 0 )
+        else if( strncmp( pt, CNC_CMD_REBOOT, CNC_CMD_REBOOT_LEN ) == 0 )
         {
-          ESP_LOGW( TAG, "Reset command received." );            
+          ESP_LOGW( TAG, "Reboot command received." );
+          g_bReboot = true;
         }
         else if( strncmp( pt, CNC_CMD_CALIBRATE, CNC_CMD_CALIBRATE_LEN ) == 0 )
         {
-          bStatus = Calibrate( );
+          if(( bStatus = Calibrate( )) == false )
+          {
+            ESP_LOGE( TAG, "Initiating calibration failed" );
+            SetState( CNC_STATE_CALIBRATION_FAILED );
+          }
+        }
+        else if( strncmp( pt, CNC_CMD_FLUSH, CNC_CMD_FLUSH_LEN ) == 0 )
+        {
+          xQueueReset( g_cmd_queue );
+          if( WaitForMotorIdle( MOTOR_IDLE_TIMEOUT_MS ))
+          {
+            MotorGetPosition( &g_NetworkPosition[0], &g_NetworkPosition[1], &g_NetworkPosition[2] );
+          }
+          else
+          {
+            ESP_LOGE( TAG, "Timeout waiting motor idle" );
+            SetState(CNC_STATE_IDLE_TIMEOUT_ERROR);
+          }
         }
         else
         {
@@ -346,7 +367,7 @@ int ParseMessage( char* msgbuf, int nbytes, char* outBuf )
       g_NextSeq++;
       MotorMoveIfIdle( );
     }
-  } 
+  }
   else if( memcmp( msgbuf, CNC_INFO_HEADER, CNC_INFO_HEADER_LEN ) == 0 )
   {
     ret = sprintf( outBuf, CNC_INFO_HEADER "," CNC_INFO_PARAMS,
@@ -420,12 +441,12 @@ bool getWiFiCredentials( wifi_config_t *pWifi_Config )
 
 void saveWiFiCrendials( char *szSSID, char *szPassword )
 {
-    nvs_handle_t nvs_handle;
-    esp_err_t err;
+  nvs_handle_t nvs_handle;
+  esp_err_t err;
 
-    // Open
-    err = nvs_open(STORAGE_NAMESPACE, NVS_READWRITE, &nvs_handle);
-    if (err != ESP_OK)
+  // Open
+  err = nvs_open(STORAGE_NAMESPACE, NVS_READWRITE, &nvs_handle);
+  if (err != ESP_OK)
 	{
 		ESP_LOGE(TAG,"Failed to open NVS '%s' (Write)", STORAGE_NAMESPACE );
 		return;
@@ -451,34 +472,34 @@ void saveWiFiCrendials( char *szSSID, char *szPassword )
 		ESP_LOGI(TAG,"NVS: Saved Password='%s'", szPassword );
 	}
 
-    // Commit and close
+  // Commit and close
 	nvs_commit(nvs_handle);
-    nvs_close(nvs_handle);
+  nvs_close(nvs_handle);
 }
 
 static void smartconfig_task(void * parm)
 {
-    EventBits_t uxBits;
-    ESP_ERROR_CHECK( esp_smartconfig_set_type(SC_TYPE_ESPTOUCH) );
-    smartconfig_start_config_t cfg = SMARTCONFIG_START_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK( esp_smartconfig_start(&cfg) );
-    while (1) {
-        uxBits = xEventGroupWaitBits(s_wifi_event_group, ESPTOUCH_DONE_BIT | GOT_WIFI_SSID_PW, true, false, portMAX_DELAY);
-		if(uxBits & GOT_WIFI_SSID_PW ) {
-			wifi_config_t wifi_config = {0};
-			saveWiFiCrendials( g_szSSID, g_szPassword );
-			getWiFiCredentials( &wifi_config );
-			ESP_ERROR_CHECK( esp_wifi_disconnect() );
-			ESP_ERROR_CHECK( esp_wifi_set_config(WIFI_IF_STA, &wifi_config) );
-			esp_wifi_connect();
-		}
-        if(uxBits & ESPTOUCH_DONE_BIT) {
-            ESP_LOGI(TAG, "smartconfig over");
-            esp_smartconfig_stop();
-            vTaskDelete(NULL);
-        }
+  EventBits_t uxBits;
+  ESP_ERROR_CHECK( esp_smartconfig_set_type(SC_TYPE_ESPTOUCH) );
+  smartconfig_start_config_t cfg = SMARTCONFIG_START_CONFIG_DEFAULT();
+  ESP_ERROR_CHECK( esp_smartconfig_start(&cfg) );
+  while (1) {
+      uxBits = xEventGroupWaitBits(s_wifi_event_group, ESPTOUCH_DONE_BIT | GOT_WIFI_SSID_PW, true, false, portMAX_DELAY);
+  if(uxBits & GOT_WIFI_SSID_PW ) {
+    wifi_config_t wifi_config = {0};
+    saveWiFiCrendials( g_szSSID, g_szPassword );
+    getWiFiCredentials( &wifi_config );
+    ESP_ERROR_CHECK( esp_wifi_disconnect() );
+    ESP_ERROR_CHECK( esp_wifi_set_config(WIFI_IF_STA, &wifi_config) );
+    esp_wifi_connect();
+  }
+      if(uxBits & ESPTOUCH_DONE_BIT) {
+          ESP_LOGI(TAG, "smartconfig over");
+          esp_smartconfig_stop();
+          vTaskDelete(NULL);
+      }
 
-    }
+  }
 }
 
 static void event_handler(void* arg, esp_event_base_t event_base,
@@ -674,6 +695,12 @@ void NetworkIdleTask( )
       }
     }      
 	}
+  
+  if( g_bReboot )
+  {
+    vTaskDelay( 1000 / portTICK_PERIOD_MS );
+    abort( );
+  }
 }
 
 int NetworkInit( bool bWiFiSetup )
