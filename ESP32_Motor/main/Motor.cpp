@@ -1,21 +1,16 @@
 
 extern "C" {
-  #include <stdlib.h>
-  #include <cstring>
+  #include "CNC.h"
 
-  #include "freertos/FreeRTOS.h"
   #include "driver/gpio.h"
   #include "driver/gptimer.h"
-  #include "esp_log.h"
 
-  #include "CNC.h"
-  #include "Network.h"  
+  #include "UDP.h"  
   #include "Events.h"
   #include "Motor.h"
 }
 
 extern uint32_t g_limitState;
-int g_debug[MAX_DEBUG];
 
 #define STEP_PULSE_US     100 // Duration of the motor step pulse
 #define RAMP_SHIFT        19 // 19=524ms
@@ -547,7 +542,7 @@ void Motor::CalibrateTask( uint64_t now )
           {
             // Done! We're calibrated!
             cal_state = 0;
-            SetState( cal_state_flag );
+            Events_SetState( cal_state_flag );
           }
         }
       }
@@ -665,7 +660,7 @@ void DualMotor::CalibrateTask( uint64_t now )
             {
               // Done! We're calibrated
               cal_state = 0;
-              SetState( cal_state_flag );
+              Events_SetState( cal_state_flag );
             }
             else
             {              
@@ -816,7 +811,7 @@ extern "C" {
         ESP_ERROR_CHECK(gptimer_stop(g_motorTimer));
         ESP_ERROR_CHECK(gptimer_set_raw_count(g_motorTimer,0));
         g_pNextMotorToStep = NULL;
-        SignalMotorIdleFromISR( );
+        Events_SignalMotorIdleFromISR( );
       }
     }
 
@@ -880,7 +875,7 @@ extern "C" {
       
       if( newCRC != ( pCmd->flags & CMD_FLAGS_CRC_MASK ))
       {
-        SetState( CNC_STATE_MOTOR_CRC_ERROR );
+        Events_SetState( CNC_STATE_MOTOR_CRC_ERROR );
       }
       else
       {
@@ -939,7 +934,7 @@ extern "C" {
         
         // Clear the flags as starting calibration decalibrates the positions
         ClearState( CNC_STATE_Z_CALIBRATED | CNC_STATE_Y_CALIBRATED | CNC_STATE_X_CALIBRATED );
-        SetState( CNC_STATE_CALIBRATING );
+        Events_SetState( CNC_STATE_CALIBRATING );
               
         X.CalibrateStart( now, CNC_STATE_X_CALIBRATED );
         Y.CalibrateStart( now, CNC_STATE_Y_CALIBRATED );
@@ -964,7 +959,7 @@ extern "C" {
         }
         else
         {
-          SignalMotorIdleFromISR( );
+          Events_SignalMotorIdleFromISR( );
         }
       }
     }
@@ -973,11 +968,11 @@ extern "C" {
   void MotorMoveIfIdle( )
   {
     cmd_t cmd;
-    if( IsMotorIdle( ))
+    if( Events_IsMotorIdle( ))
     {
       if( xQueueReceive( g_cmd_queue, &cmd, 0 ) == pdTRUE )
       {
-        SignalMotorNotIdle( );
+        Events_SignalMotorNotIdle( );
         MotorMove( &cmd, 0 );
       }
     }
@@ -989,50 +984,9 @@ extern "C" {
     *pY = Y.GetPos( );
     *pZ = Z.GetPos( );
   }
-       
-       
-   /*
-    // No movement means dwell (GCode "P")
-    if( x==0 && y==0 && z==0 )
-    {
-      if( d != 0 )
-      {
-        while( g_MoveStart + d >= micros( ))
-        {
-          UART_Task( );
-        }     
-        
-        // Just wait...
-        //WaitTillItsTime( d );
-        g_MoveStart += d;
-      }
-      return;
-    }
-
-    //Serial.printf("Start Move %ld,%ld,%ld\n", x,y,z );
-
-    do
-    {
-
-    } while( 1 );
-
-    if( d != 0 )
-    {
-      g_MoveStart += d;
-    }
-    else
-    {
-      g_MoveStart = 0;
-    }
-    */
   
-  void MotorInit( )
-  {          
-    for( int i=0; i<MAX_DEBUG; i++ )
-    {
-      g_debug[i] = 0;
-    }
-    
+  void Motor_Init( )
+  {               
     gpio_config_t io_conf = {};
     io_conf.intr_type = GPIO_INTR_DISABLE;
     io_conf.mode = GPIO_MODE_OUTPUT;

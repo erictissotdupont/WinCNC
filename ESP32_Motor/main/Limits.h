@@ -1,2 +1,2 @@
 
-void LimitsInit( );
+void Limits_Init( );

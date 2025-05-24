@@ -23,9 +23,9 @@ uint32_t g_BadLimitData = 0;
 
 extern unsigned char crc8_table[256];
 
-static void gpio_isr_handler(void* arg);
+static void Limits_GPIO_ISR(void* arg);
 
-bool IRAM_ATTR limits_timer_callback(gptimer_handle_t timer, const gptimer_alarm_event_data_t *edata, void *user_data)
+bool IRAM_ATTR Limits_TimerCallback(gptimer_handle_t timer, const gptimer_alarm_event_data_t *edata, void *user_data)
 {
   uint64_t nextT = 0;
   static uint32_t mask = 0;
@@ -144,14 +144,14 @@ bool IRAM_ATTR limits_timer_callback(gptimer_handle_t timer, const gptimer_alarm
   {
     ESP_ERROR_CHECK(gptimer_stop(g_limitsTimer));
     ESP_ERROR_CHECK(gptimer_set_raw_count(g_limitsTimer,0));
-    gpio_isr_handler_add(LIMIT_IN, gpio_isr_handler, (void*)NULL);
+    gpio_isr_handler_add(LIMIT_IN, Limits_GPIO_ISR, (void*)NULL);
   }
   
   // No need to yield
   return false;
 }
 
-static void IRAM_ATTR gpio_isr_handler(void* arg)
+static void IRAM_ATTR Limits_GPIO_ISR(void* arg)
 {
   assert( g_state == 0 );
   
@@ -177,9 +177,8 @@ static void IRAM_ATTR gpio_isr_handler(void* arg)
 }
 
 
-void LimitsInit( )
+void Limits_Init( )
 {
-  
   // OUTPUT
   // ------  
   gpio_config_t io_conf = {};
@@ -201,7 +200,7 @@ void LimitsInit( )
   io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
   ESP_ERROR_CHECK(gpio_config(&io_conf));
   ESP_ERROR_CHECK(gpio_install_isr_service(0));
-  ESP_ERROR_CHECK(gpio_isr_handler_add(LIMIT_IN, gpio_isr_handler, (void*)NULL));
+  ESP_ERROR_CHECK(gpio_isr_handler_add(LIMIT_IN, Limits_GPIO_ISR, (void*)NULL));
   
   // TIMER
   // -----
@@ -214,7 +213,7 @@ void LimitsInit( )
   ESP_ERROR_CHECK(gptimer_new_timer(&timer_config, &g_limitsTimer));
 
   gptimer_event_callbacks_t cbs = {
-      .on_alarm = limits_timer_callback,
+      .on_alarm = Limits_TimerCallback,
   };
   ESP_ERROR_CHECK(gptimer_register_event_callbacks(g_limitsTimer, &cbs, NULL));
   ESP_ERROR_CHECK(gptimer_enable(g_limitsTimer));

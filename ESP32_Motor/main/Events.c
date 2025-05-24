@@ -17,7 +17,7 @@ unsigned long g_State;
 
 static const char* TAG = "events";
 
-void SetState( unsigned long flag )
+void Events_SetState( unsigned long flag )
 {
   g_State |= flag; 
 }
@@ -26,12 +26,12 @@ void ClearState( unsigned long flag )
   g_State &= ~flag;
 }
 
-unsigned long GetState( )
+unsigned long Events_GetState( )
 {
   return g_State;
 }
 
-int EventInit( )
+int Events_Init( )
 {
   uint16_t testEndianness = 0x1234;
     
@@ -48,18 +48,18 @@ int EventInit( )
   // Test the system's endianness
   if( *((char*)&testEndianness) == 0x34 )
   { 
-    SetState( CNC_STATE_LITTLE_ENDIAN );
+    Events_SetState( CNC_STATE_LITTLE_ENDIAN );
   }
   
   // By Default, motors are idle and limit sensors are not active
   xEventGroupSetBits(g_eventGroupHandle, MOTOR_IDLE_BIT);
   
-  SetState( CNC_STATE_CONNECTED | CNC_STATE_IDLE | CNC_STATE_LIMITS_INACTIVE );
+  Events_SetState( CNC_STATE_CONNECTED | CNC_STATE_IDLE | CNC_STATE_LIMITS_INACTIVE );
 
   return 0;
 }
 
-void IRAM_ATTR SignalMotorIdleFromISR( )
+void IRAM_ATTR Events_SignalMotorIdleFromISR( )
 {
   BaseType_t xHigherPriorityTaskWoken = pdFALSE;
   if( xEventGroupSetBitsFromISR( g_eventGroupHandle, MOTOR_IDLE_BIT, &xHigherPriorityTaskWoken ) == pdPASS )
@@ -70,21 +70,21 @@ void IRAM_ATTR SignalMotorIdleFromISR( )
     // refer to the documentation page for the port being used.
     portYIELD_FROM_ISR( xHigherPriorityTaskWoken );
   }
-  SetState( CNC_STATE_IDLE );
+  Events_SetState( CNC_STATE_IDLE );
 }
 
-void SignalMotorNotIdle( )
+void Events_SignalMotorNotIdle( )
 {
   xEventGroupClearBits( g_eventGroupHandle, MOTOR_IDLE_BIT );
   ClearState( CNC_STATE_IDLE );
 }
 
-bool IsMotorIdle( )
+bool Events_IsMotorIdle( )
 {
   return(( xEventGroupWaitBits( g_eventGroupHandle, MOTOR_IDLE_BIT, pdFALSE, pdFALSE, 0 ) & MOTOR_IDLE_BIT ) == MOTOR_IDLE_BIT ); 
 }
 
-bool WaitForMotorIdle( unsigned long timeoutMs )
+bool Events_WaitForMotorIdle( unsigned long timeoutMs )
 {
   return(( xEventGroupWaitBits( g_eventGroupHandle, MOTOR_IDLE_BIT, pdFALSE, pdFALSE, timeoutMs / portTICK_PERIOD_MS ) & MOTOR_IDLE_BIT ) == MOTOR_IDLE_BIT );
 }
