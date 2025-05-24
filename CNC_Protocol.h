@@ -51,19 +51,29 @@
 
 // State flags
 // -----------
+// Errors
 #define CNC_STATE_MOTOR_CRC_ERROR         0x80000000L
 #define CNC_STATE_NETWORK_CRC_ERROR       0x40000000L
 #define CNC_STATE_LIMIT_ERROR             0x20000000L
 #define CNC_STATE_CALIBRATION_FAILED      0x10000000L
 #define CNC_STATE_COMMUNICATION_ERROR     0x08000000L
 #define CNC_STATE_IDLE_TIMEOUT_ERROR      0x04000000L
-                                      
-#define CNC_STATE_COMMAND_QUEUE_FULL      0x00002000L
-#define CNC_STATE_POS_SENSOR_XL           0x00001000L
-#define CNC_STATE_POS_SENSOR_XR           0x00000800L
-#define CNC_STATE_POS_SENSOR_ZL           0x00000400L
-#define CNC_STATE_POS_SENSOR_ZR           0x00000200L
-#define CNC_STATE_POS_SENSOR_Y            0x00000100L
+// 2 more here
+#define CNC_STATE_ERROR_MASK              0xFF000000L
+
+// Warnings   
+// 5 more here                        
+#define CNC_STATE_LIMITS_INACTIVE         0x00040000L
+#define CNC_STATE_COMMAND_QUEUE_FULL      0x00020000L
+#define CNC_STATE_POS_SENSOR_XL           0x00010000L
+#define CNC_STATE_POS_SENSOR_XR           0x00008000L
+#define CNC_STATE_POS_SENSOR_ZL           0x00004000L
+#define CNC_STATE_POS_SENSOR_ZR           0x00002000L
+#define CNC_STATE_POS_SENSOR_Y            0x00001000L
+#define CNC_STATE_WARNING_MASK            0x00FFF000L
+
+// Status
+// 4 more here
 #define CNC_STATE_Z_CALIBRATED            0x00000080L
 #define CNC_STATE_Y_CALIBRATED            0x00000040L
 #define CNC_STATE_X_CALIBRATED            0x00000020L
@@ -72,3 +82,6 @@
 #define CNC_STATE_IDLE                    0x00000004L
 #define CNC_STATE_LITTLE_ENDIAN           0x00000002L
 #define CNC_STATE_CONNECTED               0x00000001L
+#define CNC_STATE_MASK                    0x00000FFFL
+
+#define CNC_STATE_ALL_MASK                (CNC_STATE_MASK|CNC_STATE_WARNING_MASK|CNC_STATE_ERROR_MASK)

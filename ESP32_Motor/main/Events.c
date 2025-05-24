@@ -44,18 +44,17 @@ int EventInit( )
   
   // Zero all the flags
   ClearState((unsigned long)-1);
-  // Set the connected flag (state all zeros on the host means "disconnected")
-  SetState(CNC_STATE_CONNECTED);
-  
+   
   // Test the system's endianness
   if( *((char*)&testEndianness) == 0x34 )
   { 
     SetState( CNC_STATE_LITTLE_ENDIAN );
   }
   
-  // By Default, motors are idle
+  // By Default, motors are idle and limit sensors are not active
   xEventGroupSetBits(g_eventGroupHandle, MOTOR_IDLE_BIT);
-  SetState( CNC_STATE_IDLE );
+  
+  SetState( CNC_STATE_CONNECTED | CNC_STATE_IDLE | CNC_STATE_LIMITS_INACTIVE );
 
   return 0;
 }

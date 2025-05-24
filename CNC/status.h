@@ -11,7 +11,7 @@ typedef enum {
 	retCncStatusTimeout = -7,
 	retCncError = -8,
 	retOutOfMemory = -9,
-	retBusy = -10,
+	retCncCBusy = -10,
 	retBufferBusyTimeout = -11,
 	retCncCommunicationError = -12,
 	retBufferMutexTimeout = -13,

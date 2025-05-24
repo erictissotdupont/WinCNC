@@ -52,18 +52,15 @@ char g_szCNCIP[IPSTRSIZE];
 struct sockaddr_in g_CncAddr;
 
 unsigned long g_CNC_State = 0;
-int g_CNC_QueueFree;
+
 unsigned int g_CNC_QueueSize;
+unsigned int g_CNC_MsgInQueue = 0;
+int g_CNC_QueueFree;
 
 unsigned long g_TXcount = 0;
 unsigned long g_RXcount = 0;
 unsigned long g_RetryCount = 0;
 unsigned long g_NakCount = 0;
-
-unsigned int g_CNC_MsgInQueue = 0;
-
-long errCount = 0;
-long repeatCount = 0;
 
 // This is the buffer for accumulating outbound commands. Note this does not
 // include the header. So the actual message will be a few bytes long.
@@ -176,28 +173,35 @@ void getSocketStatusString(char* szBuffer, size_t cbBuffer)
 		(g_CNC_QueueSize == 0) ? 0 : (100 * g_CNC_MsgInQueue) / g_CNC_QueueSize );
 }
 
-void getCNCStateString(char* szBuffer, size_t cbBuffer)
+void getCNCStateString(char* szBuffer, size_t cbBuffer, unsigned long mask )
 {
 	*szBuffer = 0;
-	if (g_CNC_State & CNC_STATE_MOTOR_CRC_ERROR    ) strcat_s(szBuffer, cbBuffer, "Motor CRC error" "\r\n");
-	if (g_CNC_State & CNC_STATE_NETWORK_CRC_ERROR  ) strcat_s(szBuffer, cbBuffer, "Network CRC error" "\r\n");
-	if (g_CNC_State & CNC_STATE_LIMIT_ERROR        ) strcat_s(szBuffer, cbBuffer, "Limit error" "\r\n");
-	if (g_CNC_State & CNC_STATE_CALIBRATION_FAILED ) strcat_s(szBuffer, cbBuffer, "Calibration failed" "\r\n");
-	if (g_CNC_State & CNC_STATE_COMMUNICATION_ERROR) strcat_s(szBuffer, cbBuffer, "Communication error" "\r\n");
-	if (g_CNC_State & CNC_STATE_COMMAND_QUEUE_FULL ) strcat_s(szBuffer, cbBuffer, "Command queue is full" "\r\n");
-	if (g_CNC_State & CNC_STATE_POS_SENSOR_XL      ) strcat_s(szBuffer, cbBuffer, "Position sensor XL" "\r\n");
-	if (g_CNC_State & CNC_STATE_POS_SENSOR_XR      ) strcat_s(szBuffer, cbBuffer, "Position sensor XR" "\r\n");
-	if (g_CNC_State & CNC_STATE_POS_SENSOR_ZL      ) strcat_s(szBuffer, cbBuffer, "Position sensor ZL" "\r\n");
-	if (g_CNC_State & CNC_STATE_POS_SENSOR_ZR      ) strcat_s(szBuffer, cbBuffer, "Position sensor ZR" "\r\n");
-	if (g_CNC_State & CNC_STATE_POS_SENSOR_Y       ) strcat_s(szBuffer, cbBuffer, "Position sensor Y" "\r\n");
-	if (g_CNC_State & CNC_STATE_Z_CALIBRATED       ) strcat_s(szBuffer, cbBuffer, "Z axis calibrated" "\r\n");
-	if (g_CNC_State & CNC_STATE_Y_CALIBRATED       ) strcat_s(szBuffer, cbBuffer, "Y axis calibrated" "\r\n");
-	if (g_CNC_State & CNC_STATE_X_CALIBRATED       ) strcat_s(szBuffer, cbBuffer, "X axis calibrated" "\r\n");
-	if (g_CNC_State & CNC_STATE_CALIBRATING        ) strcat_s(szBuffer, cbBuffer, "Calibrating..." "\r\n");
-	if (g_CNC_State & CNC_STATE_MANUAL_MODE        ) strcat_s(szBuffer, cbBuffer, "Manual mode" "\r\n");
-	if (g_CNC_State & CNC_STATE_IDLE               ) strcat_s(szBuffer, cbBuffer, "Idle..." "\r\n");
-	if (g_CNC_State & CNC_STATE_LITTLE_ENDIAN      ) strcat_s(szBuffer, cbBuffer, "Little Endian" "\r\n");
-	if (g_CNC_State & CNC_STATE_CONNECTED          ) strcat_s(szBuffer, cbBuffer, "Connected" "\r\n");
+	unsigned long state = g_CNC_State & mask;
+	if (state & CNC_STATE_MOTOR_CRC_ERROR)     strcat_s(szBuffer, cbBuffer, "Motor CRC error" "\r\n");
+	if (state & CNC_STATE_NETWORK_CRC_ERROR)   strcat_s(szBuffer, cbBuffer, "Network CRC error" "\r\n");
+	if (state & CNC_STATE_LIMIT_ERROR)         strcat_s(szBuffer, cbBuffer, "Limit error" "\r\n");
+	if (state & CNC_STATE_CALIBRATION_FAILED)  strcat_s(szBuffer, cbBuffer, "Calibration failed" "\r\n");
+	if (state & CNC_STATE_COMMUNICATION_ERROR) strcat_s(szBuffer, cbBuffer, "Communication error" "\r\n");
+	if (state & CNC_STATE_LIMITS_INACTIVE)     strcat_s(szBuffer, cbBuffer, "Limit sensors not connected" "\r\n");
+	if (state & CNC_STATE_COMMAND_QUEUE_FULL)  strcat_s(szBuffer, cbBuffer, "Command queue is full" "\r\n");
+	if (state & CNC_STATE_POS_SENSOR_XL)       strcat_s(szBuffer, cbBuffer, "Position sensor XL" "\r\n");
+	if (state & CNC_STATE_POS_SENSOR_XR)       strcat_s(szBuffer, cbBuffer, "Position sensor XR" "\r\n");
+	if (state & CNC_STATE_POS_SENSOR_ZL)       strcat_s(szBuffer, cbBuffer, "Position sensor ZL" "\r\n");
+	if (state & CNC_STATE_POS_SENSOR_ZR)       strcat_s(szBuffer, cbBuffer, "Position sensor ZR" "\r\n");
+	if (state & CNC_STATE_POS_SENSOR_Y)        strcat_s(szBuffer, cbBuffer, "Position sensor Y" "\r\n");
+	if (state & CNC_STATE_Z_CALIBRATED)        strcat_s(szBuffer, cbBuffer, "Z axis calibrated" "\r\n");
+	if (state & CNC_STATE_Y_CALIBRATED)        strcat_s(szBuffer, cbBuffer, "Y axis calibrated" "\r\n");
+	if (state & CNC_STATE_X_CALIBRATED)        strcat_s(szBuffer, cbBuffer, "X axis calibrated" "\r\n");
+	if (state & CNC_STATE_CALIBRATING)         strcat_s(szBuffer, cbBuffer, "Calibrating..." "\r\n");
+	if (state & CNC_STATE_MANUAL_MODE)         strcat_s(szBuffer, cbBuffer, "Manual mode" "\r\n");
+	if (state & CNC_STATE_IDLE)                strcat_s(szBuffer, cbBuffer, "Idle..." "\r\n");
+	if (state & CNC_STATE_LITTLE_ENDIAN)       strcat_s(szBuffer, cbBuffer, "Little Endian" "\r\n");
+	if (state & CNC_STATE_CONNECTED)           strcat_s(szBuffer, cbBuffer, "Connected" "\r\n");
+}
+
+unsigned long getCNCState()
+{
+	return g_CNC_State;
 }
 
 bool CheckDisconnection()
@@ -234,79 +238,66 @@ int sendToCNC(char* msg, size_t cbMsg)
 
 tStatus sendAndWaitForAck(char* msg, size_t cbMsg)
 {
-	int iResult;
-	// This is the status if the we exhaust the # of of retries
-	tStatus status = retCncCommunicationError;
-	bool bRetry = true;
+	tStatus status = retInternalError;
 
-	do
+	ResetEvent(g_hAckReceived);
+	ResetEvent(g_hNackReceived);
+
+	if (sendToCNC(msg,cbMsg) <= 0 )
 	{
-		ResetEvent(g_hAckReceived);
-		ResetEvent(g_hNackReceived);
+		int iResult = WSAGetLastError();
+		status = retCncCommunicationError;
+	}
+	else
+	{
+		HANDLE hEvent[4];
+		hEvent[0] = g_hStop;
+		hEvent[1] = g_hAckReceived;
+		hEvent[2] = g_hNackReceived;
+		hEvent[3] = g_hDisconnected;
 
-		if (sendToCNC(msg,cbMsg) <= 0 )
+		switch (WaitForMultipleObjects(4, hEvent, FALSE, COMMAND_TIMEOUT_MS))
 		{
-			iResult = WSAGetLastError();
-			// Avoid sending retries in a tight loop 
-			Sleep(COMMAND_TIMEOUT_MS);
-		}
-		else
-		{
-			bool bWait = true;
-			HANDLE hEvent[4];
+		default:
+			status = retInternalError;
+			break;
 
-			hEvent[0] = g_hStop;
-			hEvent[1] = g_hAckReceived;
-			hEvent[2] = g_hNackReceived;
-			hEvent[3] = g_hDisconnected;
+		case WAIT_OBJECT_0: // Stop
+			status = retStopRequested;
+			break;
 
-			do
+		case WAIT_TIMEOUT:
+			CheckDisconnection();
+			break;
+
+		case WAIT_OBJECT_0 + 1: // ACK
+			g_TXcount++;
+			status = retSuccess;
+			break;
+
+		case WAIT_OBJECT_0 + 2: // Nack
+			if (g_CNC_State & CNC_STATE_ERROR_MASK)
 			{
-				switch (WaitForMultipleObjects(4, hEvent, FALSE, COMMAND_TIMEOUT_MS ))
-				{
-				default:
-					bWait = false;
-					bRetry = false;
-					status = retInternalError;
-					break;
+				status = retCncError;
+			}
+			else if (g_CNC_State & CNC_STATE_COMMAND_QUEUE_FULL)
+			{
+				// The CNC command pipe is full. Wait for a while before retrying
+				Sleep(COMMAND_TIMEOUT_MS);
+				status = retCncCBusy;
+			}
+			else
+			{
+				status = retUnknownErr;
+			}
+			break;
 
-				case WAIT_OBJECT_0 : // Stop
-					bWait = false;
-					bRetry = false;
-					status = retStopRequested;
-					break;
+		case WAIT_OBJECT_0 + 3: // Disconnected
+			status = retCncNotConnected;
+			break;
 
-				case WAIT_TIMEOUT:
-					// Stop waiting and retry sending the message
-					g_RetryCount++;
-					bWait = false;
-					CheckDisconnection( );
-					break;
-
-				case WAIT_OBJECT_0 + 1: // Ack
-					g_TXcount++;
-					bWait = false;
-					bRetry = false;
-					status = retSuccess;
-					break;
-
-				case WAIT_OBJECT_0 + 2: // Nack
-					// The CNC command pipe is full. It's asking us to stall.
-					// Will stay in this loop for as long as the CNC is telling
-					// us to wait...
-					break;
-
-				case WAIT_OBJECT_0 + 3: // Disconnected
-					bWait = false;
-					bRetry = false;
-					status = retCncNotConnected;
-					break;
-
-				}
-			} while (bWait);
 		}
-	} while (bRetry);
-
+	}
 	return status;
 }
 
@@ -407,8 +398,7 @@ void ForceStop( )
 			g_msgSeq,
 			1,
 			CNC_CMD_FLUSH );
-		sendToCNC(msg, msgLen);
-		//sendAndWaitForAck(msg, cbHeader + g_outCharCount + 1);
+		sendAndWaitForAck(msg, msgLen);
 	}
 }
 
@@ -461,9 +451,13 @@ DWORD senderThread(PVOID pParam)
 
 				ret = sendAndWaitForAck(msg, cbHeader + g_outCharCount + 1);
 
-				if (ret == retSuccess || ret == retStopRequested )
+				if (ret != retCncCBusy && ret != retCncStatusTimeout )
 				{
 					FlushOutBuffer( );
+				}
+				else
+				{
+					g_RetryCount++;
 				}
 			}
 			ReleaseMutex(g_outBufferMutex);
@@ -591,7 +585,6 @@ void DecodeMessage(const char* msg, int cnt)
 			}
 			else if (bNak)
 			{
-				g_NakCount++;
 				if (seq == (g_msgSeq + 1))
 				{
 					g_msgSeq++;
@@ -599,6 +592,7 @@ void DecodeMessage(const char* msg, int cnt)
 				}
 				else
 				{
+					g_NakCount++;
 					SetEvent(g_hNackReceived);
 				}
 			}

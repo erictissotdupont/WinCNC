@@ -128,7 +128,7 @@ void OnPaint(HWND hWnd)
 	current.y -= inPipe.y;
 	current.z -= inPipe.z;
 
-	getCNCStateString(str, sizeof(str));
+	getCNCStateString(str, sizeof(str), CNC_STATE_ALL_MASK);
 	DrawTextA(hdcMem, str, -1, &rect, 0);
 	DeleteObject(font);
 

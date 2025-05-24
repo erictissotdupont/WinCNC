@@ -23,5 +23,6 @@ int initSocketCom( );
 void ForceStop( );
 tStatus postCommand( char* cmd );
 void getSocketStatusString(char* szBuffer, size_t cbBuffer);
-void getCNCStateString(char* szBuffer, size_t cbBuffer);
+void getCNCStateString(char* szBuffer, size_t cbBuffer, unsigned long mask);
+unsigned long getCNCState( );
 

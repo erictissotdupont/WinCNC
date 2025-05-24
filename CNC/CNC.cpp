@@ -353,10 +353,17 @@ void OnRunGCode(HWND hWnd,BOOL bDebug)
 
 void MachineCalibrate(HWND hWnd)
 {
-	tStatus status = postCommand(CNC_CMD_CALIBRATE);
-	if (status != retSuccess)
+	if ((getCNCState() & CNC_STATE_IDLE) == 0)
 	{
-		MessageBoxA(hWnd, "Calibration command failed.", "CNC", MB_ICONERROR);
+		MessageBoxA(hWnd, "Calibration cannot be performed when the machine is not idle.", "CNC", MB_ICONERROR);
+	}
+	else
+	{
+		tStatus status = postCommand(CNC_CMD_CALIBRATE);
+		if (status != retSuccess)
+		{
+			MessageBoxA(hWnd, "Calibration command failed.", "CNC", MB_ICONERROR);
+		}
 	}
 }
 
@@ -364,7 +371,11 @@ void MachineReboot(HWND hWnd)
 {
 	if (MessageBoxA(hWnd, "The reboot will lose position and calibration. Are you sure?", "CNC", MB_YESNO | MB_ICONEXCLAMATION) == IDYES)
 	{
-		postCommand(CNC_CMD_REBOOT);
+		if ((getCNCState() & CNC_STATE_IDLE) != 0 ||
+			MessageBoxA(hWnd, "THE MACHINE IS NOT IDLE. Reboot will abort in an unknown state. Are you really sure?", "CNC", MB_YESNOCANCEL | MB_ICONERROR) == IDYES)
+		{
+			postCommand(CNC_CMD_REBOOT);
+		}
 	}
 }
 

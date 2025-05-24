@@ -225,6 +225,13 @@ bool MovementCommand( unsigned long seq, char* pt, bool bIgnoreCRC )
 bool Calibrate( )
 {
   cmd_t cmd = { 0 };
+  
+  if( GetState( ) & CNC_STATE_LIMITS_INACTIVE )
+  {
+    ESP_LOGW( TAG, "Cannot calibrate without limit sensor" );
+    return false;
+  }
+  
   cmd.flags = CMD_FLAG_CALIBRATION;
   if( xQueueSend( g_cmd_queue, 
                   &cmd, 
@@ -289,11 +296,14 @@ int ParseMessage( char* msgbuf, int nbytes, char* outBuf )
     else if(( CMD_QUEUE_SIZE - inQueue ) < cmdCount )
     {
       ESP_LOGW( TAG, "Queue is full. Got %lu commands. Queue has %d spaces.", cmdCount, CMD_QUEUE_SIZE - inQueue );
+      SetState( CNC_STATE_COMMAND_QUEUE_FULL );
     }
     else
     {
       char *pt = msgbuf+4;
       bStatus = true;
+      
+      ClearState( CNC_STATE_COMMAND_QUEUE_FULL );
       
       for( int i=0; i<cmdCount && bStatus; i++ )
       {

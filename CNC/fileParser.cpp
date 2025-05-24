@@ -212,7 +212,7 @@ WCHAR* GetCNCErrorString(tStatus status)
 	case retCncStatusTimeout: return L"Cnc status timeout";
 	case retCncError: return L"Cnc error";
 	case retOutOfMemory: return L"Out of memory";
-	case retBusy: return L"Busy";
+	case retCncCBusy: return L"Busy";
 	case retBufferBusyTimeout: return L"Buffer busy timeout";
 	case retCncCommunicationError: return L"Cnc communication error";
 	case retBufferMutexTimeout: return L"Buffer mutex timeout";

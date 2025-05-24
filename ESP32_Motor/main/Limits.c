@@ -8,6 +8,7 @@
 #include "driver/gptimer.h"
 
 #include "cnc.h"
+#include "events.h"
 
 #define LHP                   50    // Limit clock half period in uS
 
@@ -99,10 +100,10 @@ bool IRAM_ATTR limits_timer_callback(gptimer_handle_t timer, const gptimer_alarm
         if( crc == (( data >> 24 ) & 0xFF ))
         {
           g_limitState = data;
-          // Serial.printf("Limit %lx\n", data );
+          ClearState( CNC_STATE_LIMITS_INACTIVE );
 
           // Got the correct CRC. Clock one more to let the limit sensor
-          // that we're okay.
+          // know that we're okay.
           g_state = 5;
         }
         else
