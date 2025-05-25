@@ -130,49 +130,6 @@ tStatus parseLine(char* cmd)
 	return ret;
 }
 
-void OnCncStatus( HWND hWnd, char* str )
-{
-	int x, y, z, s;	
-	char* pt;
-	unsigned long gotWhat = 0;
-
-	x = y = z = s = 0;
-
-	if (str)
-	{
-		pt = strchr(str, 'X');
-		if (pt) if (sscanf_s(pt + 1, "%d", &x) == 1) gotWhat |= 0x01;
-		pt = strchr(str, 'Y');
-		if (pt) if (sscanf_s(pt + 1, "%d", &y) == 1) gotWhat |= 0x02;
-		pt = strchr(str, 'Z');
-		if (pt) if (sscanf_s(pt + 1, "%d", &z) == 1) gotWhat |= 0x04;
-		pt = strchr(str, 'S');
-		if (pt) if (sscanf_s(pt + 1, "%d", &s) == 1) gotWhat |= 0x08;
-
-		pt = strchr(str, 'a');
-		if (pt) sscanf_s(pt + 1, "%d", &g_debug[0]);
-		pt = strchr(str, 'b');
-		if (pt) sscanf_s(pt + 1, "%d", &g_debug[1]);
-		pt = strchr(str, 'c');
-		if (pt) sscanf_s(pt + 1, "%d", &g_debug[2]);
-		pt = strchr(str, 'd');
-		if (pt) sscanf_s(pt + 1, "%d", &g_debug[3]);
-	}
-
-	if (gotWhat & 0x08)
-	{
-		g_errorStatusFlags = s;
-	}
-
-	if (( gotWhat & 0x07 ) == 0x07 )
-	{
-		stepToPos(x, y, z, &g_displayPos);
-	}
-
-	// If we got some information, refresh the screen
-	if( gotWhat ) PostMessage(hWnd, WM_REDRAW, 0, 0);
-}
-
 void OnMachineUpdate(PVOID param)
 {
 	PostMessage(hMainWindow, WM_UPDATE_POSITION, 0, 0);
@@ -379,6 +336,162 @@ void MachineReboot(HWND hWnd)
 	}
 }
 
+void SenManualCommand( int x, int y, int z )
+{
+	char msg[100];
+	int len = sprintf_s(msg, sizeof(msg), CNC_HEADER CNC_MANUAL_HEADER "|" CNC_MANUAL_PARAMS "|", x, y, z);
+	sendToCNC(msg, len);
+}
+
+#define MANUAL_MODE_RES   5
+#define MANUAL_MAX_STEP   8
+
+void OnManualModeTimer(HWND hWnd)
+{
+	RECT btn;
+	RECT wnd;
+	POINT curPos;
+	int x = 0;
+	int y = 0;
+	int z = 0;
+	static bool bZMode = false;
+	static bool bCTRLdown = false;
+	static int keyDownCount = 0;
+
+	HWND hBtn = GetDlgItem(hWnd, IDOK);
+	GetWindowRect(hBtn, &btn);
+	GetWindowRect(hWnd, &wnd);
+	GetCursorPos(&curPos);
+
+	if( curPos.x > wnd.right || curPos.x < wnd.left || curPos.y > wnd.bottom || curPos.y < wnd.top )
+	{
+		PostMessage(hWnd, WM_CLOSE, 0, 0);
+	}
+	else
+	{
+		int Xres = ((wnd.right - wnd.left) - (btn.right - btn.left)) / ((MANUAL_MAX_STEP+1)*2);
+		int Yres = ((wnd.bottom - wnd.top) - (btn.bottom - btn.top)) / ((MANUAL_MAX_STEP+1)*2);
+
+		if (curPos.x < btn.left)
+		{
+			y = (curPos.x - btn.left) / Xres - 1;
+		}
+		else if (curPos.x > btn.right)
+		{
+			y = (curPos.x - btn.right) / Xres + 1;
+		}
+
+		if (curPos.y < btn.top)
+		{
+			x = (curPos.y - btn.top) / Yres - 1;
+		}
+		else if (curPos.y > btn.bottom)
+		{
+			x = (curPos.y - btn.bottom) / Yres + 1;
+		}
+		if (x > MANUAL_MAX_STEP) x = MANUAL_MAX_STEP;
+		if (x < -MANUAL_MAX_STEP) x = -MANUAL_MAX_STEP;
+		if (y > MANUAL_MAX_STEP) y = MANUAL_MAX_STEP;
+		if (y < -MANUAL_MAX_STEP) y = -MANUAL_MAX_STEP;
+
+		if (x == 0 && y == 0)
+		{
+			keyDownCount++;
+			int step = 1 + keyDownCount / 10;
+			if (GetKeyState(VK_UP) & 0x8000) { x = -step; }
+			else if (GetKeyState(VK_DOWN) & 0x8000) { x = step; }
+			else if (GetKeyState(VK_LEFT) & 0x8000) { y = -step; }
+			else if (GetKeyState(VK_RIGHT) & 0x8000) { y = step; }
+			else { keyDownCount = 0; }
+		}
+	}
+
+	if (GetKeyState(VK_CONTROL) & 0x8000)
+	{
+		bCTRLdown = true;
+	}
+	else
+	{
+		if (bCTRLdown == true)
+		{
+			bCTRLdown = false;
+			bZMode = !bZMode;
+			SetCursorPos((btn.left + btn.right) / 2, (btn.top + btn.bottom) / 2);
+			x = 0;
+			y = 0;
+			z = 0;
+		}
+	}
+
+	if (bZMode)
+	{
+		SetWindowText(hBtn, L"Z");
+		z = x;
+		x = 0;
+		y = 0;
+	}
+	else
+	{
+		SetWindowText(hBtn, L"X Y");
+	}
+
+	SenManualCommand(x, y, z);
+}
+
+void OnManualModeInit(HWND hWnd)
+{
+	RECT btn;
+	HWND hBtn = GetDlgItem(hWnd, IDOK);
+	GetWindowRect(hBtn, &btn);
+	
+	SetCursorPos((btn.left + btn.right) / 2, (btn.top + btn.bottom) / 2);
+
+	SetTimer(hWnd, 1, 125, NULL);
+}
+
+BOOL CALLBACK ManualModeProc(HWND hWnd,
+	UINT message,
+	WPARAM wParam,
+	LPARAM lParam)
+{
+	
+	switch (message)
+	{
+	case WM_INITDIALOG:
+		OnManualModeInit(hWnd);
+		return TRUE;
+		break;
+
+	case WM_TIMER:
+		OnManualModeTimer(hWnd);
+		break;
+
+	case WM_CLOSE:
+		SenManualCommand(0,0,0);
+		EndDialog(hWnd, wParam);
+		return TRUE;
+		break;
+
+	case WM_COMMAND:
+		switch (LOWORD(wParam))
+		{
+		case IDOK:
+			SenManualCommand(0, 0, 0);
+			EndDialog(hWnd, wParam);
+			return TRUE;
+		}
+	}
+	return FALSE;
+}
+
+void ManualMode(HWND hWnd)
+{
+	DialogBox(NULL,
+		MAKEINTRESOURCE(IDD_MANUAL_MODE),
+		hWnd,
+		(DLGPROC)ManualModeProc);
+}
+
 //
 //  FUNCTION: WndProc(HWND, UINT, WPARAM, LPARAM)
 //
@@ -415,6 +528,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			break;
 		case IDM_MACHINE_REBOOT:
 			MachineReboot(hWnd);
+			break;
+		case IDM_MACHINE_MANUALMODE:
+			ManualMode(hWnd);
 			break;
 		case IDM_BASIC_SHAPE:
 			BasicShapes(hWnd);

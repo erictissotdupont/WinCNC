@@ -1,6 +1,6 @@
 
 void Events_SetState( unsigned long flag );
-void ClearState( unsigned long flag );
+void Events_ClearState( unsigned long flag );
 unsigned long Events_GetState( );
 void Events_Init( );
 void IRAM_ATTR Events_SignalMotorIdleFromISR( );

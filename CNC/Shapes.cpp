@@ -13,7 +13,7 @@ void ShapeInitToolInfo(tGeneralToolInfo *pToolInfo)
 	pToolInfo->safeTravel = 0.5f;
 }
 
-UINT ShapeGetSetFloat(HWND hWnd, UINT id, BOOL get, float* val)
+UINT ShapeGetSetDouble(HWND hWnd, UINT id, BOOL get, double* val)
 {
 	WCHAR str[MAX_STR];
 	HWND hItem;
@@ -21,11 +21,11 @@ UINT ShapeGetSetFloat(HWND hWnd, UINT id, BOOL get, float* val)
 	if (get)
 	{
 		GetWindowText(hItem, str, MAX_STR);
-		if (swscanf_s(str, L"%f", val) != 1) return id;
+		if (swscanf_s(str, L"%lf", val) != 1) return id;
 	}
 	else
 	{
-		StringCbPrintf(str, sizeof(str), L"%.4f", *val);
+		StringCbPrintf(str, sizeof(str), L"%.4lf", *val);
 		SetWindowText(hItem, str);
 	}
 	return 0;
@@ -99,18 +99,18 @@ UINT ShapeGetSetRadio(HWND hWnd, UINT id, int btnCnt, BOOL get, int* val )
 	return 0;
 }
 
-UINT ShapeGetSetToolSize(HWND hWnd, UINT id, BOOL get, float* pRadius)
+UINT ShapeGetSetToolSize(HWND hWnd, UINT id, BOOL get, double* pRadius)
 {
 	HWND hItem;
 	WCHAR str[MAX_STR];
-	float val;
+	double val;
 	int i;
 
 	hItem = GetDlgItem(hWnd, id);
 	if (get)
 	{
 		ComboBox_GetText(hItem, str, MAX_STR);
-		if (swscanf_s(str, L"%f", &val) != 1) return IDC_TOOL_SIZE;
+		if (swscanf_s(str, L"%lf", &val) != 1) return IDC_TOOL_SIZE;
 		*pRadius = val / 2.0f;
 	}
 	else
@@ -129,13 +129,13 @@ UINT ShapeGetSetToolSize(HWND hWnd, UINT id, BOOL get, float* pRadius)
 			ComboBox_SetText(hItem, str);
 		}
 	}
+	return 0;
 }
 
 UINT ShapeGetSetTool(HWND hWnd, BOOL get, tGeneralToolInfo *pToolInfo )
 {
 	HWND hItem;
 	WCHAR str[MAX_STR];
-	float val;
 	int i;
 
 	ShapeGetSetToolSize(hWnd, IDC_TOOL_SIZE, get, &pToolInfo->radius);
@@ -170,10 +170,10 @@ UINT ShapeGetSetTool(HWND hWnd, BOOL get, tGeneralToolInfo *pToolInfo )
 		}
 	}
 
-	ShapeGetSetFloat(hWnd, IDC_CUT_DEPTH, get, &pToolInfo->cutDepth);
-	ShapeGetSetFloat(hWnd, IDC_MAX_TOOL_DEPTH, get, &pToolInfo->maxDepth);
+	ShapeGetSetDouble(hWnd, IDC_CUT_DEPTH, get, &pToolInfo->cutDepth);
+	ShapeGetSetDouble(hWnd, IDC_MAX_TOOL_DEPTH, get, &pToolInfo->maxDepth);
 	ShapeGetSetBool(hWnd, IDC_MOTOR, get, &pToolInfo->motorControl);
-	ShapeGetSetFloat(hWnd, IDC_SAFE_TRAVEL, get, &pToolInfo->safeTravel);
+	ShapeGetSetDouble(hWnd, IDC_SAFE_TRAVEL, get, &pToolInfo->safeTravel);
 
 	return 0;
 }

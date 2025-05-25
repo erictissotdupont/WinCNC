@@ -182,6 +182,8 @@ void getCNCStateString(char* szBuffer, size_t cbBuffer, unsigned long mask )
 	if (state & CNC_STATE_LIMIT_ERROR)         strcat_s(szBuffer, cbBuffer, "Limit error" "\r\n");
 	if (state & CNC_STATE_CALIBRATION_FAILED)  strcat_s(szBuffer, cbBuffer, "Calibration failed" "\r\n");
 	if (state & CNC_STATE_COMMUNICATION_ERROR) strcat_s(szBuffer, cbBuffer, "Communication error" "\r\n");
+	
+	if (state & CNC_STATE_POSITION_ERROR)      strcat_s(szBuffer, cbBuffer, "Calibration position error" "\r\n");
 	if (state & CNC_STATE_LIMITS_INACTIVE)     strcat_s(szBuffer, cbBuffer, "Limit sensors not connected" "\r\n");
 	if (state & CNC_STATE_COMMAND_QUEUE_FULL)  strcat_s(szBuffer, cbBuffer, "Command queue is full" "\r\n");
 	if (state & CNC_STATE_POS_SENSOR_XL)       strcat_s(szBuffer, cbBuffer, "Position sensor XL" "\r\n");
@@ -555,7 +557,6 @@ void DecodeMessage(const char* msg, int cnt)
 						{
 							g_msgSeq = seq;
 							resetMotorPosition(x, y, z);
-							resetTheoricalPosition();
 						}
 						LockMachinePosition(false);
 					}

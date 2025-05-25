@@ -5,20 +5,20 @@ void ComplexShapes(HWND hWnd);
 void BitmapShapes(HWND hWnd);
 
 typedef struct {
-	float radius;
-	float maxDepth;
-	float cutDepth;
+	double radius;
+	double maxDepth;
+	double cutDepth;
 	int cutSpeed;
 	int motorControl;
-	float safeTravel;
+	double safeTravel;
 } tGeneralToolInfo;
 
-const struct { WCHAR* str; float val; } TOOL_SIZES[] = {
-	{ L"0.5       (1/2)",0.5f },
-	{ L"0.25     (1/4)",0.25f },
-	{ L"0.125   (1/8)",0.125f },
-	{ L"0.0625 (1/16)",0.0625f },
-	{ L"0.0312 (1/32)", 0.03125f } };
+const struct { WCHAR* str; double val; } TOOL_SIZES[] = {
+	{ L"0.5       (1/2)",  0.5f },
+	{ L"0.25     (1/4)",   0.25f },
+	{ L"0.125   (1/8)",    0.125f },
+	{ L"0.0625 (1/16)",    0.0625f },
+	{ L"0.0312 (1/32)",    0.03125f } };
 
 const struct { WCHAR* str; int val; } CUT_SPEED[] = {
 	{ L"F10",10 },
@@ -32,10 +32,10 @@ const struct { WCHAR* str; int val; } CUT_SPEED[] = {
 
 void ShapeInitToolInfo(tGeneralToolInfo *pToolInfo);
 
-UINT ShapeGetSetFloat(HWND hWnd, UINT id, BOOL get, float* val);
+UINT ShapeGetSetDouble(HWND hWnd, UINT id, BOOL get, double* val);
 UINT ShapeGetSetBool(HWND hWnd, UINT id, BOOL get, int* val);
 UINT ShapeGetSetInt(HWND hWnd, UINT id, BOOL get, int* val);
 UINT ShapeGetSetString(HWND hWnd, UINT id, BOOL get, WCHAR* str, int cbStr);
 UINT ShapeGetSetRadio(HWND hWnd, UINT id, int btnCnt, BOOL get, int* val);
-UINT ShapeGetSetToolSize(HWND hWnd, UINT id, BOOL get, float* pRadius);
+UINT ShapeGetSetToolSize(HWND hWnd, UINT id, BOOL get, double* pRadius);
 UINT ShapeGetSetTool(HWND hWnd, BOOL get, tGeneralToolInfo *pToolInfo);

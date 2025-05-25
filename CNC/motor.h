@@ -4,7 +4,6 @@
 typedef struct _tAxis {
   long step;
   double scale;
-  double cutComp;
 } tAxis;
 
 typedef struct _tSpindle {
@@ -24,11 +23,6 @@ void getRawStepPos( long* x, long* y, long* z );
 void setRawStepPos(long x, long y, long z);
 
 void resetMotorPosition( long x, long y, long z );
-void resetCompensation( );
-void getCompensation( double* x, double* y, double* z );
-void addCompensation( double x, double y, double z );
-
-
 
 double getLargestStep( );
 double getSmalestStep( );

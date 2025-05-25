@@ -22,11 +22,24 @@ static const char* TAG = "UDP";
 
 // ----------------------------------------------------------------------------
 
+uint8_t UDP_GetCRCAndUpdatePosition( cmd_t *pCmd )
+{
+  // Update the position from the command received so that
+  // we can update calculate the CRC of the position the machine
+  // should be after this command is executed
+  g_NetworkPosition[0] += pCmd->dx;
+  g_NetworkPosition[1] += pCmd->dy;
+  g_NetworkPosition[2] += pCmd->dz;
+  g_NetworkPosition[3] = pCmd->duration;
+  g_NetworkPosition[4] = pCmd->flags & ~CMD_FLAGS_CRC_MASK;
+  
+  return crc8((uint8_t*)g_NetworkPosition, sizeof( g_NetworkPosition ), 0xFF );
+}
+
 bool UDP_MovementCommand( unsigned long seq, char* pt, bool bIgnoreCRC )
 {
   cmd_t cmd;
-  unsigned int remotePosCRC;
-  
+   
   if( sscanf( pt, CNC_CMD_PARAMS,
     &cmd.dx,
     &cmd.dy,
@@ -39,18 +52,8 @@ bool UDP_MovementCommand( unsigned long seq, char* pt, bool bIgnoreCRC )
   }
   else 
   {
-    remotePosCRC = cmd.flags & CMD_FLAGS_CRC_MASK;
-    
-    // Update the position from the command received so that
-    // we can update calculate the CRC of the position the machine
-    // should be after this command is executed
-    g_NetworkPosition[0] += cmd.dx;
-    g_NetworkPosition[1] += cmd.dy;
-    g_NetworkPosition[2] += cmd.dz;
-    g_NetworkPosition[3] = cmd.duration;
-    g_NetworkPosition[4] = cmd.flags & ~CMD_FLAGS_CRC_MASK;
-    
-    uint8_t localPosCRC = crc8((uint8_t*)g_NetworkPosition, sizeof( g_NetworkPosition ), 0xFF );
+    uint8_t remotePosCRC = cmd.flags & CMD_FLAGS_CRC_MASK;
+    uint8_t localPosCRC = UDP_GetCRCAndUpdatePosition( &cmd );
     
     if( localPosCRC != remotePosCRC && !bIgnoreCRC )
     {
@@ -71,7 +74,7 @@ bool UDP_MovementCommand( unsigned long seq, char* pt, bool bIgnoreCRC )
     }
     else
     {
-      ClearState( CNC_STATE_COMMAND_QUEUE_FULL );
+      Events_ClearState( CNC_STATE_COMMAND_QUEUE_FULL );
       return true;
     }
   }
@@ -174,7 +177,7 @@ int UDP_ParseMessage( char* msgbuf, int nbytes, char* outBuf )
       char *pt = msgbuf+4;
       bStatus = true;
       
-      ClearState( CNC_STATE_COMMAND_QUEUE_FULL );
+      Events_ClearState( CNC_STATE_COMMAND_QUEUE_FULL );
       
       for( int i=0; i<cmdCount && bStatus; i++ )
       {
@@ -223,7 +226,7 @@ int UDP_ParseMessage( char* msgbuf, int nbytes, char* outBuf )
           xQueueReset( g_cmd_queue );
           if( Events_WaitForMotorIdle( MOTOR_IDLE_TIMEOUT_MS ))
           {
-            MotorGetPosition( &g_NetworkPosition[0], &g_NetworkPosition[1], &g_NetworkPosition[2] );
+            Motor_GetPosition( &g_NetworkPosition[0], &g_NetworkPosition[1], &g_NetworkPosition[2] );
           }
           else
           {
@@ -246,7 +249,17 @@ int UDP_ParseMessage( char* msgbuf, int nbytes, char* outBuf )
     {
       ret = UDP_Respond( CNC_ACK_HEADER, seq, inQueue + cmdCount, outBuf );
       g_NextSeq++;
-      MotorMoveIfIdle( );
+      Motor_MoveIfIdle( );
+    }
+  }
+  else if( memcmp( msgbuf, CNC_MANUAL_HEADER, CNC_MANUAL_HEADER_LEN ) == 0 )
+  {
+    int x, y, z;
+    if( msgbuf[CNC_MANUAL_HEADER_LEN] == '|' &&
+        sscanf( &msgbuf[CNC_MANUAL_HEADER_LEN+1], CNC_MANUAL_PARAMS, &x, &y, &z ) == 3 )
+    {
+      //ESP_LOGI( TAG, "Manual %d,%d,%d", x, y, z );
+      Motor_ManualMove( x, y, z );
     }
   }
   else if( memcmp( msgbuf, CNC_INFO_HEADER, CNC_INFO_HEADER_LEN ) == 0 )
@@ -287,6 +300,13 @@ void UDP_IdleTask( )
     vTaskDelay( 1000 / portTICK_PERIOD_MS );
     abort( );
   }
+}
+
+void UDP_ResetPosition( )
+{
+  g_NetworkPosition[0] = 0;
+  g_NetworkPosition[1] = 0;
+  g_NetworkPosition[2] = 0;
 }
 
 int UDP_Init( )

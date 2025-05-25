@@ -21,7 +21,7 @@ void Events_SetState( unsigned long flag )
 {
   g_State |= flag; 
 }
-void ClearState( unsigned long flag )
+void Events_ClearState( unsigned long flag )
 {
   g_State &= ~flag;
 }
@@ -43,7 +43,7 @@ int Events_Init( )
 	}
   
   // Zero all the flags
-  ClearState((unsigned long)-1);
+  Events_ClearState((unsigned long)-1);
    
   // Test the system's endianness
   if( *((char*)&testEndianness) == 0x34 )
@@ -76,7 +76,7 @@ void IRAM_ATTR Events_SignalMotorIdleFromISR( )
 void Events_SignalMotorNotIdle( )
 {
   xEventGroupClearBits( g_eventGroupHandle, MOTOR_IDLE_BIT );
-  ClearState( CNC_STATE_IDLE );
+  Events_ClearState( CNC_STATE_IDLE );
 }
 
 bool Events_IsMotorIdle( )

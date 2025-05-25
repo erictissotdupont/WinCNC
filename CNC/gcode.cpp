@@ -5,6 +5,8 @@
 #include "gcode.h"
 #include "motor.h"
 
+// https://linuxcnc.org/docs/html/gcode/g-code.html#gcode:quick-reference-table
+
 #define MAX_FEED     200.0
 #define MIN_FEED     0.5
 
@@ -20,63 +22,11 @@ typedef struct _tMotion {
   int motion;
 } tMotion;
 
-t3DPoint theoricalPos = {0,0,0};
-
-// Cutter compensation buffered moves
-tMotion CompBfrdB = {0,0,0,0,0,0,0,0,0,0}; // Buffered move
-tMotion CompBfrdC = {0,0,0,0,0,0,0,0,0,0}; // Buffered circle
-tMotion CompBfrdZ = {0,0,0,0,0,0,0,0,0,0}; // Buffered Z only move
+t3DPoint homePos = { 0,0,0 };
 
 double feedSpeed = 30; // Inches per minute
 double cutterRadius = 0;
 int spindle = 0;
-
-void getTheoricalPos( double* x, double* y, double* z)
-{
-	if(x) *x = theoricalPos.x;
-	if(y) *y = theoricalPos.y;
-	if(z) *z = theoricalPos.z;
-}
-
-void resetTheoricalPosition( )
-{
-	getCurPos(&theoricalPos);
-}
-
-void getCompPos( t3DPoint* P )
-{
-  double cX,cY,cZ;
-  
-  getCompensation( &cX,&cY,&cZ );
-  // printf( " Compensation : %.3f,%.3f,%.3f\n", cX,cY,cZ );
-  
-  getCurPos( P );
-  P->x -= cX;
-  P->y -= cY;
-  P->z -= cZ;
-
-  if( CompBfrdB.motion )
-  {
-    P->x += CompBfrdB.X;
-    P->y += CompBfrdB.Y;
-    P->z += CompBfrdB.Z;
-    // printf( " Buffered compensated move : %.3f,%.3f,%.3f\n", CompBfrdB.X,CompBfrdB.Y,CompBfrdB.Z );
-  }
-  if( CompBfrdC.motion )
-  {
-    P->x += CompBfrdC.X;
-    P->y += CompBfrdC.Y;
-    P->z += CompBfrdC.Z;
-    // printf( " Buffered compensated circle : %.3f,%.3f,%.3f\n", CompBfrdC.X,CompBfrdC.Y,CompBfrdC.Z );
-  }
-  if( CompBfrdZ.motion )
-  {
-    P->x += CompBfrdZ.X;
-    P->y += CompBfrdZ.Y;
-    P->z += CompBfrdZ.Z;
-    // printf( " Buffered compensated Z : %.3f,%.3f,%.3f\n", CompBfrdZ.X,CompBfrdZ.Y,CompBfrdZ.Z );
-  }
-}
 
 // ---------------------- ARCS ------------------------------------
 
@@ -292,179 +242,6 @@ tStatus dwell( long t )
   return doMove( getDwellPosStepAt, 1, t, NULL );
 }
 
-// ------------------------ Cutter Compensation -----------------------------
-
-#define STATE_IDLE       0
-#define STATE_LEAD       1
-#define STATE_CONTINUOUS 2
-
-int doCutterCompensation( tMotion* pM, int mode, int loop )
-{
-  tMotion temp;
-  static int state = STATE_IDLE;
-  //static double sum1;
-  //static double sum2;
-  static int lastLoop;
-  
-  // If no cutter compensation
-  if( mode == 40 )
-  {
-    // and previous statis not cutter compensation
-    if( state == STATE_IDLE )
-    {
-      // Returns true only if it's the first time we're here
-      return (loop==0);
-    }
-    else
-    {
-      // Flush out compensated movement
-      if(loop == 0)
-      {
-        CompBfrdB.X += CompBfrdB.b1;
-        CompBfrdB.Y += CompBfrdB.b2;
-        addCompensation( CompBfrdB.b1, CompBfrdB.b2, 0 );
-        temp = *pM;
-        *pM = CompBfrdB;
-        CompBfrdB = temp;
-        lastLoop = 1;
-        return 1; 
-      }
-      else if( CompBfrdZ.motion != 0 )
-      {
-        *pM = CompBfrdZ;
-        CompBfrdZ.motion = 0;
-        lastLoop = 2;
-        return 1;
-      }
-      else if(loop == lastLoop)
-      {
-        double compX, compY;
-        // And execute the next non compensated (if any) less
-        // the overall compensation in this motion
-        if( CompBfrdB.motion == 0 )
-        {
-          printf( "ERROR : No motion to get out of tool compensation.\n" );
-          exit( 1 );
-        }
-        getCompensation( &compX, &compY, 0 );
-        // printf( "Cutter Compensation. Removing %.3f,%.3f\n", compX, compY );
-        CompBfrdB.X -= compX;
-        CompBfrdB.Y -= compY;
-        resetCompensation( );
-        *pM = CompBfrdB;
-        CompBfrdB.motion = 0;
-        state = STATE_IDLE;
-        return 1;
-      }
-      return 0;
-    }
-  }
-  else if( CompBfrdC.motion != 0 )
-  {
-    *pM = CompBfrdC;
-    CompBfrdC.motion = 0;
-    return 1;
-  }
-  else if(( mode == 41 || mode == 42 ) && loop == 0 )
-  {
-    double angle;
-    double backCut = 0;
-    double l;
-    double dir = ( mode == 41 ) ? 1 : -1;
-
-    // Move in the tool axis gets buffered and executed
-    // after the current move can be evaluated relative to
-    // the next move (otherwise it will be out of order)
-    if( pM->X == 0 && pM->Y == 0 )
-    {
-       CompBfrdZ = *pM;
-       return 0;
-    }
- 
-    if( state == STATE_IDLE )
-    {
-      CompBfrdB = *pM;
-      state = STATE_LEAD;
-      return 0;
-    }
-    else if( state == STATE_LEAD )
-    {
-      // Perpendicular offset
-      l = vectorLength( pM->X, pM->Y ) * dir;
-      CompBfrdB.b1 = -pM->Y * cutterRadius / l;
-      CompBfrdB.b2 = pM->X * cutterRadius / l;
-      state = STATE_CONTINUOUS;
-    }
-    else if( state == STATE_CONTINUOUS )
-    {
-      if( dir > 0 )
-        angle = atan2( CompBfrdB.X, CompBfrdB.Y ) - atan2( pM->X, pM->Y );
-      else
-        angle = atan2( pM->X, pM->Y ) - atan2( CompBfrdB.X, CompBfrdB.Y );
-
-      if( angle < 0 ) angle += 2 * PI;
-
-      // printf( "Cutter Compensation. Angle between moves is %.1f.\n", angle * 180 / PI );
-
-      // If opening between the 2 moves is a closed angle (less than 180 degrees)
-      // tool needs to stop on the bisect to avoid cutting into the next
-      // move path. This is by how much less along the direction of the cut
-      if( angle < PI )
-      {
-        backCut = cutterRadius * tan( angle / 2 );
-        l = vectorLength( CompBfrdB.X, CompBfrdB.Y );          
-        CompBfrdB.b1 -= CompBfrdB.X * backCut / l;
-        CompBfrdB.b2 -= CompBfrdB.Y * backCut / l;
-
-        l = vectorLength( pM->X, pM->Y );          
-        pM->b1 -= pM->X * backCut / l;
-        pM->b2 -= pM->Y * backCut / l;
-      }
-      else
-      {
-        l = vectorLength( CompBfrdB.X, CompBfrdB.Y ) * dir;
-        CompBfrdC.I = CompBfrdB.Y * cutterRadius / l;
-        CompBfrdC.J = -CompBfrdB.X * cutterRadius / l;
-        CompBfrdC.K = 0;
-
-        l = vectorLength( pM->X, pM->Y ) * dir;
-        CompBfrdC.X = -pM->Y * cutterRadius / l + CompBfrdC.I;
-        CompBfrdC.Y = pM->X * cutterRadius / l + CompBfrdC.J;
-        CompBfrdC.Z = 0;
-        CompBfrdC.P = 1;
-        CompBfrdC.motion = ( mode == 410 ) ? 20 : 30;
-
-        addCompensation( CompBfrdC.X, CompBfrdC.Y, 0 );
-      }
-	}
-	else
-	{
-		printf("ERROR: Invalid compensation state (%d)\n", state);
-		exit(1);
-	}
-
-	CompBfrdB.X += CompBfrdB.b1;
-	CompBfrdB.Y += CompBfrdB.b2;
-
-	addCompensation(CompBfrdB.b1, CompBfrdB.b2, 0);
-
-	// Save current move in buffer and return the previous one in pM
-	temp = *pM;
-	*pM = CompBfrdB;
-	CompBfrdB = temp;
-
-	return 1;
-  }
-  else if (CompBfrdZ.motion != 0)
-  {
-	  *pM = CompBfrdZ;
-	  CompBfrdZ.motion = 0;
-	  return 1;
-  }
-
-  return 0;
-}
-
 // ------------------------- G CODE PARSER ------------------------
 
 #define CMD_G0		  0
@@ -519,7 +296,6 @@ const int* modalGroup[MG_COUNT] = { modal0, modal1, modal2, modal3, modal4, moda
 void showDistanceInfo()
 {
 	t3DPoint actualPos;
-	t3DPoint compPos;
 	long x, y, z;
 
 	printf("Distance information\n");
@@ -527,15 +303,9 @@ void showDistanceInfo()
 	getRawStepPos(&x, &y, &z);
 	printf(" Raw Motor Step: X:%ld Y:%ld Z:%ld \n", x, y, z);
 
-	getCompPos(&compPos);
 	getCurPos(&actualPos);
 
-	printf(" Current Error: %.5f (Max err.:%.5f)\n",
-		distance3D(theoricalPos, compPos), getMaxDistanceError());
-
-	printf(" Theor.:%.4f,%.4f,%.4f\n", theoricalPos.x, theoricalPos.y, theoricalPos.z);
 	printf(" Actual:%.4f,%.4f,%.4f\n", actualPos.x, actualPos.y, actualPos.z);
-	printf(" Compsd:%.4f,%.4f,%.4f\n", compPos.x, compPos.y, compPos.z);
 }
 
 tStatus getMotion(char* cmd, tMotion& M, unsigned long& gotWhat )
@@ -643,10 +413,11 @@ tStatus doGcode(char* cmd)
 	int i, j, n;
 	double val;
 	tMotion M = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
-	int loop;
 	unsigned long gotWhat = 0;
-	t3DPoint compPos;
 	tStatus ret = retUnknownErr;
+	t3DPoint curPos;
+
+	getCurPos(&curPos);
 
 	// Debug
 	int cmdInGroup[MG_COUNT];
@@ -733,34 +504,27 @@ tStatus doGcode(char* cmd)
       break;
 
     case CMD_G10 : // G10 : Reset home position to current
-      // Use the actual compensensated position to reset the theorical position
-      // in order not to loose the sub-step residual error
-      getCompPos( &compPos );
-      theoricalPos.x -= compPos.x;
-      theoricalPos.y -= compPos.y;
-      theoricalPos.z -= compPos.z;
-	  
-	  ResetCNCPosition( );
-      resetMotorPosition( 0,0,0 );
+      homePos = curPos;
       break;
 
     case CMD_G30 : // G30 : Go back home
-      printf( "G30-Return home (%.3f,%.3f,%.3f) at feed speed (%.1f)\n", 
-        -theoricalPos.x,-theoricalPos.y,-theoricalPos.z, feedSpeed );
       // Move first in X-Y plane and then Z axis
-      ret = linearRel( -theoricalPos.x, -theoricalPos.y, 0 );
-      if( ret == 0 ) ret = linearRel( 0, 0, -theoricalPos.z );
-      if( ret < 0 )
+      ret = linearRel( 
+          homePos.x - curPos.x,
+          homePos.y - curPos.y,
+          0 );
+      if (ret == retSuccess)
+      {
+          ret = linearRel(0, 0, homePos.z - curPos.z);
+      }
+      if( ret != retSuccess )
       {
         // Interrupted. Set the current theorical pos to the actual pos.
-        getCurPos( &theoricalPos );
+        getCurPos( &curPos);
       }
       else
       {
         // We're home!!!
-        theoricalPos.x = 0;
-        theoricalPos.y = 0;
-        theoricalPos.z = 0;
       }
       break;
 
@@ -788,55 +552,29 @@ tStatus doGcode(char* cmd)
   if( gotWhat == 0 ) return retSuccess;
 
   if(( gotWhat & GOT_TURN_COUNT ) == 0 ) M.P = 1.0;
-
-  // This gets the actual position minus the cutter compensation offset
-  // and all moves buffered by the cutter compensation algorithm
-  getCompPos( &compPos );
-
-  // Checks if the distance between the current position and the theorical
-  // position is less than the length of one motor step in all directions
-  if( distance3D( theoricalPos, compPos ) > getMaxDistanceError( )) 
-  {
-    printf( "################ LOCATION ERROR ###############\n" );
-    showDistanceInfo( );
-  }
   
-  //compPos = theoricalPos;   // So that cutter comp works
-  //getCurPos( &compPos );  // So that precision remains
-
   // If active distance mode is absolute (G90)
   if (activeCmd[MG_DISTANCE_MODE] == CMD_G90)
   {
-    // Update the theorical position for each Axis we got a new value and make
-    // the coordinates relative to current position
-    if( gotWhat & GOT_X )
-    {
-      theoricalPos.x = M.X;
-      M.X = M.X - compPos.x;
-    }
-    if( gotWhat & GOT_Y )
-    {
-      theoricalPos.y = M.Y;
-      M.Y = M.Y - compPos.y;
-    }
-    if( gotWhat & GOT_Z )
-    {
-      theoricalPos.z = M.Z;
-      M.Z = M.Z - compPos.z;
-    }
+	  // Update the theorical position for each Axis we got a new value and make
+	  // the coordinates relative to current position
+	  if (gotWhat & GOT_X)
+	  {
+		  M.X = M.X - curPos.x + homePos.x;
+	  }
+	  if (gotWhat & GOT_Y)
+	  {
+		  M.Y = M.Y - curPos.y + homePos.y;
+	  }
+	  if (gotWhat & GOT_Z)
+	  {
+		  M.Z = M.Z - curPos.z + homePos.z;
+	  }
   }
   // If activce distance mode is relative (G91)
   else if (activeCmd[MG_DISTANCE_MODE] == CMD_G91)
   {
-    // Update the new theorical tool position
-    theoricalPos.x += M.X;
-    theoricalPos.y += M.Y;
-    theoricalPos.z += M.Z;
-    // Calculate the relative motion as the distance between the current compensated position
-    // and the new theorical position so that sub-step positioning error doesn't accumulate.
-    M.X = theoricalPos.x - compPos.x;
-    M.Y = theoricalPos.y - compPos.y;
-    M.Z = theoricalPos.z - compPos.z;
+	  // Nothing to do, M is already a relative movement
   }
   else
   {
@@ -845,44 +583,36 @@ tStatus doGcode(char* cmd)
   }
 
   // From this point on, everything is relative coordinates
-  loop = 0;
+
   M.motion = activeCmd[MG_MOTION];
   ret = retSuccess;
 
-  while (doCutterCompensation(&M, (activeCmd[MG_CUTTER_RADIUS_COMP] / 10), loop++))
+  // Depending on the active command in the motion group
+  switch( M.motion )
   {
-    // Depending on the active command in the motion group
-    switch( M.motion )
-    {
-    case CMD_G0 : // Rapid positioning
+  case CMD_G0 : // Rapid positioning
       // printf( "G0-Rapid positioning (%.3f,%.3f,%.3f)\n", M.X,M.Y,M.Z );
       ret = rapidPosRel( M.X,M.Y,M.Z );
       break;
 
-    case CMD_G1 : // Linear coordinated feed speed
+  case CMD_G1 : // Linear coordinated feed speed
       // printf( "G1-Linear movement (%.3f,%.3f,%.3f) at feed speed (%.1f)\n", M.X,M.Y,M.Z, feedSpeed );
       ret = linearRel( M.X,M.Y,M.Z );
       break;
 
-    case CMD_G2 : // Arc in CW direction
+  case CMD_G2 : // Arc in CW direction
       // printf( "G2-Arc CW movement (%.3f,%.3f,%.3f,%.3f,%.3f,%.3f) at feed speed (%.1f)\n", M.X,M.Y,M.Z,M.I,M.J,-M.P, feedSpeed );
       ret = arcInXYPlane( M.X,M.Y,M.Z,M.I,M.J,-M.P );
       break;
 
-    case CMD_G3 : // Arc in CCW direction
+  case CMD_G3 : // Arc in CCW direction
       // printf( "G3-Arc CCW movement (%.3f,%.3f,%.3f,%.3f,%.3f,%.3f) at feed speed (%.1f)\n", M.X,M.Y,M.Z,M.I,M.J,M.P, feedSpeed );
       ret = arcInXYPlane( M.X,M.Y,M.Z,M.I,M.J,M.P );
       break;
-    }
   }
 
   if( ret != retSuccess )
-  {
-    // Something went wrong during the motion. Reset the theorical position to
-    // the current compensated position because theorical position is already
-    // set at the end the movement.
-    getCurPos( &theoricalPos );
- 
+  {    
     // Reset cutter compensation (if any)
     doGcode( "G40" );
   }

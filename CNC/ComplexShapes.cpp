@@ -12,10 +12,10 @@ typedef struct
 	tGeneralToolInfo tool;
 
 	// Box
-	float boxA;
-	float boxB;
-	float boxC;
-	float boxT;
+	double boxA;
+	double boxB;
+	double boxC;
+	double boxT;
 
 } tComplexShapeParam;
 
@@ -58,10 +58,10 @@ UINT ComplexShapeGetSet(BOOL get, HWND hWnd)
 {
 	ShapeGetSetTool(hWnd, get, &g_Params.tool);
 
-	ShapeGetSetFloat(hWnd, IDC_BOX_A, get, &g_Params.boxA);
-	ShapeGetSetFloat(hWnd, IDC_BOX_B, get, &g_Params.boxB);
-	ShapeGetSetFloat(hWnd, IDC_BOX_C, get, &g_Params.boxC);
-	ShapeGetSetFloat(hWnd, IDC_BOX_T, get, &g_Params.boxT);
+	ShapeGetSetDouble(hWnd, IDC_BOX_A, get, &g_Params.boxA);
+	ShapeGetSetDouble(hWnd, IDC_BOX_B, get, &g_Params.boxB);
+	ShapeGetSetDouble(hWnd, IDC_BOX_C, get, &g_Params.boxC);
+	ShapeGetSetDouble(hWnd, IDC_BOX_T, get, &g_Params.boxT);
 
 	return 0;
 }
@@ -138,8 +138,8 @@ BOOL CarveBox(HWND hWnd)
 	char str[MAX_STR];
 	char* cmd;
 	int cycles;
-	float layer;
-	float A, B, C, T;
+	double layer;
+	double A, B, C, T;
 
 	cmd = (char*)malloc(MAX_BUF);
 	if (cmd == NULL) return FALSE;

@@ -4,114 +4,15 @@ extern "C" {
 
   #include "driver/gpio.h"
   #include "driver/gptimer.h"
+  #include "esp_timer.h"
 
   #include "UDP.h"  
   #include "Events.h"
   #include "Motor.h"
 }
+#include "Motor.hpp"
 
 extern uint32_t g_limitState;
-
-#define STEP_PULSE_US     100 // Duration of the motor step pulse
-#define RAMP_SHIFT        19 // 19=524ms
-#define RAMP_TIME         (1L << RAMP_SHIFT)
-#define MIN_SPEED         15L
-#define MAX_SPEED         150L
-#define NO_STEP_TIME      (-1ULL)
-
-#define REDUCED_RAPID_POSITIONING_SPEED   0x80000000l
-#define CALIBRATION_REVERSED              0x40000000l
-#define DIRECTION_REVERSED                0x20000000l
-
-// Calculate the speed ramp for G0 accel / decel phases 
-#define STEP_FROM_RAMP( Min, Max, t ) ( Min - ((( Min - Max ) * t ) >> RAMP_SHIFT))
-// Speed is in inch by minute, hence the 60M micro seconds
-#define SPEED_TO_STEP( sbi, s ) ( 60000000L / ((sbi) * (s)))
-
-class Motor {
-public : 
-  Motor( gpio_num_t sp, gpio_num_t dp, uint32_t em, unsigned long flags, unsigned long sbi );
-  
-  // Virtual is to make sure the derived class
-  // implementation gets called
-  virtual bool SetDirection( int d );
-  virtual void Pulse( bool on );
-  virtual int GetLimit( );
-  virtual void CalibrateStart( uint64_t now, unsigned long state_flag );
-  virtual void CalibrateTask( uint64_t now );
-  
-  // Those functions are not to overloaded
-  void Reset( );
-  long GetPos( );
-  uint64_t InitMove( long s, unsigned long t, uint64_t now );
-  uint64_t GetNextStepTime( );
-  void MovementTask( uint64_t now );
-  
-protected :
-  long curPos;                // Current axis position in steps
-
-  gpio_num_t stepPin;         // GPIO for stepping
-  bool pulseLevel;            // Save the current state of the pulse
-  gpio_num_t dirPin;          // GPIO for direction
-  int reverseDir;             // Reverse the motor direction
-  uint32_t endMask;           // Bitmask for limit detection
-    
-  long curDir;                // Current movement direction (+/- 1)
-  unsigned long moveLength;   // Movement total length in steps
-  unsigned long moveStep;     // Steps performed in movement
-  unsigned long moveDuration; // Expected total duration of the movement
-  long stepDuration;          // Duration of a half step
-  long stepModulo;            // The remainder of the division
-  uint64_t nextStepTime;      // Time when the next half step should be made
-  bool dirLevel;
-//uint64_t currentStepTime;   // Time when the current step is happening
-  long stepAcc;               // The fractional error accumulator
-
-  // Rapid positionning (G0)
-  long decelDist;             // Step in movement when deceleration starts
-  unsigned long decelTime;    // Duration of the deceleration phase 
-  unsigned long decelStart;   // Time when the deceleration has started
-  unsigned long minSpeedStep; // Duration of a step at G0 min speed 
-  unsigned long maxSpeedStep; // Same for max speed
-  unsigned long stepByInch;   // Number of steps for one inch (approx)
-
-  // Calibration
-  int cal_state;
-  long cal_count;
-  long cal_stall;
-  int cal_toward;
-  int cal_away;
-  int cal_cycle;              // Number of calibration cycles. Echh cycle slows down to increase precision
-  unsigned long cal_state_flag; // The state flag to be signaled when this axis is calbrated
-
-};
-
-class DualMotor : public Motor 
-{
-public:
-  DualMotor( gpio_num_t sp, gpio_num_t dp, uint32_t em, gpio_num_t sp2, gpio_num_t dp2, uint32_t em2, unsigned long flags, unsigned long sbi, long cof, float R );
-  
-private:
-  gpio_num_t stepPin2;        // GPIO for stepping 2nd motor
-  gpio_num_t dirPin2;         // GPIO for direction of 2nd motor
-  uint32_t endMask2;          // Bitmask for limit detection for 2nd motor
-
-  // Calibration
-  long cal_offset;            // Position difference between the L and R calibration positions (in steps)
-  long cal_delta;             // Difference of steps required between the L and R motor to reach each sensor
-  long cal_dL, cal_dR;        // Number of steps to correct the slanting of the axis prior to calibration for L and R motors 
-  float cal_R;                // The ratio betweem the position of the sensors and the motors. Used to correct the slanting effect.
-
-
-public:
-  virtual void Pulse( bool on ) override;
-  void PulseLeft( bool on );
-  void PulseRight( bool on );
-  virtual bool SetDirection( int d )override;
-  virtual int GetLimit( ) override;
-  virtual void CalibrateTask( uint64_t now ) override;
-
-};
 
 // Instantiation and configuration of the stepper motor controlers.
 //-----------------------------------------------------------------
@@ -126,7 +27,6 @@ Motor     Y ( MOTOR_Y_STEP,    MOTOR_Y_DIR,   0x0010,  CALIBRATION_REVERSED,    
 DualMotor Z ( MOTOR_Z_L_STEP,  MOTOR_Z_L_DIR, 0x0001,
               MOTOR_Z_R_STEP,  MOTOR_Z_R_DIR, 0x0002,  DIRECTION_REVERSED |
                                                        REDUCED_RAPID_POSITIONING_SPEED,   1.0f/Z_AXIS_RES,    0.22197f / Z_AXIS_RES, 0.0277f * 2.0f );
-
 
 static Motor *g_pNextMotorToStep = NULL;
 static gptimer_handle_t g_motorTimer = NULL;
@@ -260,30 +160,6 @@ uint64_t Motor::InitMove( long s, unsigned long t, uint64_t now )
     assert(false);
   }
 
-/*
-  if( s == 0 && manual )
-  {
-    if( manual > -100 && manual < 100 )
-    {
-      unsigned long now = micros( );
-      if( now > nextSlowStep )
-      {
-        nextSlowStep = now + 100000;
-        accManual += manual;
-        if( accManual < -100 || accManual > 100 )
-        {
-          if( accManual < 0 ) s = -1; else s = 1;
-          accManual = 0;
-        }
-      }
-    }
-    else
-    {
-      if( manual > 0 ) s = ( manual - 100 ); else s = manual + 100;
-    }
-    t = 100000;
-  }
-*/  
   // Backward direction
   if( s < 0 ) 
   { 
@@ -453,11 +329,29 @@ void Motor::CalibrateStart( uint64_t now, unsigned long state_flag )
   cal_cycle = 1;
   cal_state_flag = state_flag;
   nextStepTime = now + 1000;
+  cal_checkCurPos = Events_GetState( ) & state_flag;
+  Events_ClearState( state_flag );
 }
 
 #define CAL_STEP_SPEED   1000
 #define CAL_PAUSE        50000
 #define CAL_STALL        100
+#define CAL_ERROR_TRLD   2
+
+void Motor::CalibrationComplete( )
+{
+  // Done! We're calibrated
+  cal_state = 0;
+  if( cal_checkCurPos )
+  {
+    if ((curPos < -CAL_ERROR_TRLD) || (curPos > CAL_ERROR_TRLD))
+    {
+      Events_SetState( CNC_STATE_POSITION_ERROR );
+    }
+  }
+  curPos = 0;
+  Events_SetState( cal_state_flag );
+}
 
 void Motor::CalibrateTask( uint64_t now )
 {
@@ -540,9 +434,7 @@ void Motor::CalibrateTask( uint64_t now )
           }
           else
           {
-            // Done! We're calibrated!
-            cal_state = 0;
-            Events_SetState( cal_state_flag );
+            CalibrationComplete( );
           }
         }
       }
@@ -658,9 +550,7 @@ void DualMotor::CalibrateTask( uint64_t now )
             //if( cal_dR == 0 && cal_dL == 0 )
             if( abs(cal_delta) < 2 )
             {
-              // Done! We're calibrated
-              cal_state = 0;
-              Events_SetState( cal_state_flag );
+              CalibrationComplete( );
             }
             else
             {              
@@ -774,12 +664,11 @@ void DualMotor::CalibrateTask( uint64_t now )
 }
 
 extern "C" {
-    
   extern QueueHandle_t g_cmd_queue;
+  static uint64_t g_ManUpdateTimeout;
+  int g_ManX, g_ManY, g_ManZ;
     
-  static void MotorMove( cmd_t *pCmd, uint64_t now );
-  
-  static void IRAM_ATTR PrepareNextStep( uint64_t now )
+  void IRAM_ATTR Motor_PrepareNextStep( uint64_t now )
   {    
     // Check which axis is the next one to be stepped
     if(( X.GetNextStepTime( ) < Y.GetNextStepTime( )) && ( X.GetNextStepTime( ) < Z.GetNextStepTime( )))
@@ -802,7 +691,7 @@ extern "C" {
       // Pull next move command from the queue
       if( xQueueReceiveFromISR( g_cmd_queue, &cmd, &xTaskWokenByReceive ))
       {
-        MotorMove( &cmd, now );
+        Motor_PrepareNextCommand( &cmd, now );
       }
       else
       {                    
@@ -832,30 +721,30 @@ extern "C" {
       }
     }
   }
-  
-  static bool IRAM_ATTR calibration_timer_callback(gptimer_handle_t timer, const gptimer_alarm_event_data_t *edata, void *user_data)
+
+  bool IRAM_ATTR Motor_CalibrationTimerCallback(gptimer_handle_t timer, const gptimer_alarm_event_data_t *edata, void *user_data)
   {
     if( g_pNextMotorToStep )
     {
       g_pNextMotorToStep->CalibrateTask( edata->alarm_value );
     }
-    PrepareNextStep( edata->alarm_value );    
+    Motor_PrepareNextStep( edata->alarm_value );    
     return false; // No need to yield
   }
 
-  static bool IRAM_ATTR movement_timer_callback(gptimer_handle_t timer, const gptimer_alarm_event_data_t *edata, void *user_data)
+  bool IRAM_ATTR Motor_MovementTimerCallback(gptimer_handle_t timer, const gptimer_alarm_event_data_t *edata, void *user_data)
   {
     if( g_pNextMotorToStep )
     {
       g_pNextMotorToStep->MovementTask( edata->alarm_value );
     }
-    PrepareNextStep( edata->alarm_value );
+    Motor_PrepareNextStep( edata->alarm_value );
     return false; // No need to yield
   }
-  
+
   // Move the tool position by the specified # of steps for x,y,z directions.
   // Duration of the motion determines the speed. d is in microseconds
-  static void IRAM_ATTR MotorMove( cmd_t *pCmd, uint64_t now )
+  void IRAM_ATTR Motor_PrepareNextCommand( cmd_t *pCmd, uint64_t now )
   { 
     g_MoveStart = now;
         
@@ -881,7 +770,7 @@ extern "C" {
       {
         // Movements
         gptimer_event_callbacks_t cbs = {
-          .on_alarm = movement_timer_callback,
+          .on_alarm = Motor_MovementTimerCallback,
         };
         ESP_ERROR_CHECK(gptimer_register_event_callbacks(g_motorTimer, &cbs, NULL));
         
@@ -890,13 +779,18 @@ extern "C" {
         X.InitMove( pCmd->dx, pCmd->duration, now );
         Y.InitMove( pCmd->dy, pCmd->duration, now );
         Z.InitMove( pCmd->dz, pCmd->duration, now );
-        PrepareNextStep( now );
+        Motor_PrepareNextStep( now );
+        
+        if( pCmd->flags & CMD_FLAG_MANUAL_MOVE )
+        {
+          Motor_PrepareManualMove( );
+        }
       }
     }
     else
     {
-      // No Movement means "dwell"
-      if( pCmd->duration > 0 )
+      // No Movement with non zero duration means "dwell"
+      if( pCmd->duration != 0 )
       {
         // Check that the dwelve time is at least the duration of a step pulse.
         if( pCmd->duration < STEP_PULSE_US ) pCmd->duration = STEP_PULSE_US;
@@ -913,7 +807,7 @@ extern "C" {
         };
 
         gptimer_event_callbacks_t cbs = {
-          .on_alarm = movement_timer_callback,
+          .on_alarm = Motor_MovementTimerCallback,
         };
         ESP_ERROR_CHECK(gptimer_register_event_callbacks(g_motorTimer, &cbs, NULL));
         gptimer_set_alarm_action(g_motorTimer, &alarm_config1);
@@ -928,19 +822,17 @@ extern "C" {
       {
         // Calibration
         gptimer_event_callbacks_t cbs = {
-          .on_alarm = calibration_timer_callback,
+          .on_alarm = Motor_CalibrationTimerCallback,
         };
         ESP_ERROR_CHECK(gptimer_register_event_callbacks(g_motorTimer, &cbs, NULL));
         
-        // Clear the flags as starting calibration decalibrates the positions
-        ClearState( CNC_STATE_Z_CALIBRATED | CNC_STATE_Y_CALIBRATED | CNC_STATE_X_CALIBRATED );
         Events_SetState( CNC_STATE_CALIBRATING );
               
         X.CalibrateStart( now, CNC_STATE_X_CALIBRATED );
         Y.CalibrateStart( now, CNC_STATE_Y_CALIBRATED );
         Z.CalibrateStart( now, CNC_STATE_Z_CALIBRATED );
         
-        PrepareNextStep( now );
+        Motor_PrepareNextStep( now );
       }
       else // No movement commands
       {
@@ -949,13 +841,14 @@ extern "C" {
         
         if( pCmd->flags & CMD_CALIBRATION_COMPLETE )
         {
-          ClearState( CNC_STATE_CALIBRATING );
+          UDP_ResetPosition( );
+          Events_ClearState( CNC_STATE_CALIBRATING );
         }
-
+        
         // Pull next move command from the queue
         if( xQueueReceiveFromISR( g_cmd_queue, &cmd, &xTaskWokenByReceive ))
         {
-          MotorMove( &cmd, now );
+          Motor_PrepareNextCommand( &cmd, now );
         }
         else
         {
@@ -964,8 +857,8 @@ extern "C" {
       }
     }
   }
-  
-  void MotorMoveIfIdle( )
+
+  void Motor_MoveIfIdle( )
   {
     cmd_t cmd;
     if( Events_IsMotorIdle( ))
@@ -973,18 +866,111 @@ extern "C" {
       if( xQueueReceive( g_cmd_queue, &cmd, 0 ) == pdTRUE )
       {
         Events_SignalMotorNotIdle( );
-        MotorMove( &cmd, 0 );
+        Motor_PrepareNextCommand( &cmd, 0 );
       }
     }
   }
-  
-  void MotorGetPosition( long *pX, long *pY, long *pZ )
+
+  #define MANUAL_STEP          (0.0078125f) // 1/128 inch steps
+  #define MAN_SPEED_IPS        (0.125f)
+  #define MAN_STEP_US          (1000000.0f * MANUAL_STEP / MAN_SPEED_IPS)
+  #define MAN_CONT_THRLD       (4)
+  #define MANUAL_MAX_SPEED     (8)
+  #define MANUAL_SLOW_STEP_US  (500000)
+
+  void IRAM_ATTR Motor_GetManualInterval( int speed, long *pAxis, cmd_t *pMoveCmd, long steps )
+  {
+    int dir = 1;
+    cmd_t dwellCmd = { .dx = 0,.dy = 0, .dz = 0, .duration = 0, .flags = 0};
+    BaseType_t xTaskWokenByReceive = pdFALSE;
+    
+    if( speed < 0 )
+    {
+      speed = -speed;
+      dir = -1;
+    }
+    if( speed > MANUAL_MAX_SPEED )
+    {
+      speed = MANUAL_MAX_SPEED;
+    }
+    if( speed <= MAN_CONT_THRLD )
+    {
+      dwellCmd.duration = MANUAL_SLOW_STEP_US / (1 << (speed - 1));
+      xQueueSendFromISR( g_cmd_queue, &dwellCmd, &xTaskWokenByReceive );
+      
+      pMoveCmd->duration = 0;
+      *pAxis = steps * dir;
+    }
+    else
+    {
+      pMoveCmd->duration = MAN_STEP_US;
+      *pAxis = steps * dir * (speed - MAN_CONT_THRLD);
+    }
+  }
+
+  void IRAM_ATTR Motor_PrepareManualMove( )
+  {
+    cmd_t cmd = { .dx = 0,.dy = 0, .dz = 0, .duration = 0, .flags = 0};
+    BaseType_t xTaskWokenByReceive = pdFALSE;
+    
+    if( esp_timer_get_time( ) > g_ManUpdateTimeout )
+    {
+      g_ManX = 0;
+      g_ManY = 0;
+      g_ManZ = 0;
+    }
+
+    if(( g_ManX > g_ManY && g_ManX > g_ManZ ) || 
+       ( g_ManX < g_ManY && g_ManX < g_ManZ ))
+    {
+      Motor_GetManualInterval( g_ManX, &cmd.dx, &cmd, MANUAL_STEP / X_AXIS_RES );
+    }
+    else if(( g_ManY > g_ManZ || g_ManY < g_ManZ ) && 
+            ( g_ManY != 0 ))
+    {
+      Motor_GetManualInterval( g_ManY, &cmd.dy, &cmd, MANUAL_STEP / Y_AXIS_RES );
+    }
+    else if( g_ManZ != 0 )
+    {
+      Motor_GetManualInterval( g_ManZ, &cmd.dz, &cmd, MANUAL_STEP / Z_AXIS_RES );
+    }
+    else
+    {
+      // No more move
+      Events_ClearState( CNC_STATE_MANUAL_MODE );
+      return;
+    }
+    
+    cmd.flags = CMD_FLAG_MANUAL_MOVE;
+    cmd.flags |= UDP_GetCRCAndUpdatePosition( &cmd );
+    xQueueSendFromISR( g_cmd_queue, &cmd, &xTaskWokenByReceive );
+  }
+      
+  void Motor_ManualMove( int dX, int dY, int dZ )
+  {
+    g_ManX = dX;
+    g_ManY = dY;
+    g_ManZ = dZ;
+    
+    // Set the time when continuation of this manual move should stop
+    // Controller must send refresh messages continuously 
+    g_ManUpdateTimeout = esp_timer_get_time( ) + 1000000;
+
+    if( Events_IsMotorIdle( ))
+    {
+      Events_SetState( CNC_STATE_MANUAL_MODE );
+      Motor_PrepareManualMove( );
+      Motor_MoveIfIdle( );
+    }
+  }
+      
+  void Motor_GetPosition( long *pX, long *pY, long *pZ )
   {
     *pX = X.GetPos( );
     *pY = Y.GetPos( );
     *pZ = Z.GetPos( );
   }
-  
+
   void Motor_Init( )
   {               
     gpio_config_t io_conf = {};
@@ -1012,10 +998,11 @@ extern "C" {
     ESP_ERROR_CHECK(gptimer_new_timer(&timer_config, &g_motorTimer));
 
     gptimer_event_callbacks_t cbs = {
-        .on_alarm = movement_timer_callback,
+        .on_alarm = Motor_MovementTimerCallback,
     };
     ESP_ERROR_CHECK(gptimer_register_event_callbacks(g_motorTimer, &cbs, NULL));
     ESP_ERROR_CHECK(gptimer_enable(g_motorTimer));
     
   }
 }
+

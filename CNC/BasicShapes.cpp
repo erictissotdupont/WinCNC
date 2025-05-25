@@ -13,25 +13,25 @@ typedef struct
 	tGeneralToolInfo tool;
 
 	// Circle
-	float circleRadiusX;
-	float circleRadiusY;
+	double circleRadiusX;
+	double circleRadiusY;
 	int circleOval;
-	float circleDepth;
+	double circleDepth;
 	int circleExternal;
 	int circleFill;
 
 	// Rectangle
-	float rectDepth;
-	float rectX;
-	float rectY;
+	double rectDepth;
+	double rectX;
+	double rectY;
 	int rectFill;
 	int rectExternal;
 	int rectRounded;
-	float rectRadius;
+	double rectRadius;
 
 	// Polygon
-	float polyRadius;
-	float polyDepth;
+	double polyRadius;
+	double polyDepth;
 	int polyFill;
 	int polyCount;
 	int polySkip;
@@ -98,23 +98,23 @@ UINT BasicShapeGetSet(BOOL get, HWND hWnd )
 {
 	ShapeGetSetTool(hWnd, get, &g_Params.tool);
 
-	ShapeGetSetFloat(hWnd, IDC_CIRCLE_RADIUS_X, get, &g_Params.circleRadiusX);
-	ShapeGetSetFloat(hWnd, IDC_CIRCLE_RADIUS_Y, get, &g_Params.circleRadiusY);
-	ShapeGetSetFloat(hWnd, IDC_CIRCLE_DEPTH, get, &g_Params.circleDepth);
+	ShapeGetSetDouble(hWnd, IDC_CIRCLE_RADIUS_X, get, &g_Params.circleRadiusX);
+	ShapeGetSetDouble(hWnd, IDC_CIRCLE_RADIUS_Y, get, &g_Params.circleRadiusY);
+	ShapeGetSetDouble(hWnd, IDC_CIRCLE_DEPTH, get, &g_Params.circleDepth);
 	ShapeGetSetBool(hWnd, IDC_CIRCLE_OVAL, get, &g_Params.circleOval);
 	ShapeGetSetBool(hWnd, IDC_CIRCLE_FILL, get, &g_Params.circleFill);
 	ShapeGetSetBool(hWnd, IDC_CIRCLE_EXTERNAL_RADIUS, get, &g_Params.circleExternal);
 	
-	ShapeGetSetFloat(hWnd, IDC_RECT_DEPTH, get, &g_Params.rectDepth);
-	ShapeGetSetFloat(hWnd, IDC_RECT_X, get, &g_Params.rectX);
-	ShapeGetSetFloat(hWnd, IDC_RECT_Y, get, &g_Params.rectY);
-	ShapeGetSetFloat(hWnd, IDC_RECT_RADIUS, get, &g_Params.rectRadius);
+	ShapeGetSetDouble(hWnd, IDC_RECT_DEPTH, get, &g_Params.rectDepth);
+	ShapeGetSetDouble(hWnd, IDC_RECT_X, get, &g_Params.rectX);
+	ShapeGetSetDouble(hWnd, IDC_RECT_Y, get, &g_Params.rectY);
+	ShapeGetSetDouble(hWnd, IDC_RECT_RADIUS, get, &g_Params.rectRadius);
 	ShapeGetSetBool(hWnd, IDC_RECT_FILL, get, &g_Params.rectFill);
 	ShapeGetSetBool(hWnd, IDC_RECT_EXTERNAL, get, &g_Params.rectExternal);
 	ShapeGetSetBool(hWnd, IDC_RECT_ROUNDED, get, &g_Params.rectRounded);
 
-	ShapeGetSetFloat(hWnd, IDC_HEX_RADIUS, get, &g_Params.polyRadius);
-	ShapeGetSetFloat(hWnd, IDC_HEX_DEPTH, get, &g_Params.polyDepth);
+	ShapeGetSetDouble(hWnd, IDC_HEX_RADIUS, get, &g_Params.polyRadius);
+	ShapeGetSetDouble(hWnd, IDC_HEX_DEPTH, get, &g_Params.polyDepth);
 	ShapeGetSetBool(hWnd, IDC_HEX_FILL, get, &g_Params.polyFill);
 	ShapeGetSetInt(hWnd, IDC_HEX_SIDES, get, &g_Params.polyCount);
 	ShapeGetSetInt(hWnd, IDC_HEX_SKIP, get, &g_Params.polySkip);
@@ -206,9 +206,9 @@ BOOL CarvePolygon(HWND hWnd)
 
 	// Calculate the distance between concentric circles needed to fill
 	// the circle with a small overlap between each of them.
-	float R;
-	float skip = (g_Params.polySkip * 2.0f * PI) / 360.0f;
-	float slice = (2.0f * PI - skip ) / g_Params.polyCount;
+	double R;
+	double skip = (g_Params.polySkip * 2.0f * PI) / 360.0f;
+	double slice = (2.0f * PI - skip ) / g_Params.polyCount;
 	
 	if (g_Params.polyExternal)
 	{
@@ -221,8 +221,8 @@ BOOL CarvePolygon(HWND hWnd)
 
 	do
 	{
-		float a, b;
-		float Z = 0.0;
+		double a, b;
+		double Z = 0.0;
 
 		// Move from the center to the radius of the circle (3 o'clock)
 		sprintf_s(str, MAX_STR, "G0 Z%f\r\n", SAFE_TRAVEL_HEIGHT);
@@ -235,7 +235,7 @@ BOOL CarvePolygon(HWND hWnd)
 		do
 		{
 			int i;
-			float dZ = g_Params.tool.cutDepth;
+			double dZ = g_Params.tool.cutDepth;
 
 			if (bBottom)
 			{
@@ -376,10 +376,10 @@ BOOL CarveCircle(HWND hWnd)
 
 	// Calculate the distance between concentric circles needed to fill
 	// the circle with a small overlap between each of them.
-	float R = g_Params.circleRadiusX + SMALL_OVELAP;
+	double R = g_Params.circleRadiusX + SMALL_OVELAP;
 	int t =  1 + (int)(R / (( g_Params.tool.radius * 2 ) - SMALL_OVELAP ));
-	float d = R / t;
-	float rx,ry;
+	double d = R / t;
+	double rx,ry;
 
 	rx = g_Params.circleRadiusX;
 	ry = g_Params.circleOval ? g_Params.circleRadiusY : rx;
@@ -469,10 +469,10 @@ BOOL CarveCircle(HWND hWnd)
 	return TRUE;
 }
 
-void MakeRectMove(bool bXisLong, char* cmd, float L, float S, float z)
+void MakeRectMove(bool bXisLong, char* cmd, double L, double S, double z)
 {
 	char str[MAX_STR];
-	float x, y;
+	double x, y;
 	if (bXisLong)
 	{
 		x = L;
@@ -506,8 +506,8 @@ BOOL CarveRect(HWND hWnd)
 {
 	char str[MAX_STR];
 	char* cmd;
-	float OffsetL = 0.0f;
-	float OffsetS = 0.0f;
+	double OffsetL = 0.0f;
+	double OffsetS = 0.0f;
 	bool bDone = false;
 	bool bClipCornerTriangle = false;
 	int bRounded = g_Params.rectRounded;
@@ -553,9 +553,9 @@ BOOL CarveRect(HWND hWnd)
 	bool bXisLong = (g_Params.rectX > g_Params.rectY);
 
 	// Current long and short side of the rect remaining to carve
-	float L = bXisLong ? g_Params.rectX : g_Params.rectY;
-	float S = bXisLong ? g_Params.rectY : g_Params.rectX;
-	float r = g_Params.rectRadius;
+	double L = bXisLong ? g_Params.rectX : g_Params.rectY;
+	double S = bXisLong ? g_Params.rectY : g_Params.rectX;
+	double r = g_Params.rectRadius;
 	
 	// If the X and Y are external dimensions, remove tool radius
 	// for each corner (twice)
@@ -651,14 +651,14 @@ BOOL CarveRect(HWND hWnd)
 	do
 	{
 		// Start at zero depth.
-		float Z = 0.0f;
-		float w = g_Params.tool.radius / 2;
-		float d = (g_Params.tool.radius * 2) - SMALL_OVELAP;
+		double Z = 0.0f;
+		double w = g_Params.tool.radius / 2;
+		double d = (g_Params.tool.radius * 2) - SMALL_OVELAP;
 
 		// Dive while depth has not reached target rect depth
 		while (Z < g_Params.rectDepth - NEAR_ZERO)
 		{
-			float D;
+			double D;
 			// If what remains to be carve is larger than the max cut depth 
 			if (g_Params.rectDepth - Z > g_Params.tool.cutDepth)
 				// Dive by the max cut depth

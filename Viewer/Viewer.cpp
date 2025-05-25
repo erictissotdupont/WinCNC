@@ -581,7 +581,11 @@ HRESULT UpdateSurface( )
 				return S_FALSE;
 			}
 
-			ReadFile(hFile, &g_header, sizeof(header_t), NULL, NULL);
+			if (ReadFile(hFile, &g_header, sizeof(header_t), NULL, NULL) == FALSE)
+			{
+				CloseHandle(hFile);
+				return S_FALSE;
+			}
 
 			// Not enough data
 			if (g_header->cbAlt < g_header->dx * g_header->dy * sizeof(float))
@@ -592,9 +596,18 @@ HRESULT UpdateSurface( )
 
 			if (g_alt) free(g_alt);
 			g_alt = (float*)malloc(g_header->cbAlt);
+			if (g_alt == NULL)
+			{
+				CloseHandle(hFile);
+				return S_FALSE;
+			}
 
-			ReadFile(hFile, g_alt, g_header->cbAlt, NULL, NULL);
-			CloseHandle(hFile);
+			if( ReadFile(hFile, g_alt, g_header->cbAlt, NULL, NULL) == FALSE)
+			{
+				memset(g_alt, 0, g_header->cbAlt);
+			}
+			
+			CloseHandle(hFile);	
 		}
 	}
 

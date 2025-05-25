@@ -35,20 +35,6 @@ void setSimulationMode(tStatus(*callback)(t3DPoint, t3DPoint, long))
 	g_pSimulation = callback;
 }
 
-void resetCompensation( )
-{
-  XMotor.cutComp = 0;
-  YMotor.cutComp = 0;
-  ZMotor.cutComp = 0;
-}
-
-void getCompensation( double* x, double* y, double* z )
-{
-  if( x ) *x = XMotor.cutComp;
-  if( y ) *y = YMotor.cutComp;
-  if( z ) *z = ZMotor.cutComp;
-}
-
 void stepToPos(long x, long y, long z, t3DPoint* P)
 {
 	P->x = x * XMotor.scale;
@@ -73,23 +59,12 @@ void setRawStepPos(long x, long y, long z)
 	XMotor.step = x;
 	YMotor.step = y;
 	ZMotor.step = z;
-
-	resetTheoricalPosition();
-}
-
-void addCompensation( double x, double y, double z )
-{
-  XMotor.cutComp += x;
-  YMotor.cutComp += y;
-  ZMotor.cutComp += z;
 }
 
 void initAxis( int a, double scale )
 {
   tAxis* pA = pMotor[a];
-  // pA->step = 0;
   pA->scale = scale;
-  pA->cutComp = 0.0;
 }
 
 void resetMotorPosition( long x, long y, long z )

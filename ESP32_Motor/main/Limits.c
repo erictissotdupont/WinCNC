@@ -100,7 +100,7 @@ bool IRAM_ATTR Limits_TimerCallback(gptimer_handle_t timer, const gptimer_alarm_
         if( crc == (( data >> 24 ) & 0xFF ))
         {
           g_limitState = data;
-          ClearState( CNC_STATE_LIMITS_INACTIVE );
+          Events_ClearState( CNC_STATE_LIMITS_INACTIVE );
 
           // Got the correct CRC. Clock one more to let the limit sensor
           // know that we're okay.

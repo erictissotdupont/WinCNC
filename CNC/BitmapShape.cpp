@@ -22,14 +22,14 @@ typedef struct
 
 	WCHAR szFilePath[MAX_PATH];
 
-	float width;
-	float height;
-	float depth;
+	double width;
+	double height;
+	double depth;
 	tCarveMode contourOrCarve;
 	int bHorizontalCarveOnly;
-	float matrixPitch;
-	float matrixXoffset;
-	float matrixYoffset;
+	double matrixPitch;
+	double matrixXoffset;
+	double matrixYoffset;
 
 } tBitmapShapeParam;
 
@@ -41,8 +41,8 @@ typedef struct
 } tCleanBmInfo;
 
 tBitmapShapeParam g_BmParams;
-float g_Xres = (1/64.0f);
-float g_Yres = (1/64.0f);
+double g_Xres = (1/64.0f);
+double g_Yres = (1/64.0f);
 
 void BitmapShapeInit(HWND hWnd)
 {
@@ -87,133 +87,18 @@ UINT BitmapShapeGetSet(BOOL get, HWND hWnd)
 	ShapeGetSetRadio(hWnd, IDC_BITMAP_CONTOUR_CARVE, 5, get, &tmp );
 	g_BmParams.contourOrCarve = (tCarveMode)tmp;
 
-	ShapeGetSetFloat(hWnd, IDC_BITMAP_WIDTH, get, &g_BmParams.width);
-	ShapeGetSetFloat(hWnd, IDC_BITMAP_HEIGHT, get, &g_BmParams.height);
-	ShapeGetSetFloat(hWnd, IDC_BITMAP_DEPTH, get, &g_BmParams.depth);
-	ShapeGetSetFloat(hWnd, IDC_BITMAP_MATRIX_PITCH, get, &g_BmParams.matrixPitch);
+	ShapeGetSetDouble(hWnd, IDC_BITMAP_WIDTH, get, &g_BmParams.width);
+	ShapeGetSetDouble(hWnd, IDC_BITMAP_HEIGHT, get, &g_BmParams.height);
+	ShapeGetSetDouble(hWnd, IDC_BITMAP_DEPTH, get, &g_BmParams.depth);
+	ShapeGetSetDouble(hWnd, IDC_BITMAP_MATRIX_PITCH, get, &g_BmParams.matrixPitch);
 
 	ShapeGetSetBool(hWnd, IDC_BITMAP_CARVE_HORIZONTAL_ONLY, get, &g_BmParams.bHorizontalCarveOnly);
 
-	ShapeGetSetFloat(hWnd, IDC_MATRIX_X_OFFSET, get, &g_BmParams.matrixXoffset);
-	ShapeGetSetFloat(hWnd, IDC_MATRIX_Y_OFFSET, get, &g_BmParams.matrixYoffset);
+	ShapeGetSetDouble(hWnd, IDC_MATRIX_X_OFFSET, get, &g_BmParams.matrixXoffset);
+	ShapeGetSetDouble(hWnd, IDC_MATRIX_Y_OFFSET, get, &g_BmParams.matrixYoffset);
 
 	return 0;
 }
-
-#if 0
-
-#define RAW_SAMPLES_COUNT	256
-
-// This array stores the collected samples from the ADC
-uint16_t raw_samples[RAW_SAMPLES_COUNT]; // The values are from 0 to 4096
-						   /*
-						   * This function processes the raw samples stored in raw_samples,
-						   * and recovers the phase delay (theta).
-						   *
-						   * When the function is called, we assume that raw_samples
-						   * already has the most up-to-date samples from the ADC.
-						   */
-float getPhaseDelayFromRawSamples() {
-	uin16_t i;
-	uint32_t sum;
-	float theta;
-
-	// Calculate the sum of all the raw samples
-	sum = 0;
-	for (i = 0; i < RAW_SAMPLES_COUNT; i++) {
-		sum = sum + raw_samples[i];
-	}
-	// Convert the sum to average and phase angle
-	theta = (float)sum * (360.0f / (RAW_SAMPLES_COUNT * 4096.0f));
-	
-	return theta; // theta is between 0 and 359.9
-}
-
-
-
-#define USING_TMP36
-
-// Assume Arduino AVR APIs
-#define HEATER_GPIO          10
-#define HEATER_ON			 HIGH
-#define HEATER_OFF			 LOW
-#define COOLING_FAN_GPIO     11
-#define COOLING_FAN_ON		 HIGH
-#define COOLING_FAN_OFF		 LOW
-
-#define COOLING_FAN_ON_TEMP	 50		// Turns fan ON above this
-#define HEATER_ON_TEMP		 5		// Turns heater ON below this
-#define TEMP_HYSTEREIS		 1		// Can be zero. Can't exceed FAN_TEMP-HEATER_TEMP.
-
-// This variable stores latest value from temperature sensor sampled by ADC
-volatile uint16_t raw_adc_sample;
-/*
-* This function processes the raw ADC data returns the current
-* temperature.
-* When the function is called, we assume that raw_adc_sample
-* already has the latest sample from the ADC.
-*/
-uint16_t getTemperatureFromRawSample()
-{
-	uint16_t degC;
-	uint32_t voltage; // in mV
-
-	// Converts ADC reading into voltage in mV
-	// Assumes that filtering is not needed.
-	voltage = raw_adc_sample * 625 / 128;  // (5000 / 1024)
-
-#ifdef USING_TMP36
-    // Using TMP36 which has range of -40 / +125
-	// 10mV/C and 750mV at 25C.
-	if (voltage >= 500) {
-		degC = (voltage - 500 ) / 10;
-	}
-	else {
-		// Below freezing always return zero
-		degC = 0;
-	}
-#endif
-
-	return degC; // degC is between 0 to 100
-}
-/*
-* This function turns ON/OFF devices based on temperature.
-* as returned by getTemperatureFrom RawSample(). When calling
-* this function, we assume that that GPIO for controlling
-* the devices have been initialized as outpout.
-* This implementation also assumes that digitalWrite( ) is
-* efficient. If not, should be changed to only write the
-* GPIO when the temperature thresholds are crossed.
-*/
-void controlDevices()
-{
-	uint16_t curTemp = getTemperatureFromRawSample( );
-
-	// Temperature is too cold, turn on heater
-	if (curTemp < HEATER_ON_TEMP )
-	{
-		digitalWrite(HEATER_GPIO, HEATER_ON);
-	}
-	// Temperature is warm enough, turn off heater
-	if (curTemp > (HEATER_ON_TEMP + TEMP_HYSTEREIS))
-	{
-		digitalWrite(HEATER_GPIO, HEATER_OFF);
-	}
-
-	// Temperature is too hot, turn on the fan
-	if (curTemp > COOLING_FAN_ON_TEMP)
-	{
-		digitalWrite(COOLING_FAN_GPIO, COOLING_FAN_ON );
-	}
-	// Temperature is cool enough, turn off the fan
-	if (curTemp < (COOLING_FAN_ON_TEMP - TEMP_HYSTEREIS))
-	{
-		digitalWrite(COOLING_FAN_GPIO, COOLING_FAN_OFF);
-	}
-}
-
-#endif
-
 
 void BitmapShapeExecute(HWND hWnd)
 {
@@ -396,8 +281,8 @@ void AddPoint(int x, int y, t2DintPoint* list, unsigned long* count, unsigned lo
 
 toolPosResult_t TestToolPosition(BITMAP* bm, int x, int y, t2DintPoint* pTool, int nTool, t2DintPoint* pEdge, int nEdge, double* tangeant)
 {
-	float sX = 0.0;
-	float sY = 0.0;
+	double sX = 0.0;
+	double sY = 0.0;
 	int tCount = 0;
 
 	for (int i = 0; i < nTool; i++)
@@ -519,11 +404,11 @@ tStatus GCode(const char* szFormat, ...)
 
 toolPosResult_t TestToolPosition(CarvingContext_t *pCtx, int x, int y, double* tangeant)
 {
-	float sX = 0.0;
-	float sY = 0.0;
-	int tCount = 0;
+	double sX = 0.0;
+	double sY = 0.0;
+	unsigned long tCount = 0;
 
-	for (int i = 0; i < pCtx->toolPtCnt; i++)
+	for (unsigned long i = 0; i < pCtx->toolPtCnt; i++)
 	{
 		int dX = x + pCtx->tool[i].x;
 		int dY = y + pCtx->tool[i].y;
@@ -538,7 +423,7 @@ toolPosResult_t TestToolPosition(CarvingContext_t *pCtx, int x, int y, double* t
 	if (tCount >= (pCtx->toolPtCnt / 2)) return resultToolHalfOverlap;
 	if (tCount > 0) return resultToolPartialOverlap;
 
-	for (int i = 0; i < pCtx->edgePtCnt; i++)
+	for (unsigned long i = 0; i < pCtx->edgePtCnt; i++)
 	{
 		int dX = x + pCtx->edge[i].x;
 		int dY = y + pCtx->edge[i].y;
@@ -622,9 +507,9 @@ unsigned long MarkToolLocationAsCarved(BITMAP* pBitmap, int x, int y, t2DintPoin
 {
 	unsigned long carvedCount = 0;
 	if (!bSimulate)
-		for (int i = 0; i < count; i++) carvedCount += SetPixel(pBitmap, x + pTool[i].x, y + pTool[i].y);
+		for (unsigned long i = 0; i < count; i++) carvedCount += SetPixel(pBitmap, x + pTool[i].x, y + pTool[i].y);
 	else
-		for (int i = 0; i < count; i++) carvedCount += GetPixel(pBitmap, x + pTool[i].x, y + pTool[i].y);
+		for (unsigned long i = 0; i < count; i++) carvedCount += GetPixel(pBitmap, x + pTool[i].x, y + pTool[i].y);
 
 	return carvedCount;
 }
@@ -653,7 +538,7 @@ unsigned long MarkToolPathAsCarved(CarvingContext_t* pCtx, int iX, int iY, int d
 
 		if (!pCtx->bCleanup)
 		{
-			for (int i = 0; i < pCtx->toolPtCnt; i++)
+			for (unsigned long i = 0; i < pCtx->toolPtCnt; i++)
 			{
 				if (dX > 0 && pCtx->tool[i].y < 0) pCtx->halfTool[pCtx->halfToolPtCount++] = pCtx->tool[i];
 				else if (dX < 0 && pCtx->tool[i].y > 0) pCtx->halfTool[pCtx->halfToolPtCount++] = pCtx->tool[i];
@@ -671,7 +556,7 @@ unsigned long MarkToolPathAsCarved(CarvingContext_t* pCtx, int iX, int iY, int d
 
 		if (!pCtx->bCleanup)
 		{
-			for (int i = 0; i < pCtx->toolPtCnt; i++)
+			for (unsigned long i = 0; i < pCtx->toolPtCnt; i++)
 			{
 				if (dY > 0 && pCtx->tool[i].x > 0) pCtx->halfTool[pCtx->halfToolPtCount++] = pCtx->tool[i];
 				else if (dY < 0 && pCtx->tool[i].x < 0) pCtx->halfTool[pCtx->halfToolPtCount++] = pCtx->tool[i];
@@ -689,7 +574,7 @@ unsigned long MarkToolPathAsCarved(CarvingContext_t* pCtx, int iX, int iY, int d
 		if (!pCtx->bCleanup)
 		{
 			double direction = vectorDirection(dX, dY);
-			for (int i = 0; i < pCtx->toolPtCnt; i++)
+			for (unsigned long i = 0; i < pCtx->toolPtCnt; i++)
 			{
 				double toolDirection = vectorDirection(pCtx->tool[i].x, pCtx->tool[i].y);
 
@@ -710,22 +595,22 @@ unsigned long MarkToolPathAsCarved(CarvingContext_t* pCtx, int iX, int iY, int d
 		{
 			if (dX > 0) for (int i = 0; i <= dX; i++)
 			{
-				carved += MarkToolLocationAsCarved( pCtx, iX + i, iY + (double)i * slope, bSimulate );
+				carved += MarkToolLocationAsCarved( pCtx, iX + i, iY + (int)((double)i * slope), bSimulate );
 			}
 			else if (dX < 0) for (int i = 0; i >= dX; i--)
 			{
-				carved += MarkToolLocationAsCarved( pCtx, iX + i, iY + (double)i * slope, bSimulate);
+				carved += MarkToolLocationAsCarved( pCtx, iX + i, iY + (int)((double)i * slope), bSimulate);
 			}
 		}
 		else
 		{
 			if (dY > 0) for (int i = 0; i <= dY; i++)
 			{
-				carved += MarkToolLocationAsCarved( pCtx, iX + (double)i / slope, iY + i, bSimulate);
+				carved += MarkToolLocationAsCarved( pCtx, iX + (int)((double)i / slope), iY + i, bSimulate);
 			}
 			else if (dY < 0) for (int i = 0; i >= dY; i--)
 			{
-				carved += MarkToolLocationAsCarved( pCtx, iX + (double)i / slope, iY + i, bSimulate);
+				carved += MarkToolLocationAsCarved( pCtx, iX + (int)((double)i / slope), iY + i, bSimulate);
 			}
 		}
 	}
@@ -735,7 +620,6 @@ unsigned long MarkToolPathAsCarved(CarvingContext_t* pCtx, int iX, int iY, int d
 
 unsigned long CarveThisMoveInPixels(CarvingContext_t* pCtx, long dX, long dY)
 {
-	char szDive[MAX_PATH];
 	unsigned long carvedPixelsCount = 0;
 	double x = dX * pCtx->Xres;
 	double y = dY * pCtx->Yres;
@@ -813,7 +697,7 @@ BOOL CarveBitmapContour(CarvingContext_t *pCtx)
 	bDone = false;
 
 	// Size of a equare that fits inside the tool sqrt(1/2)
-	int sqInT = 0.7 * pCtx->toolRadiusInPixels;
+	int sqInT = (int)(0.7f * pCtx->toolRadiusInPixels);
 
 	dX = pCtx->tX;
 	dY = pCtx->tY;
@@ -1042,8 +926,8 @@ BOOL CarveBitmapContour(CarvingContext_t *pCtx)
 			do
 			{
 				step++;
-				dX = cos(a) * step;
-				dY = sin(a) * step;
+				dX = (long)(cos(a) * step);
+				dY = (long)(sin(a) * step);
 
 				oldTangeant = tangeant;
 				res = TestToolPosition( pCtx, pCtx->iX + dX, pCtx->iY + dY, &tangeant);
@@ -1052,8 +936,8 @@ BOOL CarveBitmapContour(CarvingContext_t *pCtx)
 
 			// Go back to the previous step which was still having contact
 			step--;
-			dX = cos(a) * step;
-			dY = sin(a) * step;
+			dX = (long)(cos(a) * step);
+			dY = (long)(sin(a) * step);
 			tangeant = oldTangeant;
 
 			if (res == resultNoOverlap)
@@ -1089,7 +973,7 @@ BOOL CarveBitmapContour(CarvingContext_t *pCtx)
 
 			if (carvedPixels == 0)
 			{
-				for (int i = 0; i < pCtx->pathCount && !bDone; i++)
+				for (unsigned long i = 0; i < pCtx->pathCount && !bDone; i++)
 				{
 					// Been here before!
 					if (pCtx->path[i].x == pCtx->iX && pCtx->path[i].y == pCtx->iY)
@@ -1141,12 +1025,14 @@ void CopyBitmap(BITMAP* pDst, BITMAP* pSrc)
 	size_t bitsSize = pSrc->bmWidthBytes * pSrc->bmHeight;
 	*pDst = *pSrc;
 	pDst->bmBits = malloc(bitsSize);
-	memcpy(pDst->bmBits, pSrc->bmBits, bitsSize);
+	if (pDst->bmBits != NULL)
+	{
+		memcpy(pDst->bmBits, pSrc->bmBits, bitsSize);
+	}
 }
 
 void CarveBitmapContour( )
 {
-	char cmd[MAX_STR];
 	CarvingContext_t ctx = { 0 };
 
 	HANDLE hOriginalBM = LoadImage( NULL, g_BmParams.szFilePath, IMAGE_BITMAP, 0, 0,
@@ -1175,8 +1061,8 @@ void CarveBitmapContour( )
 
 	ctx.toolPtCnt = 0;
 	ctx.edgePtCnt = 0;
-	for (int iX = 0; iX <= ctx.toolRadiusInPixels + 1; iX++) 
-	for (int iY = 0; iY <= ctx.toolRadiusInPixels + 1; iY++)
+	for (unsigned long iX = 0; iX <= ctx.toolRadiusInPixels + 1; iX++) 
+	for (unsigned long iY = 0; iY <= ctx.toolRadiusInPixels + 1; iY++)
 	{
 		double d = sqrt((iX * iX) + (iY * iY));
 		// Points which are within the tool
@@ -1389,8 +1275,8 @@ BOOL BitmapProcess(HWND hWnd)
 				sprintf_s(cmd, sizeof(cmd), "G0 Z%f\r\n", -g_BmParams.tool.safeTravel);
 				doGcode(cmd);
 
-				float z = 0.0f;
-				float dz = g_BmParams.tool.radius * 2;
+				double z = 0.0f;
+				double dz = g_BmParams.tool.radius * 2;
 				while (1)
 				{
 					if ((z + dz) > g_BmParams.depth) dz = g_BmParams.depth - z;
@@ -2042,7 +1928,7 @@ BOOL BitmapProcess(HWND hWnd)
 
 	update3DView();
 	
-	DeleteObject(hBitmap);
+	if( hBitmap != NULL ) DeleteObject(hBitmap);
 	free(tool);
 	free(edge);
 

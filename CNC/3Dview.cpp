@@ -202,6 +202,10 @@ bool start3DViewer( )
 	si.cb = sizeof(STARTUPINFO);
 	GetStartupInfo(&si);
 
+	initAxis(0, 0.0005f); // X
+	initAxis(1, 0.0005f); // Y
+	initAxis(2, 0.0005f); // Z
+
 	g_hFileChangeEvent = CreateEvent(NULL, FALSE, FALSE, L"Local\\AltFileChangeEvent");
 
 	WCHAR cmdLine[MAX_PATH];
@@ -258,7 +262,7 @@ void resetBlockSurface()
 #define SIM_RESOLUTION_MIN		0.0001f	// 0.0254mm
 #define SIM_RESOLUTION_MAX		0.01f	// 0.254mm
 
-bool init3DView(float x, float y)
+bool init3DView(double x, double y)
 {
 	HANDLE hMapFile;
 	DWORD countX, countY;
@@ -337,8 +341,8 @@ bool init3DView(float x, float y)
 		g_header->dy = countY;
 		g_header->res = (float)g_res;
 		g_header->cbAlt = SIM_MAX_SIZE_BYTES;
-		g_header->originX = -g_MetaData.offsetX;
-		g_header->originY = -g_MetaData.offsetY;
+		g_header->originX = (float)-g_MetaData.offsetX;
+		g_header->originY = (float)-g_MetaData.offsetY;
 
 		resetBlockSurface();
 	}
@@ -356,6 +360,7 @@ void initToolShape(double radius)
 	iToolPoints = 0;
 	if (g_toolShape) free(g_toolShape);
 	g_toolShape = (g_toolShape_t*)malloc(iRtool*iRtool*sizeof(g_toolShape_t));
+	if (g_toolShape == NULL) return;
 
 	for (int i = 0; i < iRtool; i++) for (int j = 0; j < iRtool; j++)
 	{
@@ -378,14 +383,14 @@ void update3DView()
 	}
 }
 
-inline void toolAt(long x, long y, float z)
+inline void toolAt(long x, long y, double z)
 {
 	if (x >= 0 && y >= 0 && x<(long)g_header->dx && y<(long)g_header->dy)
 	{
 		float* point = &g_alt[x * g_header->dy + y];
 		if (*point > z)
 		{
-			*point = z;
+			*point = (float)z;
 		}
 	}
 }
@@ -410,10 +415,10 @@ tStatus buildPath(t3DPoint Start, t3DPoint End, long d )
 
 		for (DWORD i = 0; i < iToolPoints; i++)
 		{
-			toolAt(iX + g_toolShape[i].dx, iY + g_toolShape[i].dy, (float)p.z);
-			toolAt(iX - g_toolShape[i].dx, iY + g_toolShape[i].dy, (float)p.z);
-			toolAt(iX - g_toolShape[i].dx, iY - g_toolShape[i].dy, (float)p.z);
-			toolAt(iX + g_toolShape[i].dx, iY - g_toolShape[i].dy, (float)p.z);
+			toolAt(iX + g_toolShape[i].dx, iY + g_toolShape[i].dy, p.z);
+			toolAt(iX - g_toolShape[i].dx, iY + g_toolShape[i].dy, p.z);
+			toolAt(iX - g_toolShape[i].dx, iY - g_toolShape[i].dy, p.z);
+			toolAt(iX + g_toolShape[i].dx, iY - g_toolShape[i].dy, p.z);
 		}
 		DWORD current = timeGetTime();
 		if (current > prevTime + 50 || step == n )
@@ -497,15 +502,15 @@ void _3DSettingsSave()
 
 UINT _3DSettingsGetSet(BOOL get, HWND hWnd)
 {
-	ShapeGetSetFloat(hWnd, IDC_3D_X, get, &g_MetaData.blockX);
-	ShapeGetSetFloat(hWnd, IDC_3D_Y, get, &g_MetaData.blockY);
-	ShapeGetSetFloat(hWnd, IDC_3D_Z, get, &g_MetaData.blockZ);
+	ShapeGetSetDouble(hWnd, IDC_3D_X, get, &g_MetaData.blockX);
+	ShapeGetSetDouble(hWnd, IDC_3D_Y, get, &g_MetaData.blockY);
+	ShapeGetSetDouble(hWnd, IDC_3D_Z, get, &g_MetaData.blockZ);
 
-	ShapeGetSetFloat(hWnd, IDC_3D_OFFSET_X, get, &g_MetaData.offsetX);
-	ShapeGetSetFloat(hWnd, IDC_3D_OFFSET_Y, get, &g_MetaData.offsetY);
-	ShapeGetSetFloat(hWnd, IDC_3D_OFFSET_Z, get, &g_MetaData.offsetZ);
+	ShapeGetSetDouble(hWnd, IDC_3D_OFFSET_X, get, &g_MetaData.offsetX);
+	ShapeGetSetDouble(hWnd, IDC_3D_OFFSET_Y, get, &g_MetaData.offsetY);
+	ShapeGetSetDouble(hWnd, IDC_3D_OFFSET_Z, get, &g_MetaData.offsetZ);
 
-	ShapeGetSetFloat(hWnd, IDC_3D_TOOL_HEIGHT, get, &g_MetaData.toolHeight);
+	ShapeGetSetDouble(hWnd, IDC_3D_TOOL_HEIGHT, get, &g_MetaData.toolHeight);
 
 	ShapeGetSetToolSize(hWnd, IDC_3D_TOOL_RADIUS, get, &g_MetaData.toolRadius);
 
