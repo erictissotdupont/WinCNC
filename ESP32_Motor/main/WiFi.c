@@ -349,7 +349,7 @@ static void WiFi_ReceiveTask(void *pvParameters)
 				rx_buffer[rx_len] = 0; 
 			}
       
-      #define RX_STRING_TRUNCATE_AT 50
+      #define RX_STRING_TRUNCATE_AT 65
       #define ELIPSYS_STR "..."
       #define ELIPSYS_LEN 4
 
@@ -358,12 +358,12 @@ static void WiFi_ReceiveTask(void *pvParameters)
         char tmp[ELIPSYS_LEN];
         memcpy( tmp, rx_buffer + RX_STRING_TRUNCATE_AT - ELIPSYS_LEN, sizeof(tmp));
         strcpy( rx_buffer + RX_STRING_TRUNCATE_AT - ELIPSYS_LEN, ELIPSYS_STR );
-        ESP_LOGI(TAG, "Received %d bytes '%s' from %s", rx_len, rx_buffer, inet_ntoa(source_addr.sin_addr));
+        ESP_LOGI(TAG, "Rcvd < '%s' (%d)%s", rx_buffer, rx_len, inet_ntoa(source_addr.sin_addr));
         memcpy( rx_buffer + RX_STRING_TRUNCATE_AT - ELIPSYS_LEN, tmp, sizeof(tmp));
       }
       else
       {
-        ESP_LOGI(TAG, "Received %d bytes '%s' from %s", rx_len, rx_buffer, inet_ntoa(source_addr.sin_addr));
+        ESP_LOGI(TAG, "Rcvd < '%s'(%d)%s", rx_buffer, rx_len, inet_ntoa(source_addr.sin_addr));
       }
       
       int tx_len = UDP_ParseMessage( rx_buffer, rx_len, tx_buffer );    
@@ -384,7 +384,7 @@ static void WiFi_ReceiveTask(void *pvParameters)
         else
         {
           xEventGroupSetBits(s_wifi_event_group, MSG_SENT_BIT);
-          ESP_LOGI(TAG, "Sent:'%s' (%d) Rsp", tx_buffer, tx_len );
+          ESP_LOGI(TAG, "Send > '%s' (%d) Rsp", tx_buffer, tx_len );
         }
       }
 		}
@@ -448,7 +448,7 @@ void WiFi_IdleTask( )
       }
       else
       {
-        ESP_LOGI(TAG, "Sent:'%s' (%d) Idle", tx_buffer, tx_len );
+        ESP_LOGI(TAG, "Sent > '%s' (%d) Idle", tx_buffer, tx_len );
       }
     }      
 	}

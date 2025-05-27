@@ -6,7 +6,7 @@
 
 // How often the CNC sends a ping (POS) to the host when idle to
 // keep the connection alive
-#define CNC_IDLE_POS_TIMEOUT_MS           1000
+#define CNC_IDLE_POS_TIMEOUT_MS           500
 
 // How long for waiting for the motors to go idle after flushing the queue
 #define MOTOR_IDLE_TIMEOUT_MS             10000
@@ -36,15 +36,15 @@
                                           
 #define CNC_INFO_HEADER                   "INFO"
 #define CNC_INFO_HEADER_LEN               4
-//                                        Ver,Rx,Qsz,X, Y, Z
-#define CNC_INFO_PARAMS                   "%d,%u,%u,%f,%f,%f" 
+//                                        Ver,Rx,Qs,Xs,Ys,Zs, Xm, Ym, Zm, XM, YM, ZM,
+#define CNC_INFO_PARAMS                   "%d,%u,%u,%f,%f,%f,%ld,%ld,%ld,%ld,%ld,%ld" 
                                           
 #define CNC_POS_HEADER                    "POS"
 #define CNC_ACK_HEADER                    "ACK"
 #define CNC_NAK_HEADER                    "NAK"
 #define CNC_POS_ACK_NAK_HEADER_LEN        3
-//                                         Seq,  x,  y,  z,Ste,inQueue
-#define CNC_POS_ACK_NAK_PARAMS            "%lu,%ld,%ld,%ld,%lx,%u"
+//                                         Seq,  x,  y,  z,Ste,inQ,Dbg
+#define CNC_POS_ACK_NAK_PARAMS            "%lu,%ld,%ld,%ld,%lx,%u,%llx"
 
 // Command flags
 // -------------
@@ -59,16 +59,18 @@
 // Errors
 #define CNC_STATE_MOTOR_CRC_ERROR         0x80000000L // The CRC of a movement command did not match with the physical position
 #define CNC_STATE_NETWORK_CRC_ERROR       0x40000000L // The CRC in a UDP command message did not match with the network position
-#define CNC_STATE_LIMIT_ERROR             0x20000000L // Not used yet : A physical limit was triggered. A power cycle is needed
-#define CNC_STATE_CALIBRATION_FAILED      0x10000000L // The calibration process failed because the machine was not idle, went too far or triggered a physical limit
-#define CNC_STATE_COMMUNICATION_ERROR     0x08000000L // A UDP message with the correct header was not formatted properly
-#define CNC_STATE_IDLE_TIMEOUT_ERROR      0x04000000L // Following a command to "FLUSH", one of the axis didn't return to idle 
-// 2 more here
-#define CNC_STATE_ERROR_MASK              0xFF000000L
+#define CNC_STATE_LIMIT_ERROR             0x20000000L // Not used yet : A physical limit was triggered. Motors are powered down
+#define CNC_STATE_LOGICAL_LIMIT_ERROR     0x10000000L // The end position of a movement went outside of the machine limits
+#define CNC_STATE_CALIBRATION_FAILED      0x08000000L // The calibration process failed because the machine was not idle, went too far or triggered a physical limit
+#define CNC_STATE_COMMUNICATION_ERROR     0x04000000L // A UDP message with the correct header was not formatted properly
+#define CNC_STATE_IDLE_TIMEOUT_ERROR      0x02000000L // Following a command to "FLUSH", one of the axis didn't return to idle 
+// 1 more here
+#define CNC_STATE_ERROR_MASK              0xFF000000L // ANY OF THOSE FLAG SET WILL MAKE THE MACHINE REJECT ANY NEW COMMANDS
+#define CNC_STATE_RECOVERABLE_ERROR_MASK  (CNC_STATE_ERROR_MASK & ~CNC_STATE_NETWORK_CRC_ERROR)
 
 // Warnings   
 // 4 more here
-#define CNC_STATE_POSITION_ERROR          0x00080000L // In calibrated state, a second calibration didn't return to the same position
+#define CNC_STATE_CAL_ORIGIN_ERROR        0x00080000L // From a calibrated state the origin position was off by more than 3 steps
 #define CNC_STATE_LIMITS_INACTIVE         0x00040000L // The limit sensor interface is not connected
 #define CNC_STATE_COMMAND_QUEUE_FULL      0x00020000L // The command queue is currently full
 #define CNC_STATE_POS_SENSOR_XL           0x00010000L // The left side position sensor for the X axis is triggered
@@ -83,11 +85,12 @@
 #define CNC_STATE_Z_CALIBRATED            0x00000080L // The Z axis is calibrated
 #define CNC_STATE_Y_CALIBRATED            0x00000040L // Same for Y axis
 #define CNC_STATE_X_CALIBRATED            0x00000020L // Same for X axis
+#define CNC_STATE_ALL_CALIBRATED          ( CNC_STATE_X_CALIBRATED | CNC_STATE_Y_CALIBRATED | CNC_STATE_Z_CALIBRATED )
 #define CNC_STATE_CALIBRATING             0x00000010L // The machine is performing its axis alibration
 #define CNC_STATE_MANUAL_MODE             0x00000008L // The machine is currently operating in manual mode
 #define CNC_STATE_IDLE                    0x00000004L // The maxhine is idle no motor is moving (nor dwelling)
 #define CNC_STATE_LITTLE_ENDIAN           0x00000002L // The SOC running the machine is little endian (LSB first, like Intel proc)
 #define CNC_STATE_CONNECTED               0x00000001L // The machine is connected. Any status from the machine must have this bit set
-#define CNC_STATE_MASK                    0x00000FFFL
+#define CNC_STATE_INFORMATION_MASK        0x00000FFFL
 
-#define CNC_STATE_ALL_MASK                (CNC_STATE_MASK|CNC_STATE_WARNING_MASK|CNC_STATE_ERROR_MASK)
+#define CNC_STATE_ALL_MASK                (CNC_STATE_INFORMATION_MASK|CNC_STATE_WARNING_MASK|CNC_STATE_ERROR_MASK)

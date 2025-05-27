@@ -23,7 +23,6 @@ t2DPoint vuX = { 100, 0 };
 t2DPoint vuY = { 60, -40 };
 t2DPoint vuZ = { 0, -100 };
 
-extern t3DPoint g_displayPos;
 extern int g_debug[4];
 
 #define VIEW_MARGIN			10
@@ -86,7 +85,7 @@ void OnPaint(HWND hWnd)
 	rect.top = view.top + VIEW_MARGIN * 2 + statusHeight;
 	rect.bottom = rect.top + positionHeight;
 	font = CreateFont(
-		positionHeight/3, 0, 0, 0, 
+		positionHeight / 3, 0, 0, 0, 
 		FW_REGULAR, false, false, false, 
 		DEFAULT_CHARSET, 
 		OUT_DEFAULT_PRECIS, 
@@ -96,19 +95,21 @@ void OnPaint(HWND hWnd)
 		VIEW_POSITION_FONT );
 	SelectObject(hdcMem, font);
 	//swprintf(str, 100, L"X:%.4f\r\nY:%.4f\r\nZ:%.4f",
-	sprintf_s(str, sizeof(str), "X:%.3f\r\nY:%.3f\r\nZ:%.3f",
-		g_displayPos.x,
-		g_displayPos.y,
-		g_displayPos.z);
+
+	t3DPoint pos;
+	GetMachinePosition(&pos);
+
+	sprintf_s(str, sizeof(str), "X:%.4f\r\nY:%.4f\r\nZ:%.4f", 
+		pos.x,
+		pos.y, 
+		pos.z );
+
 	DrawTextA(hdcMem, str, -1, &rect, 0);
 	DeleteObject(font);
 
-	// Lower right corner : Debug information
+	// Lower left corner : Debug information
 	int debugHeight = (height - (VIEW_MARGIN * 3) - statusHeight) / 2;
-	rect.left = view.left + VIEW_MARGIN;
-	rect.right = rect.left + (width - (VIEW_MARGIN * 3)) / 2;
-	rect.top = view.top + VIEW_MARGIN * 2 + statusHeight + positionHeight;
-	rect.bottom = rect.top + debugHeight;
+	
 	font = CreateFont(
 		positionHeight / 10, 0, 0, 0,
 		FW_REGULAR, false, false, false,
@@ -118,18 +119,66 @@ void OnPaint(HWND hWnd)
 		DEFAULT_QUALITY,
 		DEFAULT_PITCH,
 		VIEW_POSITION_FONT);
+
 	SelectObject(hdcMem, font);
 
-	long xInPipe = 0, yInPipe = 0, zInPipe = 0;
-	t3DPoint current, inPipe;
-	getCurPos(&current);
-	stepToPos(xInPipe, yInPipe, zInPipe, &inPipe);
-	current.x -= inPipe.x;
-	current.y -= inPipe.y;
-	current.z -= inPipe.z;
-
-	getCNCStateString(str, sizeof(str), CNC_STATE_ALL_MASK);
+	// Bottom Left : INFORMATION
+	rect.left = view.left + VIEW_MARGIN;
+	rect.right = rect.left + (width - (VIEW_MARGIN * 3)) / 2;
+	rect.top = view.top + VIEW_MARGIN * 2 + statusHeight + positionHeight;
+	rect.bottom = rect.top + debugHeight;
+	getCNCStateString(str, sizeof(str), CNC_STATE_INFORMATION_MASK);
 	DrawTextA(hdcMem, str, -1, &rect, 0);
+
+	// Top right : WARNINGS
+	rect.right = view.right - VIEW_MARGIN;
+	rect.left = rect.right - (width - (VIEW_MARGIN * 3)) / 2;
+	rect.top = view.top + VIEW_MARGIN * 2 + statusHeight;
+	rect.bottom = rect.top + positionHeight;
+
+	t3DPoint theoriCalPos;
+	getTheoricalPos(&theoriCalPos);
+
+#if 0 // Show the delta between the physical position and the theorical position x1000
+	theoriCalPos.x -= pos.x;
+	theoriCalPos.y -= pos.y;
+	theoriCalPos.z -= pos.z;
+	theoriCalPos.x *= 1000.0f;
+	theoriCalPos.y *= 1000.0f;
+	theoriCalPos.z *= 1000.0f;
+#endif
+
+	int n = sprintf_s(str, sizeof(str), "\r\nX:%.4f Y:%.4f Z:%.4f\r\n\r\n",
+		theoriCalPos.x,
+		theoriCalPos.y,
+		theoriCalPos.z);
+
+	getCNCStateString(str+n, sizeof(str)-n, CNC_STATE_WARNING_MASK);
+
+	DrawTextA(hdcMem, str, -1, &rect, 0);
+
+	// Bottom Right : ERRORS
+
+	DeleteObject(font);
+	font = CreateFont(
+		positionHeight / 8, 0, 0, 0,
+		FW_DEMIBOLD, false, false, false,
+		DEFAULT_CHARSET,
+		OUT_DEFAULT_PRECIS,
+		CLIP_DEFAULT_PRECIS,
+		DEFAULT_QUALITY,
+		DEFAULT_PITCH,
+		VIEW_POSITION_FONT);
+	SelectObject(hdcMem, font);
+
+	rect.right = view.right - VIEW_MARGIN;
+	rect.left = rect.right - (width - (VIEW_MARGIN * 3)) / 2;
+	rect.top = view.top + VIEW_MARGIN * 2 + statusHeight + positionHeight;
+	rect.bottom = rect.top + debugHeight;
+	getCNCStateString(str, sizeof(str), CNC_STATE_ERROR_MASK );
+	SetTextColor(hdcMem, RGB(255, 0, 0));
+	DrawTextA(hdcMem, str, -1, &rect, 0);
+
 	DeleteObject(font);
 
 	// Transfer the off-screen DC to the screen

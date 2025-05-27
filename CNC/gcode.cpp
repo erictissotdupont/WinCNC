@@ -22,7 +22,7 @@ typedef struct _tMotion {
   int motion;
 } tMotion;
 
-t3DPoint homePos = { 0,0,0 };
+t3DPoint g_HomePos = { 0,0,0 };
 
 double feedSpeed = 30; // Inches per minute
 double cutterRadius = 0;
@@ -92,7 +92,7 @@ tStatus arcInXYPlane( double X, double Y, double Z, double I, double J, double P
   t3DPoint end;
 
   // Start and end of the movement
-  getCurPos( &info.start );
+  getTheoricalPos( &info.start );
 
   // If any z motion
   info.z = Z;
@@ -159,7 +159,8 @@ tStatus arcInXYPlane( double X, double Y, double Z, double I, double J, double P
       info.end.x, info.end.y, info.end.z,
       end.x, end.y, end.z );
   }
-   
+
+  updateTheoricalPosition(X, Y, Z);
   return doMove( getArcPosStepAt, stepCount, duration, &info );
 }
 
@@ -190,7 +191,7 @@ tStatus linearRel( double x, double y, double z )
   info.x = x;
   info.y = y;
   info.z = z;
-  getCurPos( &info.Origin );
+  getTheoricalPos( &info.Origin );
 
   // Make sure we don't send single move command taking longer than 1sec
   steps = (long)( duration / 1000 );
@@ -201,6 +202,7 @@ tStatus linearRel( double x, double y, double z )
 
   // printf( "Length=%.2f - Feed=%.2f - Duration=%.2f - Steps=%d\n", l, feedSpeed, duration,steps );
 
+  updateTheoricalPosition(x, y, z);
   return doMove( getLinearRelStepAt, steps, duration, &info );
 }
 
@@ -220,13 +222,15 @@ void getrapidPosStepAt( t3DPoint* P, int s, int total, void* pArg )
 }
 
 tStatus rapidPosRel( double x, double y, double z )
-{ 
+{
   rapidPosInfo info;
 
-  getCurPos( &info.Origin );
+  getTheoricalPos( &info.Origin );
   info.x = x;
   info.y = y;
   info.z = z;
+
+  updateTheoricalPosition(x, y, z);
 
   return doMove( getrapidPosStepAt, 1, 0, &info );
 }
@@ -234,7 +238,7 @@ tStatus rapidPosRel( double x, double y, double z )
 // --------------------------- Dwell - G4 --------------------------------
 void getDwellPosStepAt( t3DPoint* P, int s, int total, void* pArg )
 {
-  getCurPos( P );
+  getPhysicalPosition( P );
 }
 
 tStatus dwell( long t )
@@ -292,21 +296,6 @@ const int* modalGroup[MG_COUNT] = { modal0, modal1, modal2, modal3, modal4, moda
 #define GOT_DIMENSION  0x0040
 #define GOT_TURN_COUNT 0x0080
 #define GOT_SPINDLE    0x0100
-
-void showDistanceInfo()
-{
-	t3DPoint actualPos;
-	long x, y, z;
-
-	printf("Distance information\n");
-
-	getRawStepPos(&x, &y, &z);
-	printf(" Raw Motor Step: X:%ld Y:%ld Z:%ld \n", x, y, z);
-
-	getCurPos(&actualPos);
-
-	printf(" Actual:%.4f,%.4f,%.4f\n", actualPos.x, actualPos.y, actualPos.z);
-}
 
 tStatus getMotion(char* cmd, tMotion& M, unsigned long& gotWhat )
 {
@@ -417,7 +406,8 @@ tStatus doGcode(char* cmd)
 	tStatus ret = retUnknownErr;
 	t3DPoint curPos;
 
-	getCurPos(&curPos);
+	getTheoricalPos(&curPos);
+	//getPhysicalPosition(&curPos);
 
 	// Debug
 	int cmdInGroup[MG_COUNT];
@@ -504,27 +494,18 @@ tStatus doGcode(char* cmd)
       break;
 
     case CMD_G10 : // G10 : Reset home position to current
-      homePos = curPos;
+      g_HomePos = curPos;
       break;
 
     case CMD_G30 : // G30 : Go back home
       // Move first in X-Y plane and then Z axis
       ret = linearRel( 
-          homePos.x - curPos.x,
-          homePos.y - curPos.y,
+          g_HomePos.x - curPos.x,
+          g_HomePos.y - curPos.y,
           0 );
       if (ret == retSuccess)
       {
-          ret = linearRel(0, 0, homePos.z - curPos.z);
-      }
-      if( ret != retSuccess )
-      {
-        // Interrupted. Set the current theorical pos to the actual pos.
-        getCurPos( &curPos);
-      }
-      else
-      {
-        // We're home!!!
+          ret = linearRel(0, 0, g_HomePos.z - curPos.z);
       }
       break;
 
@@ -560,15 +541,15 @@ tStatus doGcode(char* cmd)
 	  // the coordinates relative to current position
 	  if (gotWhat & GOT_X)
 	  {
-		  M.X = M.X - curPos.x + homePos.x;
+		  M.X = M.X - curPos.x + g_HomePos.x;
 	  }
 	  if (gotWhat & GOT_Y)
 	  {
-		  M.Y = M.Y - curPos.y + homePos.y;
+		  M.Y = M.Y - curPos.y + g_HomePos.y;
 	  }
 	  if (gotWhat & GOT_Z)
 	  {
-		  M.Z = M.Z - curPos.z + homePos.z;
+		  M.Z = M.Z - curPos.z + g_HomePos.z;
 	  }
   }
   // If activce distance mode is relative (G91)

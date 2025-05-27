@@ -11,9 +11,9 @@
 #include <mmsystem.h>
 
 #include "status.h"
-#include "socket.h"
 #include "motor.h"
 #include "gcode.h"
+#include "socket.h"
 
 // This is how often the host will broadcast a request for info when
 // no longer connected to the machine
@@ -52,7 +52,7 @@ char g_szCNCIP[IPSTRSIZE];
 struct sockaddr_in g_CncAddr;
 
 unsigned long g_CNC_State = 0;
-
+INT64 g_CNC_Debug;
 unsigned int g_CNC_QueueSize;
 unsigned int g_CNC_MsgInQueue = 0;
 int g_CNC_QueueFree;
@@ -76,6 +76,14 @@ HANDLE g_outBufferMutex = NULL;
 // all messages are received and processed only once. The machine and
 // the host only increment when a message is received.
 unsigned long g_msgSeq;
+
+typedef enum {
+	Endianness_Unknown = 0,
+	BigEndian = 1,
+	LittleEndian = 2,
+} Endianness_t;
+
+Endianness_t g_Endianness = Endianness_Unknown;
 
 static const unsigned char crc8_table[256] = {
 	0x00, 0xF7, 0xB9, 0x4E, 0x25, 0xD2, 0x9C, 0x6B,
@@ -127,7 +135,7 @@ unsigned char crc8(unsigned char* pt, unsigned int nbytes, unsigned char crc)
 unsigned char GetPosCRC(long x, long y, long z, unsigned long d, unsigned long flags )
 {
 	long posForCRC[5];
-	if (g_CNC_State & CNC_STATE_LITTLE_ENDIAN)
+	if (g_Endianness == LittleEndian )
 	{
 		posForCRC[0] = x;
 		posForCRC[1] = y;
@@ -135,13 +143,17 @@ unsigned char GetPosCRC(long x, long y, long z, unsigned long d, unsigned long f
 		posForCRC[3] = d;
 		posForCRC[4] = flags;
 	}
-	else
+	else if( g_Endianness == BigEndian )
 	{
 		posForCRC[0] = htonl(x);
 		posForCRC[1] = htonl(y);
 		posForCRC[2] = htonl(z);
 		posForCRC[3] = htonl(d);
 		posForCRC[4] = htonl(flags);
+	}
+	else
+	{
+		return 0;
 	}
 	return crc8((unsigned char*)posForCRC, sizeof(posForCRC), 0xFF);
 }
@@ -162,6 +174,11 @@ bool LockMachinePosition(bool bLock)
 	}
 }
 
+unsigned int GetInQueueCount()
+{
+	return g_CNC_MsgInQueue;
+}
+
 void getSocketStatusString(char* szBuffer, size_t cbBuffer)
 {
 	sprintf_s(szBuffer, cbBuffer, "%s - Tx:%lu - Rx:%lu - Retry:%lu - Nak:%lu - Lvl:%d %%",
@@ -177,28 +194,49 @@ void getCNCStateString(char* szBuffer, size_t cbBuffer, unsigned long mask )
 {
 	*szBuffer = 0;
 	unsigned long state = g_CNC_State & mask;
+
+	// Error
 	if (state & CNC_STATE_MOTOR_CRC_ERROR)     strcat_s(szBuffer, cbBuffer, "Motor CRC error" "\r\n");
 	if (state & CNC_STATE_NETWORK_CRC_ERROR)   strcat_s(szBuffer, cbBuffer, "Network CRC error" "\r\n");
-	if (state & CNC_STATE_LIMIT_ERROR)         strcat_s(szBuffer, cbBuffer, "Limit error" "\r\n");
+	if (state & CNC_STATE_LIMIT_ERROR)         strcat_s(szBuffer, cbBuffer, "Physical limit error" "\r\n");
+	if (state & CNC_STATE_LOGICAL_LIMIT_ERROR) strcat_s(szBuffer, cbBuffer, "Logical limit error" "\r\n");
 	if (state & CNC_STATE_CALIBRATION_FAILED)  strcat_s(szBuffer, cbBuffer, "Calibration failed" "\r\n");
 	if (state & CNC_STATE_COMMUNICATION_ERROR) strcat_s(szBuffer, cbBuffer, "Communication error" "\r\n");
+	if (state & CNC_STATE_IDLE_TIMEOUT_ERROR)  strcat_s(szBuffer, cbBuffer, "Idle timeout error" "\r\n");
 	
-	if (state & CNC_STATE_POSITION_ERROR)      strcat_s(szBuffer, cbBuffer, "Calibration position error" "\r\n");
-	if (state & CNC_STATE_LIMITS_INACTIVE)     strcat_s(szBuffer, cbBuffer, "Limit sensors not connected" "\r\n");
+	// Warning
+	if (state & CNC_STATE_CAL_ORIGIN_ERROR)    strcat_s(szBuffer, cbBuffer, "Calibration position error" "\r\n");
+	if (state & CNC_STATE_LIMITS_INACTIVE)     strcat_s(szBuffer, cbBuffer, "Limit sensors not available" "\r\n");
 	if (state & CNC_STATE_COMMAND_QUEUE_FULL)  strcat_s(szBuffer, cbBuffer, "Command queue is full" "\r\n");
 	if (state & CNC_STATE_POS_SENSOR_XL)       strcat_s(szBuffer, cbBuffer, "Position sensor XL" "\r\n");
 	if (state & CNC_STATE_POS_SENSOR_XR)       strcat_s(szBuffer, cbBuffer, "Position sensor XR" "\r\n");
 	if (state & CNC_STATE_POS_SENSOR_ZL)       strcat_s(szBuffer, cbBuffer, "Position sensor ZL" "\r\n");
 	if (state & CNC_STATE_POS_SENSOR_ZR)       strcat_s(szBuffer, cbBuffer, "Position sensor ZR" "\r\n");
 	if (state & CNC_STATE_POS_SENSOR_Y)        strcat_s(szBuffer, cbBuffer, "Position sensor Y" "\r\n");
+
+	// Information
 	if (state & CNC_STATE_Z_CALIBRATED)        strcat_s(szBuffer, cbBuffer, "Z axis calibrated" "\r\n");
 	if (state & CNC_STATE_Y_CALIBRATED)        strcat_s(szBuffer, cbBuffer, "Y axis calibrated" "\r\n");
 	if (state & CNC_STATE_X_CALIBRATED)        strcat_s(szBuffer, cbBuffer, "X axis calibrated" "\r\n");
 	if (state & CNC_STATE_CALIBRATING)         strcat_s(szBuffer, cbBuffer, "Calibrating..." "\r\n");
 	if (state & CNC_STATE_MANUAL_MODE)         strcat_s(szBuffer, cbBuffer, "Manual mode" "\r\n");
 	if (state & CNC_STATE_IDLE)                strcat_s(szBuffer, cbBuffer, "Idle..." "\r\n");
-	if (state & CNC_STATE_LITTLE_ENDIAN)       strcat_s(szBuffer, cbBuffer, "Little Endian" "\r\n");
-	if (state & CNC_STATE_CONNECTED)           strcat_s(szBuffer, cbBuffer, "Connected" "\r\n");
+	//if (state & CNC_STATE_LITTLE_ENDIAN)       strcat_s(szBuffer, cbBuffer, "Little Endian" "\r\n");
+	if (state & CNC_STATE_CONNECTED)
+	{
+		char szDebug[80];
+		strcat_s(szBuffer, cbBuffer, "Connected" "\r\n");
+		if (g_CNC_Debug || 1)
+		{
+			int i = 0;
+			int n = sizeof(szDebug) - 1;
+			i += sprintf_s(szDebug,   n-i, "\r\n0x%04llX", (g_CNC_Debug >> 48) & 0xFFFF);
+			i += sprintf_s(szDebug+i, n-i, "-%04llX",      (g_CNC_Debug >> 32) & 0xFFFF);
+			i += sprintf_s(szDebug+i, n-i, "-%04llX",      (g_CNC_Debug >> 16) & 0xFFFF);
+			i += sprintf_s(szDebug+i, n-i, "-%04llX\r\n",  (g_CNC_Debug & 0xFFFF));
+			strcat_s(szBuffer, cbBuffer, szDebug);
+		}
+	}
 }
 
 unsigned long getCNCState()
@@ -270,6 +308,7 @@ tStatus sendAndWaitForAck(char* msg, size_t cbMsg)
 
 		case WAIT_TIMEOUT:
 			CheckDisconnection();
+			status = retCncStatusTimeout;
 			break;
 
 		case WAIT_OBJECT_0 + 1: // ACK
@@ -390,6 +429,17 @@ tStatus postCommand(char* cmd)
 	return status;
 }
 
+void CNC_Reboot()
+{
+	char msg[64];
+	int msgLen = sprintf_s(msg, sizeof(msg), CNC_HEADER CNC_CMD_HEADER "," CNC_CMD_HEADER_PARAMS "|%s|",
+		g_msgSeq,
+		1,
+		CNC_CMD_REBOOT);
+
+	sendAndWaitForAck(msg, msgLen);
+}
+
 void ForceStop( )
 {
 	SetEvent(g_hStop);
@@ -400,6 +450,7 @@ void ForceStop( )
 			g_msgSeq,
 			1,
 			CNC_CMD_FLUSH );
+
 		sendAndWaitForAck(msg, msgLen);
 	}
 }
@@ -436,12 +487,19 @@ DWORD senderThread(PVOID pParam)
 			continue;
 		}
 
+		if (g_CNC_State & CNC_STATE_ERROR_MASK)
+		{
+			FlushOutBuffer();
+			continue;
+		}
+
 		if (WaitForSingleObject(g_outBufferMutex, OUT_BUFFER_MUTEX_TIMEOUT_MS ) != WAIT_OBJECT_0)
 		{
 			// Deal with the buffer mutex timeout
 		}
 		else
 		{
+			char dbg[80];
 			if (g_outCmdCount == 0)
 			{
 				// Nothing to send... idle
@@ -453,14 +511,22 @@ DWORD senderThread(PVOID pParam)
 
 				ret = sendAndWaitForAck(msg, cbHeader + g_outCharCount + 1);
 
-				if (ret != retCncCBusy && ret != retCncStatusTimeout )
+				if (ret == retCncCBusy || 
+					ret == retCncStatusTimeout ||
+					ret == retCncCommunicationError )
 				{
-					FlushOutBuffer( );
+					// Keep trying
+					g_RetryCount++;
+					sprintf_s(dbg, sizeof(dbg), ">>> Resending msg %d.\r\n", g_msgSeq);
 				}
 				else
 				{
-					g_RetryCount++;
+					sprintf_s(dbg, sizeof(dbg), "Flushing msg %d\r\n", g_msgSeq);
+					g_msgSeq++;
+					FlushOutBuffer();
 				}
+				OutputDebugStringA(dbg);
+
 			}
 			ReleaseMutex(g_outBufferMutex);
 		}
@@ -481,6 +547,9 @@ void DecodeMessage(const char* msg, int cnt)
 		int g_CNCversion;
 		int g_rxBufferSize;
 		float g_xRes, g_yRes, g_zRes;
+		long g_xMin, g_xMax;
+		long g_yMin, g_yMax;
+		long g_zMin, g_zMax;
 
 		if (sscanf_s(msg + CNC_INFO_HEADER_LEN + 1, CNC_INFO_PARAMS,
 			&g_CNCversion,
@@ -488,7 +557,13 @@ void DecodeMessage(const char* msg, int cnt)
 			&g_CNC_QueueSize,
 			&g_xRes,
 			&g_yRes,
-			&g_zRes) != 6)
+			&g_zRes,
+			&g_xMin,
+			&g_yMin,
+			&g_zMin,
+			&g_xMax,
+			&g_yMax,
+			&g_zMax) != 12)
 		{
 			OutputDebugStringA(__FUNCTION__"::INFO format error.");
 		}
@@ -516,6 +591,7 @@ void DecodeMessage(const char* msg, int cnt)
 		long x,y,z;
 		unsigned long state;
 		unsigned int inQueue;
+		INT64 debug;
 
 		if (sscanf_s(msg + CNC_POS_ACK_NAK_HEADER_LEN + 1, CNC_POS_ACK_NAK_PARAMS,
 			&seq,
@@ -523,12 +599,16 @@ void DecodeMessage(const char* msg, int cnt)
 			&y,
 			&z,
 			&state,
-			&inQueue) != 6)
+			&inQueue,
+			&debug) != 7)
 		{
 			OutputDebugStringA(__FUNCTION__"::Format error.");
 		}
 		else
 		{
+			char dbg[80] = { 0 };
+
+			g_CNC_Debug = debug;
 			g_CNC_MsgInQueue = inQueue;
 			g_CNC_QueueFree = g_CNC_QueueSize - inQueue;
 			g_CNC_State = state;
@@ -553,50 +633,57 @@ void DecodeMessage(const char* msg, int cnt)
 
 					if (LockMachinePosition(true))
 					{
-						if (inQueue == 0 && g_CNC_State & CNC_STATE_IDLE && g_outCmdCount == 0 )
+						if ((inQueue == 0) && 
+							(g_CNC_State & (CNC_STATE_IDLE | CNC_STATE_CONNECTED)) &&
+							(g_outCmdCount == 0 ))
 						{
 							g_msgSeq = seq;
-							resetMotorPosition(x, y, z);
+							g_Endianness = ((g_CNC_State & CNC_STATE_LITTLE_ENDIAN) != 0 ) ? LittleEndian : BigEndian;
+							resetMotorPosition(x, y, z, g_CNC_QueueSize);
 						}
 						LockMachinePosition(false);
 					}
 				}
+				sprintf_s(dbg, sizeof(dbg), "Got POS. In queue %d. State:%X\r\n", inQueue, state );
 			}
 			else if (bAck)
 			{
 				if (!bConnected)
 				{
 					// Got an ACK while we're not connected. Ignore?
-					OutputDebugStringA("ACK received when not connected.\r\n");
+					sprintf_s(dbg, sizeof(dbg), "Got ACK while not connected for command %d\r\n", seq);
 				}
 				else if (seq != g_msgSeq)
 				{
-					char str[80];
-					sprintf_s(str, sizeof(str),
-						__FUNCTION__"::Out of sequence ACK. Got %lu, expected %lu.\t\n",
+					sprintf_s(dbg, sizeof(dbg),
+						__FUNCTION__"::Out of sequence ACK. Got %lu, expected %lu.\r\n",
 						seq, g_msgSeq);
-
-					OutputDebugStringA(str);
 				}
 				else if (seq == g_msgSeq)
 				{
-					g_msgSeq++;
 					SetEvent(g_hAckReceived);
+					sprintf_s(dbg, sizeof(dbg), "Got ACK for command %d\r\n", seq);
 				}
 			}
 			else if (bNak)
 			{
 				if (seq == (g_msgSeq + 1))
 				{
-					g_msgSeq++;
 					SetEvent(g_hAckReceived);
+					sprintf_s(dbg, sizeof(dbg), "Got NAK for previous seq (%d). Treat it like an ACK.\r\n", seq );
 				}
-				else
+				else if( seq == g_msgSeq )
 				{
 					g_NakCount++;
 					SetEvent(g_hNackReceived);
+					sprintf_s(dbg, sizeof(dbg), "Got NAK for command %d\r\n", seq);
+				}
+				else
+				{
+					sprintf_s(dbg, sizeof(dbg), "Got unexpected NAK: %d local Seq: %d\r\n", seq, g_msgSeq );
 				}
 			}
+			OutputDebugStringA(dbg);
 			NOTIFY_CALLBACK(CNC_MACHINE_UPDATE, NULL)
 		}
 	}
@@ -788,7 +875,7 @@ DWORD __stdcall broadcasterThread(PVOID pParam)
 
 	while (1)
 	{
-		char msg[OUT_MSG_BUF_SIZE];
+		char msg[80];
 
 		// Look for new IO boards every 1 seconds. Note that event is created
 		// as already in the signaled state so the first time the loop runs, 
@@ -801,7 +888,7 @@ DWORD __stdcall broadcasterThread(PVOID pParam)
 		{
 			Addr.sin_addr.s_addr = BroadcastAddr[i];
 
-			sprintf_s(msg, OUT_MSG_BUF_SIZE, CNC_HEADER CNC_INFO_HEADER);
+			sprintf_s(msg, sizeof(msg), CNC_HEADER CNC_INFO_HEADER);
 
 			if (sendto(g_CNCSocket, msg, (int)strlen(msg), 0, (struct sockaddr*)&Addr, sizeof(Addr)) < 0)
 			{

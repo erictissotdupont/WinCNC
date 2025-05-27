@@ -112,8 +112,6 @@ void Motor::Reset( )
   moveDuration = 0;
 }
 
-#define AVG_SAMPLE_COUNT  100
-
 int Motor::GetLimit( )
 {
   return ( g_limitState & endMask ) ? 1 : 0;
@@ -323,11 +321,12 @@ long Motor::GetPos( )
   return curPos;
 }
 
-void Motor::CalibrateStart( uint64_t now, unsigned long state_flag )
+void Motor::CalibrateStart( uint64_t now, long max_step, unsigned long state_flag )
 {
   cal_state = 1;
   cal_cycle = 1;
   cal_state_flag = state_flag;
+  cal_max_step = max_step;
   nextStepTime = now + 1000;
   cal_checkCurPos = Events_GetState( ) & state_flag;
   Events_ClearState( state_flag );
@@ -336,7 +335,7 @@ void Motor::CalibrateStart( uint64_t now, unsigned long state_flag )
 #define CAL_STEP_SPEED   1000
 #define CAL_PAUSE        50000
 #define CAL_STALL        100
-#define CAL_ERROR_TRLD   2
+#define CAL_ERROR_TRLD   3
 
 void Motor::CalibrationComplete( )
 {
@@ -346,6 +345,7 @@ void Motor::CalibrationComplete( )
   {
     if ((curPos < -CAL_ERROR_TRLD) || (curPos > CAL_ERROR_TRLD))
     {
+      Events_SetDebug( (cal_state_flag << 16) | ( curPos & 0xFFFF ));
       Events_SetState( CNC_STATE_POSITION_ERROR );
     }
   }
@@ -442,8 +442,17 @@ void Motor::CalibrateTask( uint64_t now )
       
     case 5 :
       Pulse( 0 );
-      nextStepTime = now + ( CAL_STEP_SPEED << (cal_cycle - 1));
-      cal_state = 4;
+      if(( --cal_max_step < 0 ) || ( Events_GetState( ) & CNC_STATE_RECOVERABLE_ERROR_MASK ) != 0 )
+      {
+        Events_SetState( CNC_STATE_CALIBRATION_FAILED );
+        cal_state = 0;
+        nextStepTime = NO_STEP_TIME;
+      }
+      else
+      {
+        nextStepTime = now + ( CAL_STEP_SPEED << (cal_cycle - 1));
+        cal_state = 4;
+      }
       break;
       
   }
@@ -576,8 +585,17 @@ void DualMotor::CalibrateTask( uint64_t now )
     case 5 :
       PulseLeft( 0 );
       PulseRight( 0 );
-      nextStepTime = now + CAL_STEP_SPEED * ( 1 << ( cal_cycle - 1));
-      cal_state = 4;
+      if(( --cal_max_step < 0 ) || ( Events_GetState( ) & CNC_STATE_RECOVERABLE_ERROR_MASK ) != 0 )
+      {
+        Events_SetState( CNC_STATE_CALIBRATION_FAILED );
+        cal_state = 0;
+        nextStepTime = NO_STEP_TIME;
+      }
+      else
+      {
+        nextStepTime = now + CAL_STEP_SPEED * ( 1 << ( cal_cycle - 1));
+        cal_state = 4;
+      }
       break;
       
     case 6 : // Correction of "d1" which is away from sensor on the opposite side which was furthest
@@ -766,6 +784,13 @@ extern "C" {
       {
         Events_SetState( CNC_STATE_MOTOR_CRC_ERROR );
       }
+      else if((( Events_GetState( ) & CNC_STATE_ALL_CALIBRATED ) == CNC_STATE_ALL_CALIBRATED ) &&
+              (( newPos[0] < X_AXIS_MIN ) || ( newPos[0] > X_AXIS_MAX ) ||
+               ( newPos[1] < Y_AXIS_MIN ) || ( newPos[1] > Y_AXIS_MAX ) ||
+               ( newPos[2] < Z_AXIS_MIN ) || ( newPos[2] > Z_AXIS_MAX )))
+      {
+        Events_SetState( CNC_STATE_LOGICAL_LIMIT_ERROR );
+      }
       else
       {
         // Movements
@@ -828,9 +853,9 @@ extern "C" {
         
         Events_SetState( CNC_STATE_CALIBRATING );
               
-        X.CalibrateStart( now, CNC_STATE_X_CALIBRATED );
-        Y.CalibrateStart( now, CNC_STATE_Y_CALIBRATED );
-        Z.CalibrateStart( now, CNC_STATE_Z_CALIBRATED );
+        X.CalibrateStart( now, X_AXIS_LENGTH, CNC_STATE_X_CALIBRATED );
+        Y.CalibrateStart( now, Y_AXIS_LENGTH, CNC_STATE_Y_CALIBRATED );
+        Z.CalibrateStart( now, Z_AXIS_LENGTH, CNC_STATE_Z_CALIBRATED );
         
         Motor_PrepareNextStep( now );
       }

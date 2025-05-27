@@ -20,10 +20,12 @@ unsigned char GetPosCRC(long x, long y, long z, unsigned long t, unsigned long f
 bool LockMachinePosition(bool bLock);
 void registerSocketCallback(CNC_SOCKET_EVENT event, void(*pCallback)(PVOID));
 int initSocketCom( );
+void CNC_Reboot( );
 void ForceStop( );
 tStatus postCommand( char* cmd );
 void getSocketStatusString(char* szBuffer, size_t cbBuffer);
 void getCNCStateString(char* szBuffer, size_t cbBuffer, unsigned long mask);
+unsigned int GetInQueueCount( );
 unsigned long getCNCState( );
 int sendToCNC(char* msg, size_t cbMsg);
 

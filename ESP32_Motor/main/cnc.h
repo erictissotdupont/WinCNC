@@ -1,9 +1,23 @@
 
-//  A X I S    R E S O L U T I O N
-//  ------------------------------- 
-#define Z_AXIS_RES            0.0003925f
-#define X_AXIS_RES            0.00049213f
-#define Y_AXIS_RES            0.00049213f
+//   A X I S   
+// -----------
+// Axis resolution in inches per step 
+#define Z_AXIS_RES           0.0003925f
+#define X_AXIS_RES           0.00049213f
+#define Y_AXIS_RES           0.00049213f
+
+// Maximum positions per axis in steps
+#define X_AXIS_MIN           ((long)(  0.00f / X_AXIS_RES))
+#define X_AXIS_MAX           ((long)( 48.00f / X_AXIS_RES))
+#define Y_AXIS_MIN           ((long)(  0.00f / Y_AXIS_RES))
+#define Y_AXIS_MAX           ((long)( 32.00f / Y_AXIS_RES))
+#define Z_AXIS_MIN           ((long)( -8.00f / Z_AXIS_RES))
+#define Z_AXIS_MAX           ((long)(  0.00f / Z_AXIS_RES))
+
+// Axis length in steps
+#define X_AXIS_LENGTH        (X_AXIS_MAX-X_AXIS_MIN)
+#define Y_AXIS_LENGTH        (Y_AXIS_MAX-Y_AXIS_MIN)
+#define Z_AXIS_LENGTH        (Z_AXIS_MAX-Z_AXIS_MIN)
 
 //-----------------------------------------------------------------------------
 //                            G P I O   M A P P I N G 

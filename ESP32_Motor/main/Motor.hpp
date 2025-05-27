@@ -32,7 +32,7 @@ public :
   uint64_t InitMove( long s, unsigned long t, uint64_t now );
   uint64_t GetNextStepTime( );
   void MovementTask( uint64_t now );
-  void CalibrateStart( uint64_t now, unsigned long state_flag );
+  void CalibrateStart( uint64_t now, long max_step, unsigned long state_flag );
   void CalibrationComplete( );
   
 protected :
@@ -73,6 +73,7 @@ protected :
   int cal_away;
   int cal_cycle;              // Number of calibration cycles. Echh cycle slows down to increase precision
   unsigned long cal_state_flag; // The state flag to be signaled when this axis is calbrated
+  long cal_max_step;
 
 };
 

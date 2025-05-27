@@ -8,8 +8,6 @@
 #include "socket.h"
 #include "gcode.h"
 
-
-#define MAX_DURATION_IN_PIPE	  1000 // 1 second
 #define TIMEPIPESIZE			  256
 #define POLL_RATE				  30 // ms
 
@@ -20,10 +18,13 @@
 
 HANDLE exportFile = NULL;
 tAxis XMotor,YMotor,ZMotor;
+t3DPoint g_TheoricalPosition = { 0.0, 0.0, 0.0 };
 tAxis* pMotor[] = {&XMotor,&YMotor,&ZMotor};
 tSpindle Spindle;
-
 tStatus(*g_pSimulation)(t3DPoint, t3DPoint, long) = NULL;
+unsigned int g_CmdLast;
+t3DPoint* g_CmdQ;
+int g_CmdQueueSize;
 
 void setExportFile( HANDLE file )
 {
@@ -42,23 +43,21 @@ void stepToPos(long x, long y, long z, t3DPoint* P)
 	P->z = z * ZMotor.scale;
 }
 
-void getCurPos( t3DPoint* P )
+void getPhysicalPosition( t3DPoint* P )
 {
 	stepToPos(XMotor.step, YMotor.step, ZMotor.step, P);
 }
 
-void getRawStepPos( long* x, long* y, long* z )
+void getTheoricalPos( t3DPoint* R )
 {
-  if( x ) *x = XMotor.step;
-  if( y ) *y = YMotor.step;
-  if( z ) *z = ZMotor.step;
+	*R = g_TheoricalPosition;
 }
 
-void setRawStepPos(long x, long y, long z)
+void updateTheoricalPosition(double X, double Y, double Z)
 {
-	XMotor.step = x;
-	YMotor.step = y;
-	ZMotor.step = z;
+	g_TheoricalPosition.x += X;
+	g_TheoricalPosition.y += Y;
+	g_TheoricalPosition.z += Z;
 }
 
 void initAxis( int a, double scale )
@@ -67,11 +66,24 @@ void initAxis( int a, double scale )
   pA->scale = scale;
 }
 
-void resetMotorPosition( long x, long y, long z )
+void resetMotorPosition( long x, long y, long z, int cmdQueueSize )
 {
   XMotor.step = x;
   YMotor.step = y;
   ZMotor.step = z;
+
+  g_TheoricalPosition.x = x * XMotor.scale;
+  g_TheoricalPosition.y = y * YMotor.scale;
+  g_TheoricalPosition.z = z * ZMotor.scale;
+
+  // Add one slot just in case
+  cmdQueueSize++;
+  if (cmdQueueSize != g_CmdQueueSize)
+  {
+	  if (g_CmdQ) free(g_CmdQ);
+	  g_CmdQ = (t3DPoint*)malloc(sizeof(t3DPoint) * cmdQueueSize);
+	  g_CmdQueueSize = cmdQueueSize;
+  }
 }
 
 double getLargestStep( )
@@ -117,16 +129,31 @@ long getSpindleState( )
   return Spindle.currentState;
 }
 
+void GetMachinePosition(t3DPoint* pPos)
+{
+	int inQueue = GetInQueueCount();
+	if (inQueue == 0 || g_CmdQ )
+	{
+		getPhysicalPosition(pPos);
+	}
+	else
+	{
+		int oldestCmd = g_CmdLast - inQueue;
+		if (oldestCmd < 0) oldestCmd += g_CmdQueueSize;
+		*pPos = g_CmdQ[oldestCmd];
+	}
+}
+
 tStatus doMove( void(*posAtStep)(t3DPoint*,int,int,void*), int stepCount, double duration, void* pArg )
 {
   int i;
   long x, y, z;
   unsigned long d, s;
   t3DPoint End;
-  char str[ 100 ];
+  char str[100] = { 0 };
   tStatus status = retNoOutputFound;
  
-  if (stepCount == 0)
+  if (stepCount <= 0)
   {
 	  return retUnknownErr;
   }
@@ -140,11 +167,6 @@ tStatus doMove( void(*posAtStep)(t3DPoint*,int,int,void*), int stepCount, double
  
   for( i=1; i<=stepCount; i++ )
   {
-    t3DPoint Start = {
-	  XMotor.step * XMotor.scale,
-	  YMotor.step * YMotor.scale,
-	  ZMotor.step * ZMotor.scale };
-
     // Get the position we should be at for step i of stepCount
     posAtStep( &End, i, stepCount, pArg );
 
@@ -155,6 +177,8 @@ tStatus doMove( void(*posAtStep)(t3DPoint*,int,int,void*), int stepCount, double
 
 	if (g_pSimulation)
 	{
+		t3DPoint Start;
+		getPhysicalPosition(&Start);
 		status = g_pSimulation(Start, End, d );
 	}
 	else
@@ -173,9 +197,15 @@ tStatus doMove( void(*posAtStep)(t3DPoint*,int,int,void*), int stepCount, double
 		{
 			break;
 		}
+		else
+		{
+			getPhysicalPosition(&g_CmdQ[g_CmdLast]);
+			g_CmdLast++;
+			if (g_CmdLast >= g_CmdQueueSize) g_CmdLast = 0;
+		}
 	}
 
-    if( exportFile )
+    if( exportFile && *str )
     {
 	  // if( fwrite( str, 1, strlen( str ), exportFile ) > 0 && status == retCncNotConnected )
 	  if (WriteFile(exportFile, str, strlen(str), NULL, NULL) && status == retCncNotConnected)

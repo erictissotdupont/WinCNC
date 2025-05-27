@@ -8,12 +8,11 @@
 
 #define EVENT_NEW_STATE		   BIT0
 #define EVENT_CALLBACK_SET	 BIT1
-#define WIFI_CONNECTED_BIT   BIT2
-#define WIFI_FAIL_BIT        BIT3
-#define MOTOR_IDLE_BIT       BIT4
+#define MOTOR_IDLE_BIT       BIT2
 
 EventGroupHandle_t g_eventGroupHandle;
 unsigned long g_State;
+int64_t g_Debug = 0x123456789ABCDEF0;
 
 static const char* TAG = "events";
 
@@ -24,6 +23,16 @@ void Events_SetState( unsigned long flag )
 void Events_ClearState( unsigned long flag )
 {
   g_State &= ~flag;
+}
+
+void Events_SetDebug( int64_t value )
+{
+  g_Debug = value;
+}
+
+int64_t Events_GetDebug( )
+{
+  return g_Debug;
 }
 
 unsigned long Events_GetState( )
@@ -55,6 +64,9 @@ int Events_Init( )
   xEventGroupSetBits(g_eventGroupHandle, MOTOR_IDLE_BIT);
   
   Events_SetState( CNC_STATE_CONNECTED | CNC_STATE_IDLE | CNC_STATE_LIMITS_INACTIVE );
+  
+  // Events_ClearState( CNC_STATE_LIMITS_INACTIVE );
+  // Events_SetState( CNC_STATE_Z_CALIBRATED | CNC_STATE_X_CALIBRATED | CNC_STATE_Y_CALIBRATED );
 
   return 0;
 }

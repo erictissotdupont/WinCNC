@@ -9,7 +9,7 @@
 #include "Motor.h"
 #include "Wifi.h"
 
-#define CMD_QUEUE_SIZE                ( 128 )
+#define CMD_QUEUE_SIZE                ( 256 )
 #define NACK_INTERVAL_MS              ( 100L )
 
 unsigned long g_NextSeq = 0;
@@ -66,6 +66,10 @@ bool UDP_MovementCommand( unsigned long seq, char* pt, bool bIgnoreCRC )
         
       Events_SetState( CNC_STATE_NETWORK_CRC_ERROR );
     }
+    else if(( Events_GetState( ) & CNC_STATE_ERROR_MASK ) != 0 )
+    {
+      ESP_LOGE( TAG, "Machine in error state" );
+    }
     else if( xQueueSend( g_cmd_queue, 
                          &cmd, 
                          ( NACK_INTERVAL_MS / portTICK_PERIOD_MS )) != pdPASS )
@@ -117,7 +121,8 @@ int UDP_Respond( const char* rsp, unsigned long seq, unsigned int inQueue, char*
     g_NetworkPosition[1],
     g_NetworkPosition[2],
     Events_GetState( ),
-    inQueue );
+    inQueue,
+    Events_GetDebug( ));
 }
 
 int UDP_ParseMessage( char* msgbuf, int nbytes, char* outBuf )
@@ -150,8 +155,8 @@ int UDP_ParseMessage( char* msgbuf, int nbytes, char* outBuf )
     unsigned long cmdCount;
     bool bStatus = false;
     
-    if( sscanf( msgbuf + CNC_CMD_HEADER_LEN + 1, CNC_CMD_HEADER_PARAMS, &seq, &cmdCount ) != 2 || 
-        cmdCount > CMD_QUEUE_SIZE )
+    if(( sscanf( msgbuf + CNC_CMD_HEADER_LEN + 1, CNC_CMD_HEADER_PARAMS, &seq, &cmdCount ) != 2 ) || 
+            ( cmdCount > CMD_QUEUE_SIZE ))
     {
       // Format error.
       ESP_LOGE( TAG, "Message header error" );
@@ -270,7 +275,13 @@ int UDP_ParseMessage( char* msgbuf, int nbytes, char* outBuf )
       CMD_QUEUE_SIZE,
       1.0f / X_AXIS_RES,
       1.0f / Y_AXIS_RES,
-      1.0f / Z_AXIS_RES );
+      1.0f / Z_AXIS_RES,
+      X_AXIS_MIN,
+      Y_AXIS_MIN,
+      Z_AXIS_MIN,
+      X_AXIS_MAX,
+      Y_AXIS_MAX,
+      Z_AXIS_MAX );
   }
   else if( memcmp( msgbuf, CNC_POS_HEADER, 3 ) == 0 )
   {

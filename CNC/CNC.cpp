@@ -20,115 +20,13 @@ HINSTANCE hInst;								// current instance
 TCHAR szTitle[MAX_LOADSTRING];					// The title bar text
 TCHAR szWindowClass[MAX_LOADSTRING];			// the main window class name
 
+tMetaData g_MetaData;
+
 // Forward declarations of functions included in this code module:
 ATOM				MyRegisterClass(HINSTANCE hInstance);
 BOOL				InitInstance(HINSTANCE, int);
 LRESULT CALLBACK	WndProc(HWND, UINT, WPARAM, LPARAM);
 INT_PTR CALLBACK	About(HWND, UINT, WPARAM, LPARAM);
-
-// Relative movement
-#define RELMOVE "G91 G40 G1 "
-// 1/256 of an inch.
-#define SMALL_MOVE ".00390625"
-
-// Information about the part being machined such as size, 
-// tool position and tool size.
-tMetaData g_MetaData;
-
-// Current tool position to be displayed on the screen. This gets
-// updated by the return of the "get status" commands
-t3DPoint g_displayPos;
- 
-// The value following the status information. This bitfield indicates
-// various error condition of the CNC
-unsigned short g_errorStatusFlags = 0;
-
-extern unsigned long g_Status;
-
-// The values returned by the answer of the debug command
-// Those are NOT fetched by the release of the code.
-int g_debug[4];
-
-tStatus parseLine(char* cmd)
-{
-	tStatus ret = retSuccess;
-
-	if (strstr(cmd, "RUN ") == cmd)
-	{
-		
-	}
-	else if (strstr(cmd, "EXP") == cmd)
-	{
-		char *fileName = cmd + 4;
-		setExportFile(CreateFileA(fileName, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL));
-	}
-	else if (strstr(cmd, "POS") == cmd)
-	{
-		showDistanceInfo();
-	}
-	else if (strstr(cmd, "TST ") == cmd)
-	{
-		int i;
-		char str[20];
-		int step, axis, cycle;
-		sscanf_s(cmd + 4, "%d %d %d", &axis, &step, &cycle);
-		printf("Test motor %d\n", step);
-		// testMotor( axis, step, cycle );
-
-		sprintf_s(str, sizeof(str), "G10 G90 G1 F%d", step);
-		doGcode(str);
-
-		for (i = 0; i<cycle; i++)
-		{
-			sprintf_s(str, sizeof(str), "Z%.6f", ((rand() % 1000) / 100000.0));
-			sprintf_s(str, sizeof(str), "Z%.6f", ((rand() % 1000) / 100000.0));
-			sprintf_s(str, sizeof(str), "Z%.6f", ((rand() % 1000) / 100000.0));
-			doGcode(str);
-			doGcode("Z0");
-		}
-
-	}
-	else if (strstr(cmd, "UNT") == cmd)
-	{
-		// unitTest();
-	}
-	else if (strstr(cmd, "MAN") == cmd)
-	{
-		/*
-		int k;
-		do
-		{
-			k = 0;
-			if (getkey((char*)&k, sizeof(k)) > 0)
-			{
-				OnKey(k);
-			}
-			else
-			{
-				usleep(10000); // 10ms
-			}
-		} while (k != 27);
-		*/
-	}
-	else if (strstr(cmd, "QUIT") == cmd)
-	{
-		ret = retQuit;
-	}
-	else
-	{
-		switch (ret = doGcode(cmd))
-		{
-		case retSuccess:
-			// Success.
-			break;
-		default :
-			printf("%S", GetCNCErrorString(ret));
-			break;
-		}
-	}
-
-	return ret;
-}
 
 void OnMachineUpdate(PVOID param)
 {
@@ -251,36 +149,6 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
    return TRUE;
 }
 
-
-void OnKey(int key)
-{
-	// printf( "OnKey( 0x%08X )\n", key );
-	switch (key)
-	{
-	case VK_UP:
-		doGcode(RELMOVE "X" SMALL_MOVE);
-		break;
-	case VK_DOWN:
-		doGcode(RELMOVE "X-" SMALL_MOVE);
-		break;
-	case VK_RIGHT:
-		doGcode(RELMOVE "Y-" SMALL_MOVE);
-		break;
-	case VK_LEFT:
-		doGcode(RELMOVE "Y" SMALL_MOVE);
-		break;
-
-		/*
-		case VK_PAGEUP:
-		doGcode(RELMOVE"Z"SMALL_MOVE);
-		break;
-		case VK_PAGEDN:
-		doGcode(RELMOVE"Z-"SMALL_MOVE);
-		break;
-		*/
-	}
-}
-
 void OnRunGCode(HWND hWnd,BOOL bDebug)
 {
 	WCHAR szFile[MAX_PATH];       // buffer for file name
@@ -331,7 +199,7 @@ void MachineReboot(HWND hWnd)
 		if ((getCNCState() & CNC_STATE_IDLE) != 0 ||
 			MessageBoxA(hWnd, "THE MACHINE IS NOT IDLE. Reboot will abort in an unknown state. Are you really sure?", "CNC", MB_YESNOCANCEL | MB_ICONERROR) == IDYES)
 		{
-			postCommand(CNC_CMD_REBOOT);
+			CNC_Reboot();
 		}
 	}
 }
@@ -557,7 +425,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		break;
 
 	case WM_UPDATE_POSITION:
-		getCurPos(&g_displayPos);
 		InvalidateRgn(hWnd, NULL, false);
 		update3DView();
 		break;
@@ -568,10 +435,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
 	case WM_DESTROY:
 		PostQuitMessage(0);
-		break;
-
-	case WM_KEYDOWN : 
-		OnKey(wParam);
 		break;
 
 	case WM_TIMER :
