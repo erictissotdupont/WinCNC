@@ -167,6 +167,9 @@ tStatus doMove( void(*posAtStep)(t3DPoint*,int,int,void*), int stepCount, double
  
   for( i=1; i<=stepCount; i++ )
   {
+	t3DPoint Start;
+	getPhysicalPosition(&Start);
+
     // Get the position we should be at for step i of stepCount
     posAtStep( &End, i, stepCount, pArg );
 
@@ -177,8 +180,6 @@ tStatus doMove( void(*posAtStep)(t3DPoint*,int,int,void*), int stepCount, double
 
 	if (g_pSimulation)
 	{
-		t3DPoint Start;
-		getPhysicalPosition(&Start);
 		status = g_pSimulation(Start, End, d );
 	}
 	else

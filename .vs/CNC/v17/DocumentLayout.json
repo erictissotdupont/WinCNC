@@ -3,12 +3,16 @@
   "WorkspaceRootPath": "C:\\Users\\erict\\Documents\\Projects\\WinCNC\\",
   "Documents": [
     {
-      "AbsoluteMoniker": "D:0:0:{99141EDA-DB70-48BE-BD63-BDE0667655A3}|CNC\\CNC.vcxproj|C:\\Users\\erict\\Documents\\Projects\\WinCNC\\CNC\\CNC.cpp||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}",
-      "RelativeMoniker": "D:0:0:{99141EDA-DB70-48BE-BD63-BDE0667655A3}|CNC\\CNC.vcxproj|solutionrelative:CNC\\CNC.cpp||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}"
-    },
-    {
       "AbsoluteMoniker": "D:0:0:{99141EDA-DB70-48BE-BD63-BDE0667655A3}|CNC\\CNC.vcxproj|C:\\Users\\erict\\Documents\\Projects\\WinCNC\\CNC\\motor.cpp||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}",
       "RelativeMoniker": "D:0:0:{99141EDA-DB70-48BE-BD63-BDE0667655A3}|CNC\\CNC.vcxproj|solutionrelative:CNC\\motor.cpp||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{99141EDA-DB70-48BE-BD63-BDE0667655A3}|CNC\\CNC.vcxproj|C:\\Users\\erict\\Documents\\Projects\\WinCNC\\CNC\\gcode.cpp||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}",
+      "RelativeMoniker": "D:0:0:{99141EDA-DB70-48BE-BD63-BDE0667655A3}|CNC\\CNC.vcxproj|solutionrelative:CNC\\gcode.cpp||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{99141EDA-DB70-48BE-BD63-BDE0667655A3}|CNC\\CNC.vcxproj|C:\\Users\\erict\\Documents\\Projects\\WinCNC\\CNC\\CNC.cpp||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}",
+      "RelativeMoniker": "D:0:0:{99141EDA-DB70-48BE-BD63-BDE0667655A3}|CNC\\CNC.vcxproj|solutionrelative:CNC\\CNC.cpp||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}"
     },
     {
       "AbsoluteMoniker": "D:0:0:{99141EDA-DB70-48BE-BD63-BDE0667655A3}|CNC\\CNC.vcxproj|C:\\Users\\erict\\Documents\\Projects\\WinCNC\\CNC\\Socket.cpp||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}",
@@ -25,10 +29,6 @@
     {
       "AbsoluteMoniker": "D:0:0:{99141EDA-DB70-48BE-BD63-BDE0667655A3}|CNC\\CNC.vcxproj|C:\\Users\\erict\\Documents\\Projects\\WinCNC\\CNC\\3Dview.cpp||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}",
       "RelativeMoniker": "D:0:0:{99141EDA-DB70-48BE-BD63-BDE0667655A3}|CNC\\CNC.vcxproj|solutionrelative:CNC\\3Dview.cpp||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}"
-    },
-    {
-      "AbsoluteMoniker": "D:0:0:{99141EDA-DB70-48BE-BD63-BDE0667655A3}|CNC\\CNC.vcxproj|C:\\Users\\erict\\Documents\\Projects\\WinCNC\\CNC\\gcode.cpp||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}",
-      "RelativeMoniker": "D:0:0:{99141EDA-DB70-48BE-BD63-BDE0667655A3}|CNC\\CNC.vcxproj|solutionrelative:CNC\\gcode.cpp||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}"
     },
     {
       "AbsoluteMoniker": "D:0:0:{99141EDA-DB70-48BE-BD63-BDE0667655A3}|CNC\\CNC.vcxproj|C:\\Users\\erict\\Documents\\Projects\\WinCNC\\CNC\\fileParser.cpp||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}",
@@ -50,11 +50,11 @@
       "DocumentGroups": [
         {
           "DockedWidth": 200,
-          "SelectedChildIndex": 5,
+          "SelectedChildIndex": 2,
           "Children": [
             {
               "$type": "Document",
-              "DocumentIndex": 2,
+              "DocumentIndex": 3,
               "Title": "Socket.cpp",
               "DocumentMoniker": "C:\\Users\\erict\\Documents\\Projects\\WinCNC\\CNC\\Socket.cpp",
               "RelativeDocumentMoniker": "CNC\\Socket.cpp",
@@ -62,12 +62,11 @@
               "RelativeToolTip": "CNC\\Socket.cpp",
               "ViewState": "AgIAAFkCAAAAAAAAAAAWwIECAAAzAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000677|",
-              "WhenOpened": "2025-05-26T22:21:56.286Z",
-              "EditorCaption": ""
+              "WhenOpened": "2025-05-26T22:21:56.286Z"
             },
             {
               "$type": "Document",
-              "DocumentIndex": 3,
+              "DocumentIndex": 4,
               "Title": "motor.h",
               "DocumentMoniker": "C:\\Users\\erict\\Documents\\Projects\\WinCNC\\CNC\\motor.h",
               "RelativeDocumentMoniker": "CNC\\motor.h",
@@ -75,18 +74,17 @@
               "RelativeToolTip": "CNC\\motor.h",
               "ViewState": "AgIAAAAAAAAAAAAAAAAWwBkAAAA+AAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000680|",
-              "WhenOpened": "2025-05-25T21:58:16.914Z",
-              "EditorCaption": ""
+              "WhenOpened": "2025-05-25T21:58:16.914Z"
             },
             {
               "$type": "Document",
-              "DocumentIndex": 1,
+              "DocumentIndex": 0,
               "Title": "motor.cpp",
               "DocumentMoniker": "C:\\Users\\erict\\Documents\\Projects\\WinCNC\\CNC\\motor.cpp",
               "RelativeDocumentMoniker": "CNC\\motor.cpp",
-              "ToolTip": "C:\\Users\\erict\\Documents\\Projects\\WinCNC\\CNC\\motor.cpp",
-              "RelativeToolTip": "CNC\\motor.cpp",
-              "ViewState": "AgIAALIAAAAAAAAAAAAswMsAAAAiAAAAAAAAAA==",
+              "ToolTip": "C:\\Users\\erict\\Documents\\Projects\\WinCNC\\CNC\\motor.cpp*",
+              "RelativeToolTip": "CNC\\motor.cpp*",
+              "ViewState": "AgIAAJoAAAAAAAAAAAAswK4AAAAAAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000677|",
               "WhenOpened": "2025-05-25T21:51:48.859Z",
               "EditorCaption": ""
@@ -101,12 +99,11 @@
               "RelativeToolTip": "CNC\\fileParser.cpp",
               "ViewState": "AgIAAOMAAAAAAAAAAAAMwPcAAAACAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000677|",
-              "WhenOpened": "2025-05-25T21:55:02.922Z",
-              "EditorCaption": ""
+              "WhenOpened": "2025-05-25T21:55:02.922Z"
             },
             {
               "$type": "Document",
-              "DocumentIndex": 4,
+              "DocumentIndex": 5,
               "Title": "socket.h",
               "DocumentMoniker": "C:\\Users\\erict\\Documents\\Projects\\WinCNC\\CNC\\socket.h",
               "RelativeDocumentMoniker": "CNC\\socket.h",
@@ -114,12 +111,11 @@
               "RelativeToolTip": "CNC\\socket.h",
               "ViewState": "AgIAAAAAAAAAAAAAAAAAABYAAAARAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000680|",
-              "WhenOpened": "2025-05-25T21:53:27.877Z",
-              "EditorCaption": ""
+              "WhenOpened": "2025-05-25T21:53:27.877Z"
             },
             {
               "$type": "Document",
-              "DocumentIndex": 0,
+              "DocumentIndex": 2,
               "Title": "CNC.cpp",
               "DocumentMoniker": "C:\\Users\\erict\\Documents\\Projects\\WinCNC\\CNC\\CNC.cpp",
               "RelativeDocumentMoniker": "CNC\\CNC.cpp",
@@ -132,20 +128,20 @@
             },
             {
               "$type": "Document",
-              "DocumentIndex": 6,
+              "DocumentIndex": 1,
               "Title": "gcode.cpp",
               "DocumentMoniker": "C:\\Users\\erict\\Documents\\Projects\\WinCNC\\CNC\\gcode.cpp",
               "RelativeDocumentMoniker": "CNC\\gcode.cpp",
               "ToolTip": "C:\\Users\\erict\\Documents\\Projects\\WinCNC\\CNC\\gcode.cpp",
               "RelativeToolTip": "CNC\\gcode.cpp",
-              "ViewState": "AgIAANEAAAAAAAAAAAAWwOgAAAAZAAAAAAAAAA==",
+              "ViewState": "AgIAAGcBAAAAAAAAAAAWwOgAAAAZAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000677|",
               "WhenOpened": "2025-05-26T15:48:35.236Z",
               "EditorCaption": ""
             },
             {
               "$type": "Document",
-              "DocumentIndex": 5,
+              "DocumentIndex": 6,
               "Title": "3Dview.cpp",
               "DocumentMoniker": "C:\\Users\\erict\\Documents\\Projects\\WinCNC\\CNC\\3Dview.cpp",
               "RelativeDocumentMoniker": "CNC\\3Dview.cpp",
@@ -153,8 +149,7 @@
               "RelativeToolTip": "CNC\\3Dview.cpp",
               "ViewState": "AgIAAFYAAAAAAAAAAAAkwGMAAAATAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000677|",
-              "WhenOpened": "2025-05-25T21:48:07.592Z",
-              "EditorCaption": ""
+              "WhenOpened": "2025-05-25T21:48:07.592Z"
             },
             {
               "$type": "Document",
