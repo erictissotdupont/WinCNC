@@ -12,13 +12,12 @@
 #include "fileParser.h"
 #include "..\CNC_Protocol.h"
 
-#define MAX_LOADSTRING 100
 
 // Global Variables:
 HWND hMainWindow = NULL;						// main window handle
 HINSTANCE hInst;								// current instance
-TCHAR szTitle[MAX_LOADSTRING];					// The title bar text
-TCHAR szWindowClass[MAX_LOADSTRING];			// the main window class name
+TCHAR szTitle[MAX_PATH];					// The title bar text
+TCHAR szWindowClass[MAX_PATH];			// the main window class name
 
 tMetaData g_MetaData;
 
@@ -33,6 +32,7 @@ void OnMachineUpdate(PVOID param)
 	PostMessage(hMainWindow, WM_UPDATE_POSITION, 0, 0);
 }
 
+
 int APIENTRY _tWinMain(_In_ HINSTANCE hInstance,
                      _In_opt_ HINSTANCE hPrevInstance,
                      _In_ LPTSTR    lpCmdLine,
@@ -46,8 +46,8 @@ int APIENTRY _tWinMain(_In_ HINSTANCE hInstance,
 	HACCEL hAccelTable;
 
 	// Initialize global strings
-	LoadString(hInstance, IDS_APP_TITLE, szTitle, MAX_LOADSTRING);
-	LoadString(hInstance, IDC_CNC, szWindowClass, MAX_LOADSTRING);
+	LoadString(hInstance, IDS_APP_TITLE, szTitle, MAX_PATH);
+	LoadString(hInstance, IDC_CNC, szWindowClass, MAX_PATH);
 	MyRegisterClass(hInstance);
 
 	// Perform application initialization:
@@ -61,15 +61,7 @@ int APIENTRY _tWinMain(_In_ HINSTANCE hInstance,
 	initSocketCom();
 	registerSocketCallback(CNC_MACHINE_UPDATE, OnMachineUpdate);
 
-	motorInit();
-
-	// 1/16 step - 400 steps - 2.8in per turn = 0.0004375 per step
-	// Error of 0.32% (too far) = 0.0004393
-/*
-	initAxis(0, 0.00043821); // X
-	initAxis(1, 0.00049271); // Y
-	initAxis(2, 0.0003925); // Z - 1/4 step - 400 steps - 0.5in per turn
-*/
+	MotorInit();
 	
 	// Main message loop:
 	while (GetMessage(&msg, NULL, 0, 0))
@@ -83,8 +75,6 @@ int APIENTRY _tWinMain(_In_ HINSTANCE hInstance,
 
 	return (int) msg.wParam;
 }
-
-
 
 //
 //  FUNCTION: MyRegisterClass()

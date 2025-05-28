@@ -11,19 +11,7 @@
 #include <psapi.h>
 #include <windowsx.h>
 
-DWORD pathSteps;
-DWORD maxPathSteps;
-t3DPoint *path;
-
 extern HWND hMainWindow;
-
-POINT O = { 50, 500 };
-
-t2DPoint vuX = { 100, 0 };
-t2DPoint vuY = { 60, -40 };
-t2DPoint vuZ = { 0, -100 };
-
-extern int g_debug[4];
 
 #define VIEW_MARGIN			10
 #define VIEW_STATUS_FONT	L"Arial"
@@ -97,7 +85,7 @@ void OnPaint(HWND hWnd)
 	//swprintf(str, 100, L"X:%.4f\r\nY:%.4f\r\nZ:%.4f",
 
 	t3DPoint pos;
-	GetMachinePosition(&pos);
+	GetDisplayPosition(&pos);
 
 	sprintf_s(str, sizeof(str), "X:%.4f\r\nY:%.4f\r\nZ:%.4f", 
 		pos.x,
@@ -137,7 +125,7 @@ void OnPaint(HWND hWnd)
 	rect.bottom = rect.top + positionHeight;
 
 	t3DPoint theoriCalPos;
-	getTheoricalPos(&theoriCalPos);
+	GetTheoricalPosition(&theoriCalPos);
 
 #if 0 // Show the delta between the physical position and the theorical position x1000
 	theoriCalPos.x -= pos.x;
@@ -251,9 +239,9 @@ bool start3DViewer( )
 	si.cb = sizeof(STARTUPINFO);
 	GetStartupInfo(&si);
 
-	initAxis(0, 0.0005f); // X
-	initAxis(1, 0.0005f); // Y
-	initAxis(2, 0.0005f); // Z
+	InitMotorAxis(0, 0.0005f); // X
+	InitMotorAxis(1, 0.0005f); // Y
+	InitMotorAxis(2, 0.0005f); // Z
 
 	g_hFileChangeEvent = CreateEvent(NULL, FALSE, FALSE, L"Local\\AltFileChangeEvent");
 
@@ -480,29 +468,6 @@ tStatus buildPath(t3DPoint Start, t3DPoint End, long d )
 		//if (d && ((n % 5) == 1)) Sleep(1);
 	}
 
-	/*
-	if (pathSteps >= maxPathSteps)
-	{
-	// Increase the size of our buffer
-	maxPathSteps = (maxPathSteps + 2) * 2;
-	t3DPoint* newPath = (t3DPoint*)malloc(sizeof(t3DPoint)*maxPathSteps);
-	if (path && pathSteps )
-	{
-	memcpy(newPath, path, pathSteps * sizeof(t3DPoint));
-	free(path);
-	}
-	path = newPath;
-	}
-
-	path[pathSteps++] = P;
-	*/
-
-	// Normal speed
-	//Sleep( d / 1000 );
-
-	// 3x faster
-	//Sleep(d / 3000);
-
 	return retSuccess;
 }
 
@@ -574,7 +539,7 @@ void _3DLaunchSimulatorApp()
 	init3DView(g_MetaData.blockX, g_MetaData.blockY);
 	initToolShape(g_MetaData.toolRadius);
 
-	setSimulationMode(buildPath);
+	SetMotorSimulationMode(buildPath);
 
 	// This launches the 3D viewer window
 	start3DViewer();

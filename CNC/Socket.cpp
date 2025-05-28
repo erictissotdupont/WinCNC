@@ -572,9 +572,9 @@ void DecodeMessage(const char* msg, int cnt)
 			char szOut[100];
 			int cbOut;
 
-			initAxis(0, 1.0f / g_xRes ); // X
-			initAxis(1, 1.0f / g_yRes ); // Y
-			initAxis(2, 1.0f / g_zRes ); // Z
+			InitMotorAxis(0, 1.0f / g_xRes ); // X
+			InitMotorAxis(1, 1.0f / g_yRes ); // Y
+			InitMotorAxis(2, 1.0f / g_zRes ); // Z
 
 			bGotInfo = 1;
 
@@ -639,7 +639,7 @@ void DecodeMessage(const char* msg, int cnt)
 						{
 							g_msgSeq = seq;
 							g_Endianness = ((g_CNC_State & CNC_STATE_LITTLE_ENDIAN) != 0 ) ? LittleEndian : BigEndian;
-							resetMotorPosition(x, y, z, g_CNC_QueueSize);
+							ResetMachinePosition(x, y, z, g_CNC_QueueSize);
 						}
 						LockMachinePosition(false);
 					}

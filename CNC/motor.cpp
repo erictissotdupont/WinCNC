@@ -1,239 +1,217 @@
 
 #include "CNC.h"
-#include "winsock.h"
 #include "status.h"
 #include "geometry.h"
-#include "motor.h"
-#include "keyboard.h"
 #include "socket.h"
 #include "gcode.h"
+#include "motor.h"
 
-#define TIMEPIPESIZE			  256
-#define POLL_RATE				  30 // ms
-
-#define COMMAND_RESET_ORIGIN   "RST"
-#define COMMAND_GET_POSITION   "POS"
-#define COMMAND_GET_DEBUG	   "DBG"
-#define COMMAND_CALIBRATE      "CALIBRATE"
-
-HANDLE exportFile = NULL;
 tAxis XMotor,YMotor,ZMotor;
 t3DPoint g_TheoricalPosition = { 0.0, 0.0, 0.0 };
 tAxis* pMotor[] = {&XMotor,&YMotor,&ZMotor};
 tSpindle Spindle;
 tStatus(*g_pSimulation)(t3DPoint, t3DPoint, long) = NULL;
-unsigned int g_CmdLast;
-t3DPoint* g_CmdQ;
-int g_CmdQueueSize;
 
-void setExportFile( HANDLE file )
+// Queue to track the movements sent to the machine but not executed yet
+t3DPoint* g_CmdQueue;
+unsigned int g_CmdInIndex;
+unsigned int g_CmdQueueSize;
+
+// ----------------------------------------------------------------------------
+
+// Returns the position based on the motors current step. This is where the
+// machine really is. Each new movement should be calculated using this
+// position as the starting point. This should only be different from the 
+// real position by less than a motor step.
+//
+void GetRealPosition( t3DPoint* P )
 {
-	exportFile = file;
+	P->x = XMotor.step * XMotor.scale;
+	P->y = YMotor.step * YMotor.scale;
+	P->z = ZMotor.step * ZMotor.scale;
 }
 
-void setSimulationMode(tStatus(*callback)(t3DPoint, t3DPoint, long))
-{
-	g_pSimulation = callback;
-}
-
-void stepToPos(long x, long y, long z, t3DPoint* P)
-{
-	P->x = x * XMotor.scale;
-	P->y = y * YMotor.scale;
-	P->z = z * ZMotor.scale;
-}
-
-void getPhysicalPosition( t3DPoint* P )
-{
-	stepToPos(XMotor.step, YMotor.step, ZMotor.step, P);
-}
-
-void getTheoricalPos( t3DPoint* R )
+// Return the position based on the previous movement accumulation. This is
+// where the commands would like the machine to be. Each new movement should
+// be using this position to calculate the ending point.
+//
+void GetTheoricalPosition( t3DPoint* R )
 {
 	*R = g_TheoricalPosition;
 }
 
-void updateTheoricalPosition(double X, double Y, double Z)
+// Returns the estimated postion of the machine at a given time. This position
+// should ONLY be used for display. It uses the history of commands sent
+// to the machine and the reported number of commands currently in the queue
+// to estimate the position of the actual machine.
+//
+void GetDisplayPosition(t3DPoint* pPos)
+{
+	int inQueue = GetInQueueCount();
+	if (inQueue == 0 || g_CmdQueue == NULL )
+	{
+		GetRealPosition(pPos);
+	}
+	else
+	{
+		int oldestCmd = g_CmdInIndex - inQueue;
+		if (oldestCmd < 0) oldestCmd += g_CmdQueueSize;
+		*pPos = g_CmdQueue[oldestCmd];
+	}
+}
+
+// Called when first connecting to the machine and receiving its current
+// idle position. This resets both the REAL and THEORICAL positions.
+// This also initialize the command queue used to track the actual
+// position of the machine.
+//
+void ResetMachinePosition(long x, long y, long z, int cmdQueueSize)
+{
+	XMotor.step = x;
+	YMotor.step = y;
+	ZMotor.step = z;
+
+	GetRealPosition(&g_TheoricalPosition);
+
+	// Add one slot just in case
+	cmdQueueSize++;
+	if (cmdQueueSize != g_CmdQueueSize)
+	{
+		if (g_CmdQueue) free(g_CmdQueue);
+		g_CmdQueue = (t3DPoint*)malloc(sizeof(t3DPoint) * cmdQueueSize);
+		g_CmdQueueSize = cmdQueueSize;
+	}
+}
+
+// Called by every movement command to update the new theorical position
+//
+void UpdateTheoricalPosition(double X, double Y, double Z)
 {
 	g_TheoricalPosition.x += X;
 	g_TheoricalPosition.y += Y;
 	g_TheoricalPosition.z += Z;
 }
 
-void initAxis( int a, double scale )
+// Initialize the motor scale from the machine's provided information
+//
+void InitMotorAxis( int a, double scale )
 {
   tAxis* pA = pMotor[a];
   pA->scale = scale;
 }
 
-void resetMotorPosition( long x, long y, long z, int cmdQueueSize )
-{
-  XMotor.step = x;
-  YMotor.step = y;
-  ZMotor.step = z;
-
-  g_TheoricalPosition.x = x * XMotor.scale;
-  g_TheoricalPosition.y = y * YMotor.scale;
-  g_TheoricalPosition.z = z * ZMotor.scale;
-
-  // Add one slot just in case
-  cmdQueueSize++;
-  if (cmdQueueSize != g_CmdQueueSize)
-  {
-	  if (g_CmdQ) free(g_CmdQ);
-	  g_CmdQ = (t3DPoint*)malloc(sizeof(t3DPoint) * cmdQueueSize);
-	  g_CmdQueueSize = cmdQueueSize;
-  }
-}
-
-double getLargestStep( )
-{
-  return maxOf3( XMotor.scale, YMotor.scale, ZMotor.scale );
-}
-
-double getSmalestStep( )
+double GetMotorSmalestStep( )
 {
   return minOf3( XMotor.scale, YMotor.scale, ZMotor.scale );
 }
 
-double getMaxDistanceError( )
+double GetMaxMotorDistanceError()
 {
-  t3DPoint oneStep;
-  oneStep.x = XMotor.scale;
-  oneStep.y = YMotor.scale;
-  oneStep.z = ZMotor.scale;
-  return vector3DLength(oneStep);
+	t3DPoint oneStep;
+	oneStep.x = XMotor.scale;
+	oneStep.y = YMotor.scale;
+	oneStep.z = ZMotor.scale;
+	return vector3DLength(oneStep);
 }
 
-long calculateMove( tAxis* A, double target )
+void SetMotorSimulationMode(tStatus(*callback)(t3DPoint, t3DPoint, long))
 {
-  double delta = target - A->step * A->scale;
-  long step = (long)(delta / A->scale);
-  A->step += step;
-  return step;
+	g_pSimulation = callback;
 }
 
-int setSpindleState( int state )
+int SetMachineSpindleState(int state)
 {
-  if( Spindle.nextState != state )
-  {
-    Spindle.nextState = state;
-    return 1;
-  }
-  return 0;
-}
-
-long getSpindleState( )
-{
-  Spindle.currentState = Spindle.nextState;
-  return Spindle.currentState;
-}
-
-void GetMachinePosition(t3DPoint* pPos)
-{
-	int inQueue = GetInQueueCount();
-	if (inQueue == 0 || g_CmdQ )
+	if (Spindle.nextState != state)
 	{
-		getPhysicalPosition(pPos);
+		Spindle.nextState = state;
+		return 1;
 	}
-	else
-	{
-		int oldestCmd = g_CmdLast - inQueue;
-		if (oldestCmd < 0) oldestCmd += g_CmdQueueSize;
-		*pPos = g_CmdQ[oldestCmd];
-	}
+	return 0;
 }
 
-tStatus doMove( void(*posAtStep)(t3DPoint*,int,int,void*), int stepCount, double duration, void* pArg )
+long MotorMakeTheMove(tAxis* A, double target)
 {
-  int i;
-  long x, y, z;
-  unsigned long d, s;
-  t3DPoint End;
-  char str[100] = { 0 };
-  tStatus status = retNoOutputFound;
- 
-  if (stepCount <= 0)
-  {
-	  return retUnknownErr;
-  }
+	double delta = target - (A->step * A->scale);
+	long step = (long)(delta / A->scale);
+	A->step += step;
+	return step;
+}
 
-  // Split the duration of the whole move for each step
-  duration = duration / stepCount;
-  // Convert that in uS for the CNC
-  d = (unsigned long)(duration * 1000);
+long getSpindleState()
+{
+	Spindle.currentState = Spindle.nextState;
+	return Spindle.currentState;
+}
 
-  LockMachinePosition(true);
- 
-  for( i=1; i<=stepCount; i++ )
-  {
-	t3DPoint Start;
-	getPhysicalPosition(&Start);
+tStatus MotorDoTheMode(void(*posAtStep)(t3DPoint*, int, int, void*), int stepCount, double duration, void* pArg)
+{
+	int i;
+	long x, y, z;
+	unsigned long d, s;
+	t3DPoint End;
+	char str[100] = { 0 };
+	tStatus status = retNoOutputFound;
 
-    // Get the position we should be at for step i of stepCount
-    posAtStep( &End, i, stepCount, pArg );
-
-	x = calculateMove( &XMotor, End.x );
-    y = calculateMove( &YMotor, End.y );
-    z = calculateMove( &ZMotor, End.z );
-	s = ( getSpindleState() == 3 ) ? CMD_FLAG_SPINDLE_ON : 0;
-
-	if (g_pSimulation)
+	if (stepCount <= 0)
 	{
-		status = g_pSimulation(Start, End, d );
+		return retUnknownErr;
 	}
-	else
+
+	// Split the duration of the whole move for each step
+	duration = duration / stepCount;
+	// Convert that in uS for the CNC
+	d = (unsigned long)(duration * 1000);
+
+	LockMachinePosition(true);
+
+	for (i = 1; i <= stepCount; i++)
 	{
-		// Calculate the CRC of the position at the end of the movement
-        // so that the machine can check if its position and distance 
-		// corresponds to what the host wants. Includes duration and
-		// flags
-		s = s | GetPosCRC(XMotor.step, YMotor.step, ZMotor.step, d, s );
+		t3DPoint Start;
+		GetRealPosition(&Start);
 
-		sprintf_s(str, sizeof(str), "@" CNC_CMD_PARAMS, x, y, z, d, s );
+		// Get the position we should be at for step i of stepCount
+		posAtStep(&End, i, stepCount, pArg);
 
-		status = postCommand( str );
+		x = MotorMakeTheMove(&XMotor, End.x);
+		y = MotorMakeTheMove(&YMotor, End.y);
+		z = MotorMakeTheMove(&ZMotor, End.z);
+		s = (getSpindleState() == 3) ? CMD_FLAG_SPINDLE_ON : 0;
 
-		if (status != retSuccess)
+		if (g_pSimulation)
 		{
-			break;
+			status = g_pSimulation(Start, End, d);
 		}
 		else
 		{
-			getPhysicalPosition(&g_CmdQ[g_CmdLast]);
-			g_CmdLast++;
-			if (g_CmdLast >= g_CmdQueueSize) g_CmdLast = 0;
+			// Calculate the CRC of the position at the end of the movement
+			// so that the machine can check if its position and distance 
+			// corresponds to what the host wants. Includes duration and
+			// flags
+			s = s | GetPosCRC(XMotor.step, YMotor.step, ZMotor.step, d, s);
+
+			sprintf_s(str, sizeof(str), "@" CNC_CMD_PARAMS, x, y, z, d, s);
+
+			status = postCommand(str);
+
+			if (status != retSuccess)
+			{
+				break;
+			}
+			else
+			{
+				GetRealPosition(&g_CmdQueue[g_CmdInIndex]);
+				g_CmdInIndex++;
+				if (g_CmdInIndex >= g_CmdQueueSize) g_CmdInIndex = 0;
+			}
 		}
 	}
 
-    if( exportFile && *str )
-    {
-	  // if( fwrite( str, 1, strlen( str ), exportFile ) > 0 && status == retCncNotConnected )
-	  if (WriteFile(exportFile, str, strlen(str), NULL, NULL) && status == retCncNotConnected)
-      {
-        status = retSuccess;
-      }
-    }
-  }
+	LockMachinePosition(false);
 
-  LockMachinePosition(false);
-
-  return status;
+	return status;
 }
 
-tStatus ResetCNCPosition( )
-{
-	// TODO
-	return retNotImplemented;
-}
-
-tStatus ClearCNCError()
-{
-	// TODO
-	return retNotImplemented;
-}
-
-void motorInit()
+void MotorInit()
 {
 	Spindle.currentState = 0;
 	Spindle.nextState = 0;

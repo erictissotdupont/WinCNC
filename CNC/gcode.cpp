@@ -7,8 +7,9 @@
 
 // https://linuxcnc.org/docs/html/gcode/g-code.html#gcode:quick-reference-table
 
-#define MAX_FEED     200.0
-#define MIN_FEED     0.5
+#define MAX_FEED            200.0
+#define DEFAULT_FEED_SPEED   30.0
+#define MIN_FEED              0.1
 
 typedef struct _tMotion {
   double X;
@@ -23,8 +24,7 @@ typedef struct _tMotion {
 } tMotion;
 
 t3DPoint g_HomePos = { 0,0,0 };
-
-double feedSpeed = 30; // Inches per minute
+double feedSpeed = DEFAULT_FEED_SPEED; // Inches per minute
 double cutterRadius = 0;
 int spindle = 0;
 
@@ -92,7 +92,7 @@ tStatus arcInXYPlane( double X, double Y, double Z, double I, double J, double P
   t3DPoint end;
 
   // Start and end of the movement
-  getTheoricalPos( &info.start );
+  GetTheoricalPosition( &info.start );
 
   // If any z motion
   info.z = Z;
@@ -132,7 +132,7 @@ tStatus arcInXYPlane( double X, double Y, double Z, double I, double J, double P
   // Length of the arc
   l = lengthOfArc( &info );
 
-  stepCount = 1 + (long)( l / ( getSmalestStep( ) * 100 ));
+  stepCount = 1 + (long)( l / ( GetMotorSmalestStep( ) * 100 ));
   duration = l / feedSpeed * IPM_TO_IPMS;
 
   printf( " Ctr:%.3f,%.3f,%.3f - R:%.3f,%.3f - L:%.3f/%d - arc:%.3f t:%.3f - Rot:%.4f\n", 
@@ -160,8 +160,8 @@ tStatus arcInXYPlane( double X, double Y, double Z, double I, double J, double P
       end.x, end.y, end.z );
   }
 
-  updateTheoricalPosition(X, Y, Z);
-  return doMove( getArcPosStepAt, stepCount, duration, &info );
+  UpdateTheoricalPosition(X, Y, Z);
+  return MotorDoTheMode( getArcPosStepAt, stepCount, duration, &info );
 }
 
 // ------------------------ LINEAR - G1 --------------------------
@@ -191,7 +191,7 @@ tStatus linearRel( double x, double y, double z )
   info.x = x;
   info.y = y;
   info.z = z;
-  getTheoricalPos( &info.Origin );
+  GetTheoricalPosition( &info.Origin );
 
   // Make sure we don't send single move command taking longer than 1sec
   steps = (long)( duration / 1000 );
@@ -202,10 +202,9 @@ tStatus linearRel( double x, double y, double z )
 
   // printf( "Length=%.2f - Feed=%.2f - Duration=%.2f - Steps=%d\n", l, feedSpeed, duration,steps );
 
-  updateTheoricalPosition(x, y, z);
-  return doMove( getLinearRelStepAt, steps, duration, &info );
+  UpdateTheoricalPosition(x, y, z);
+  return MotorDoTheMode( getLinearRelStepAt, steps, duration, &info );
 }
-
 
 // -------------------- Rapid Positioning - G0 ---------------------------
 typedef struct {
@@ -225,25 +224,25 @@ tStatus rapidPosRel( double x, double y, double z )
 {
   rapidPosInfo info;
 
-  getTheoricalPos( &info.Origin );
+  GetTheoricalPosition( &info.Origin );
   info.x = x;
   info.y = y;
   info.z = z;
 
-  updateTheoricalPosition(x, y, z);
+  UpdateTheoricalPosition(x, y, z);
 
-  return doMove( getrapidPosStepAt, 1, 0, &info );
+  return MotorDoTheMode( getrapidPosStepAt, 1, 0, &info );
 }
 
 // --------------------------- Dwell - G4 --------------------------------
 void getDwellPosStepAt( t3DPoint* P, int s, int total, void* pArg )
 {
-  getPhysicalPosition( P );
+  GetRealPosition( P );
 }
 
 tStatus dwell( long t )
 {
-  return doMove( getDwellPosStepAt, 1, t, NULL );
+  return MotorDoTheMode( getDwellPosStepAt, 1, t, NULL );
 }
 
 // ------------------------- G CODE PARSER ------------------------
@@ -260,16 +259,16 @@ tStatus dwell( long t )
 #define CMD_G91		910
 
 
-const int modal0[] = { 0, 10, 20, 30, 380, 820, 840, 850, 860, 870, 880, 890, -1 }; // Motion
-const int modal1[] = { 170, 180, 190, -1 };                      // Plane selection
-const int modal2[] = { 900, 910, -1 };                           // Distance mode
-const int modal3[] = { 930, 940, -1 };                           // Feed rate mode
-const int modal4[] = { 200, 210, -1 };                           // Units
-const int modal5[] = { 400, 410, 420, -1 };                      // Cutter radius compensation
-const int modal6[] = { 430, 490, -1 };                           // Tool length offset
-const int modal7[] = { 980, 990, -1 };                           // Return mode in canned cycles
-const int modal8[] = { 540, 550, 560, 570, 580, 590, -1 };       // Coordinates system selection
-const int modal9[] = { 610, 640, -1 };                           // Path control mode
+const int modal0[] = { 0, 10, 20, 30, 380, 820, 840, 850, 860, 870, 880, 890, -1 };   // Motion
+const int modal1[] = { 170, 180, 190, -1 };                                           // Plane selection
+const int modal2[] = { 900, 910, -1 };                                                // Distance mode
+const int modal3[] = { 930, 940, -1 };                                                // Feed rate mode
+const int modal4[] = { 200, 210, -1 };                                                // Units
+const int modal5[] = { 400, 410, 420, -1 };                                           // Cutter radius compensation
+const int modal6[] = { 430, 490, -1 };                                                // Tool length offset
+const int modal7[] = { 980, 990, -1 };                                                // Return mode in canned cycles
+const int modal8[] = { 540, 550, 560, 570, 580, 590, -1 };                            // Coordinates system selection
+const int modal9[] = { 610, 640, -1 };                                                // Path control mode
 
 typedef enum {
 	MG_MOTION = 0,
@@ -406,12 +405,10 @@ tStatus doGcode(char* cmd)
 	tStatus ret = retUnknownErr;
 	t3DPoint curPos;
 
-	getTheoricalPos(&curPos);
-	//getPhysicalPosition(&curPos);
+	GetTheoricalPosition(&curPos);
 
 	// Debug
 	int cmdInGroup[MG_COUNT];
-
 	memset(cmdInGroup, 0x00, sizeof(cmdInGroup));
 
 	// Ignore characters within brackets: Mach3 comments
@@ -445,159 +442,148 @@ tStatus doGcode(char* cmd)
 			if( val > MAX_FEED ) 
 			{
 				feedSpeed = MAX_FEED; 
-				printf( "WRN: MAX feed limit %f IMP.\n", MAX_FEED );
 			}
 			else if( val < MIN_FEED )
 			{
 				feedSpeed = MIN_FEED;
-				printf( "WRN: MIN feed limit %f IMP.\n", MIN_FEED );
 			}
 			else feedSpeed = val;
 		}
 		else return retInvalidParam;
 	}
 
-  if(( pt = strchr( cmd, 'M' )) != NULL )
-  {
-    if( sscanf_s( pt+1, "%d", &i ) != 1 ) return retInvalidParam; 
-    switch( i )
-    {
-      case 0 :
-      case 1 :
-	  case 2 :
-        if( setSpindleState( 0 )) gotWhat |= GOT_SPINDLE;
-        break;
-      case 3 :
-        if( setSpindleState( 3 )) gotWhat |= GOT_SPINDLE;
-        break;
-	  // M114 : Get Position
-	  case 114 :
-          // TODO
-		  return retNotImplemented;
-      default:
-        return retInvalidParam;
-    } 
-  }
+	if(( pt = strchr( cmd, 'M' )) != NULL )
+	{
+		if( sscanf_s( pt+1, "%d", &i ) != 1 ) return retInvalidParam; 
+		switch( i )
+		{
+		case 0 :
+		case 1 :
+		case 2 :
+			if( SetMachineSpindleState( 0 )) gotWhat |= GOT_SPINDLE;
+			break;
+		case 3 :
+			if( SetMachineSpindleState( 3 )) gotWhat |= GOT_SPINDLE;
+			break;
+		// M114 : Get Position
+		case 114 :
+			// TODO
+			return retNotImplemented;
+		default:
+			return retInvalidParam;
+		} 
+	}
  
-  pt = cmd;
-  while(( pt = strchr( pt, 'G' )) != NULL )
-  {
-    pt++;
-    if( sscanf_s( pt, "%lf", &val ) != 1 ) return retInvalidParam;
-	n = (int)round(val*10);
+	pt = cmd;
+	while(( pt = strchr( pt, 'G' )) != NULL )
+	{
+		pt++;
+		if( sscanf_s( pt, "%lf", &val ) != 1 ) return retInvalidParam;
+		n = (int)round(val*10);
 
-    switch( n )
-    {
-    case CMD_G4 : // G4 : Dwell
-      printf( "Dwell( %.3f sec).\n", M.P );
-      dwell( (long)(M.P * 1000));
-      break;
+		switch( n )
+		{
+		case CMD_G4 : // G4 : Dwell
+			printf( "Dwell( %.3f sec).\n", M.P );
+			dwell( (long)(M.P * 1000));
+			break;
 
-    case CMD_G10 : // G10 : Reset home position to current
-      g_HomePos = curPos;
-      break;
+		case CMD_G10 : // G10 : Reset home position to current
+			g_HomePos = curPos;
+			break;
 
-    case CMD_G30 : // G30 : Go back home
-      // Move first in X-Y plane and then Z axis
-      ret = linearRel( 
-          g_HomePos.x - curPos.x,
-          g_HomePos.y - curPos.y,
-          0 );
-      if (ret == retSuccess)
-      {
-          ret = linearRel(0, 0, g_HomePos.z - curPos.z);
-      }
-      break;
+		case CMD_G30 : // G30 : Go back home
+			// Move first in X-Y plane and then Z axis
+			ret = linearRel( 
+				g_HomePos.x - curPos.x,
+				g_HomePos.y - curPos.y,
+				0 );
+			if (ret == retSuccess)
+			{
+				ret = linearRel(0, 0, g_HomePos.z - curPos.z);
+			}
+			break;
 
-    default :
-	  for (j = 0; j<MG_COUNT; j++)
-      {
-        for(i=0; modalGroup[j][i]>=0; i++ )
-        {
-          //printf( "[%d,%d]=%d\n", j,i, modalGroup[j][i] );
+		default :
+			for (j = 0; j<MG_COUNT; j++)
+			{
+				for(i=0; modalGroup[j][i]>=0; i++ )
+				{
+					//printf( "[%d,%d]=%d\n", j,i, modalGroup[j][i] );
           
-		  if( n == modalGroup[j][i] )
-          {
-            cmdInGroup[j]++;
-            // There can only be one command of each modal group per
-            if( cmdInGroup[j] > 1 ) return retSyntaxError;
-            // Remember the currently active for this group
-            activeCmd[j] = n;
-          }
-        }
-      }
-    }
-  }
+					if( n == modalGroup[j][i] )
+					{
+						cmdInGroup[j]++;
+						// There can only be one command of each modal group per
+						if( cmdInGroup[j] > 1 ) return retSyntaxError;
+						// Remember the currently active for this group
+						activeCmd[j] = n;
+					}
+				}
+			}
+		}
+	}
 
-  // Nothing actionalble on this line (no movement)
-  if( gotWhat == 0 ) return retSuccess;
+	// Nothing actionalble on this line (no movement)
+	if( gotWhat == 0 ) return retSuccess;
 
-  if(( gotWhat & GOT_TURN_COUNT ) == 0 ) M.P = 1.0;
+	if(( gotWhat & GOT_TURN_COUNT ) == 0 ) M.P = 1.0;
   
-  // If active distance mode is absolute (G90)
-  if (activeCmd[MG_DISTANCE_MODE] == CMD_G90)
-  {
-	  // Update the theorical position for each Axis we got a new value and make
-	  // the coordinates relative to current position
-	  if (gotWhat & GOT_X)
-	  {
-		  M.X = M.X - curPos.x + g_HomePos.x;
-	  }
-	  if (gotWhat & GOT_Y)
-	  {
-		  M.Y = M.Y - curPos.y + g_HomePos.y;
-	  }
-	  if (gotWhat & GOT_Z)
-	  {
-		  M.Z = M.Z - curPos.z + g_HomePos.z;
-	  }
-  }
-  // If activce distance mode is relative (G91)
-  else if (activeCmd[MG_DISTANCE_MODE] == CMD_G91)
-  {
-	  // Nothing to do, M is already a relative movement
-  }
-  else
-  {
-    printf ("ERROR : Invalid distance mode.\n"); 
-    return retSyntaxError; 
-  }
+	// If active distance mode is absolute (G90)
+	if (activeCmd[MG_DISTANCE_MODE] == CMD_G90)
+	{
+		// Update the theorical position for each Axis we got a new value and make
+		// the coordinates relative to current position. Any coordinates not found
+		// in the command should be assumed to remain the same.
+		if (gotWhat & GOT_X)
+		{
+			M.X = M.X - curPos.x + g_HomePos.x;
+		}
+		if (gotWhat & GOT_Y)
+		{
+			M.Y = M.Y - curPos.y + g_HomePos.y;
+		}
+		if (gotWhat & GOT_Z)
+		{
+			M.Z = M.Z - curPos.z + g_HomePos.z;
+		}
+	}
+	// If activce distance mode is relative (G91)
+	else if (activeCmd[MG_DISTANCE_MODE] == CMD_G91)
+	{
+		// Nothing to do, M is already a relative movement
+	}
+	else
+	{
+		printf ("ERROR : Invalid distance mode.\n"); 
+		return retSyntaxError; 
+	}
 
-  // From this point on, everything is relative coordinates
+	// From this point on, everything is relative coordinates
 
-  M.motion = activeCmd[MG_MOTION];
-  ret = retSuccess;
+	M.motion = activeCmd[MG_MOTION];
+	ret = retSuccess;
 
-  // Depending on the active command in the motion group
-  switch( M.motion )
-  {
-  case CMD_G0 : // Rapid positioning
-      // printf( "G0-Rapid positioning (%.3f,%.3f,%.3f)\n", M.X,M.Y,M.Z );
-      ret = rapidPosRel( M.X,M.Y,M.Z );
-      break;
+	// Depending on the active command in the motion group
+	switch( M.motion )
+	{
+	case CMD_G0 : // Rapid positioning
+		ret = rapidPosRel( M.X,M.Y,M.Z );
+		break;
 
-  case CMD_G1 : // Linear coordinated feed speed
-      // printf( "G1-Linear movement (%.3f,%.3f,%.3f) at feed speed (%.1f)\n", M.X,M.Y,M.Z, feedSpeed );
-      ret = linearRel( M.X,M.Y,M.Z );
-      break;
+	case CMD_G1 : // Linear coordinated feed speed
+		ret = linearRel( M.X,M.Y,M.Z );
+		break;
 
-  case CMD_G2 : // Arc in CW direction
-      // printf( "G2-Arc CW movement (%.3f,%.3f,%.3f,%.3f,%.3f,%.3f) at feed speed (%.1f)\n", M.X,M.Y,M.Z,M.I,M.J,-M.P, feedSpeed );
-      ret = arcInXYPlane( M.X,M.Y,M.Z,M.I,M.J,-M.P );
-      break;
+	case CMD_G2 : // Arc in CW direction
+		ret = arcInXYPlane( M.X,M.Y,M.Z,M.I,M.J,-M.P );
+		break;
 
-  case CMD_G3 : // Arc in CCW direction
-      // printf( "G3-Arc CCW movement (%.3f,%.3f,%.3f,%.3f,%.3f,%.3f) at feed speed (%.1f)\n", M.X,M.Y,M.Z,M.I,M.J,M.P, feedSpeed );
-      ret = arcInXYPlane( M.X,M.Y,M.Z,M.I,M.J,M.P );
-      break;
-  }
-
-  if( ret != retSuccess )
-  {    
-    // Reset cutter compensation (if any)
-    doGcode( "G40" );
-  }
-
-  return ret;
+	case CMD_G3 : // Arc in CCW direction
+		ret = arcInXYPlane( M.X,M.Y,M.Z,M.I,M.J,M.P );
+		break;
+	}
+	
+	return ret;
 }
 

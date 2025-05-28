@@ -11,28 +11,21 @@ typedef struct _tSpindle {
   int nextState;
 } tSpindle;
 
-void motorInit( );
-void setExportFile( HANDLE file );
-void setSimulationMode(tStatus(*callback)(t3DPoint, t3DPoint, long));
+void MotorInit( );
+void SetMotorSimulationMode(tStatus(*callback)(t3DPoint, t3DPoint, long));
 
-void initAxis( int a, double scale );
+void InitMotorAxis( int a, double scale );
 
-void stepToPos(long x, long y, long z, t3DPoint* P);
+void GetRealPosition( t3DPoint* P );
+void GetTheoricalPosition(t3DPoint* R);
+void UpdateTheoricalPosition(double X, double Y, double Z);
 
-void getPhysicalPosition( t3DPoint* P );
-void getTheoricalPos(t3DPoint* R);
-void updateTheoricalPosition(double X, double Y, double Z);
+void ResetMachinePosition( long x, long y, long z, int queueSize );
 
-void resetMotorPosition( long x, long y, long z, int queueSize );
+double GetMotorSmalestStep( );
+double GetMaxMotorDistanceError( );
 
-double getLargestStep( );
-double getSmalestStep( );
-double getMaxDistanceError( );
+void GetDisplayPosition(t3DPoint* pPos);
+tStatus MotorDoTheMode( void(*posAtStep)(t3DPoint*,int,int,void*), int stepCount, double duration, void* pArg );
 
-void GetMachinePosition(t3DPoint* pPos);
-tStatus doMove( void(*posAtStep)(t3DPoint*,int,int,void*), int stepCount, double duration, void* pArg );
-
-int setSpindleState( int state );
-
-tStatus ResetCNCPosition( );
-tStatus ClearCNCError( );
+int SetMachineSpindleState( int state );
