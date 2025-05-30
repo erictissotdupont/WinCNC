@@ -246,7 +246,10 @@ unsigned long getCNCState()
 
 bool CheckDisconnection()
 {
-	if (g_dwTimeLastMessageReceived + (CNC_IDLE_POS_TIMEOUT_MS * 3) < timeGetTime())
+	// The machine will send the messages 3x slower when idle. The 10x factor allows for
+	// 2 consecutive messages to be lost before the diconnected state to be declared.
+	//
+	if (g_dwTimeLastMessageReceived + (CNC_IDLE_POS_TIMEOUT_MS * 10) < timeGetTime())
 	{
 		if (bConnected)
 		{

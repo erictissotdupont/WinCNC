@@ -256,8 +256,9 @@ static void WiFi_EventHandler(void* arg,
 			}
 			break;
 		case WIFI_EVENT_STA_DISCONNECTED :
-			esp_wifi_connect();
+      ESP_LOGW( TAG, "Disconnected" );
 			xEventGroupClearBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
+      esp_wifi_connect();
 			break;
 		}
   } 
@@ -291,6 +292,11 @@ static void WiFi_EventHandler(void* arg,
   }
 }
 
+bool WiFi_IsIPconnected( )
+{
+  return(( xEventGroupGetBits(s_wifi_event_group) & WIFI_CONNECTED_BIT ) == WIFI_CONNECTED_BIT );
+}
+
 static void WiFi_ReceiveTask(void *pvParameters)
 {
 	bool bRun;
@@ -300,7 +306,7 @@ static void WiFi_ReceiveTask(void *pvParameters)
 
 	while (1) 
   {
-		// Wait to be connected
+		// Wait for WiFi to be connected
 		xEventGroupWaitBits(s_wifi_event_group,
             WIFI_CONNECTED_BIT,
             pdFALSE,
@@ -317,6 +323,7 @@ static void WiFi_ReceiveTask(void *pvParameters)
 		if (g_host_sock < 0) 
 		{
 			ESP_LOGW(TAG, "Create socket failed.");
+      // Don't try again right away.
 			vTaskDelay( 1000 / portTICK_PERIOD_MS );
 			continue;
 		}
@@ -324,6 +331,9 @@ static void WiFi_ReceiveTask(void *pvParameters)
 		if (bind(g_host_sock, (const struct sockaddr *)&dest_addr, sizeof(dest_addr)) < 0) 
 		{
 			ESP_LOGW(TAG, "Bind socket failed.");
+      close(g_host_sock);
+      g_host_sock = -1;
+      // Don't try again right away.
 			vTaskDelay( 1000 / portTICK_PERIOD_MS );
 			continue;
 		}
@@ -339,62 +349,77 @@ static void WiFi_ReceiveTask(void *pvParameters)
 
 			if (rx_len < 0) 
 			{
-				bRun = false;
 				ESP_LOGE(TAG, "Socket receive failed.");
-				break;
+        bRun = false;
 			}
 			else 
 			{
 				// Null-terminate the data we received and treat like a string
 				rx_buffer[rx_len] = 0; 
-			}
       
-      #define RX_STRING_TRUNCATE_AT 65
-      #define ELIPSYS_STR "..."
-      #define ELIPSYS_LEN 4
+        #define RX_STRING_TRUNCATE_AT 65
+        #define ELIPSYS_STR "..."
+        #define ELIPSYS_LEN 4
 
-      if( rx_len > RX_STRING_TRUNCATE_AT )
-      {
-        char tmp[ELIPSYS_LEN];
-        memcpy( tmp, rx_buffer + RX_STRING_TRUNCATE_AT - ELIPSYS_LEN, sizeof(tmp));
-        strcpy( rx_buffer + RX_STRING_TRUNCATE_AT - ELIPSYS_LEN, ELIPSYS_STR );
-        ESP_LOGI(TAG, "Rcvd < '%s' (%d)%s", rx_buffer, rx_len, inet_ntoa(source_addr.sin_addr));
-        memcpy( rx_buffer + RX_STRING_TRUNCATE_AT - ELIPSYS_LEN, tmp, sizeof(tmp));
-      }
-      else
-      {
-        ESP_LOGI(TAG, "Rcvd < '%s'(%d)%s", rx_buffer, rx_len, inet_ntoa(source_addr.sin_addr));
-      }
-      
-      int tx_len = UDP_ParseMessage( rx_buffer, rx_len, tx_buffer );    
-      if( tx_len > 0 )
-      {
-        memset(&g_host_addr,0x00,sizeof(g_host_addr));
-        g_host_addr.sin_addr.s_addr = source_addr.sin_addr.s_addr;
-        g_host_addr.sin_family = AF_INET;
-        g_host_addr.sin_port = htons(CNC_UDP_PORT);
-        
-        int len = sendto( g_host_sock, tx_buffer, tx_len, 0, (struct sockaddr *)&g_host_addr, sizeof(g_host_addr));
-        if( len < 0 )
+        if( rx_len > RX_STRING_TRUNCATE_AT )
         {
-          bRun = false;
-          ESP_LOGE(TAG, "Socket transmit failed.");
-          break;
+          char tmp[ELIPSYS_LEN];
+          memcpy( tmp, rx_buffer + RX_STRING_TRUNCATE_AT - ELIPSYS_LEN, sizeof(tmp));
+          strcpy( rx_buffer + RX_STRING_TRUNCATE_AT - ELIPSYS_LEN, ELIPSYS_STR );
+          ESP_LOGI(TAG, "Rcvd < '%s' (%d)%s", rx_buffer, rx_len, inet_ntoa(source_addr.sin_addr));
+          memcpy( rx_buffer + RX_STRING_TRUNCATE_AT - ELIPSYS_LEN, tmp, sizeof(tmp));
         }
         else
         {
-          xEventGroupSetBits(s_wifi_event_group, MSG_SENT_BIT);
-          ESP_LOGI(TAG, "Send > '%s' (%d) Rsp", tx_buffer, tx_len );
+          ESP_LOGI(TAG, "Rcvd < '%s'(%d)%s", rx_buffer, rx_len, inet_ntoa(source_addr.sin_addr));
+        }
+        
+        int tx_len = UDP_ParseMessage( rx_buffer, rx_len, tx_buffer );    
+        if( tx_len > 0 )
+        {
+          memset(&g_host_addr,0x00,sizeof(g_host_addr));
+          g_host_addr.sin_addr.s_addr = source_addr.sin_addr.s_addr;
+          g_host_addr.sin_family = AF_INET;
+          g_host_addr.sin_port = htons(CNC_UDP_PORT);
+          
+          if( !WiFi_IsIPconnected( ))
+          {
+            bRun = false;
+            ESP_LOGE( TAG, "Wifi disconnected while responding");
+          }
+          else
+          {        
+            int len = sendto( g_host_sock, tx_buffer, tx_len, 0, (struct sockaddr *)&g_host_addr, sizeof(g_host_addr));
+            if( len < 0 )
+            {
+              ESP_LOGE(TAG, "Socket transmit failed.");
+              bRun = false;
+            }
+            else
+            {
+              xEventGroupSetBits(s_wifi_event_group, MSG_SENT_BIT);
+              ESP_LOGI(TAG, "Send > '%s' (%d) Rsp", tx_buffer, tx_len );
+            }
+          }
         }
       }
 		}
 
 		if (g_host_sock != -1)
 		{
-			shutdown(g_host_sock, 0);
+      // This delay before closing the socket seem to avoid a crash when wifi
+      // goes away while there is a lot of UDP traffic
+      vTaskDelay( 1000 / portTICK_PERIOD_MS );      
 			close(g_host_sock);
+      g_host_sock = -1;
+      ESP_LOGW(TAG, "UDP socket closed." );
+      
+      // This other delay was added avoid avoid errors when re-opening the
+      // socket after the AP has rebooted. There are times when the first
+      // reconnection fails and it takes a couple of cycles for things to 
+      // stablilize. This 1 second delay appears to help with that.
+      vTaskDelay( 1000 / portTICK_PERIOD_MS );
 		}
-		ESP_LOGW(TAG, "UDP socket closed." );
 	}
 }
 
@@ -402,6 +427,7 @@ void WiFi_IdleTask( )
 {
   EventBits_t bits;
   static int bootDownCnt = 0;
+  static int blinkCount = 0;
   
   if( gpio_get_level( BOOT_GPIO ) == 0 )
   {
@@ -428,30 +454,51 @@ void WiFi_IdleTask( )
   {
     bootDownCnt = 0;
   }
-    
-  bits = xEventGroupWaitBits(
-			s_wifi_event_group,
-			MSG_SENT_BIT,
-			pdTRUE,
-      pdFALSE,
-			CNC_IDLE_POS_TIMEOUT_MS / portTICK_PERIOD_MS );
   
-  if(( bits & MSG_SENT_BIT ) == 0 )
+  if( !WiFi_IsIPconnected( ))
   {
-    if( g_host_addr.sin_port != 0 && g_host_sock >= 0 )
+    // Not connected...
+    // Blink green
+    blinkCount++;
+		WiFi_SetRGBLED( 0, (blinkCount & 1) ? 0xFF : 0, 0 );
+    vTaskDelay( LED_BLINK_RATE_MS / portTICK_PERIOD_MS );
+  }
+  else
+  {
+    if((blinkCount & 1) == 0 )
+    {
+      // Make it solid green the station reconnected when it was off
+    	WiFi_SetRGBLED( 0, 0xFF, 0 );
+      blinkCount = 1;
+    }
+
+    bits = xEventGroupWaitBits(
+      s_wifi_event_group,
+      MSG_SENT_BIT,
+      pdTRUE,
+      pdFALSE,
+      (( Events_IsMotorIdle( ) ? 3 : 1 ) * CNC_IDLE_POS_TIMEOUT_MS ) / portTICK_PERIOD_MS );
+  
+    if((( bits & MSG_SENT_BIT ) == 0 ) && ( g_host_addr.sin_port != 0 ) && ( g_host_sock >= 0 ))
     {
       char tx_buffer[100];
       int tx_len = UDP_GetIdleStatus( tx_buffer );
       if( sendto( g_host_sock, tx_buffer, tx_len, 0, (struct sockaddr *)&g_host_addr, sizeof(g_host_addr)) <= 0 )
       {
         ESP_LOGE( TAG, "Failed to send idle POS to host" );
+        if (g_host_sock != -1)
+        {
+          shutdown(g_host_sock, 0);
+          close(g_host_sock);
+          g_host_sock = -1;
+        }
       }
       else
       {
         ESP_LOGI(TAG, "Sent > '%s' (%d) Idle", tx_buffer, tx_len );
       }
-    }      
-	}
+    }
+  }
 }
 
 int WiFi_Init( bool bWiFiSetup )
@@ -533,7 +580,7 @@ int WiFi_Init( bool bWiFiSetup )
 	int n = 0;
 	EventBits_t bits;
 	do
-	{    
+	{
 		// Blink blue (SmartConfig) or green (WiFi STA)
 		WiFi_SetRGBLED( 0, !g_bSmartConfig && (n & 1) ? 0xFF : 0, g_bSmartConfig && (n & 1) ? 0xFF : 0 );
 		n++;

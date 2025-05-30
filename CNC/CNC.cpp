@@ -14,12 +14,11 @@
 
 
 // Global Variables:
-HWND hMainWindow = NULL;						// main window handle
-HINSTANCE hInst;								// current instance
-TCHAR szTitle[MAX_PATH];					// The title bar text
-TCHAR szWindowClass[MAX_PATH];			// the main window class name
-
+HWND g_hMainWindow = NULL;				// Main window handle
 tMetaData g_MetaData;
+
+TCHAR szTitle[MAX_PATH];				// The title bar text
+TCHAR szWindowClass[MAX_PATH];			// the main window class name
 
 // Forward declarations of functions included in this code module:
 ATOM				MyRegisterClass(HINSTANCE hInstance);
@@ -27,9 +26,14 @@ BOOL				InitInstance(HINSTANCE, int);
 LRESULT CALLBACK	WndProc(HWND, UINT, WPARAM, LPARAM);
 INT_PTR CALLBACK	About(HWND, UINT, WPARAM, LPARAM);
 
+HWND GetMainWindow()
+{
+	return g_hMainWindow;
+}
+
 void OnMachineUpdate(PVOID param)
 {
-	PostMessage(hMainWindow, WM_UPDATE_POSITION, 0, 0);
+	PostMessage(g_hMainWindow, WM_UPDATE_POSITION, 0, 0);
 }
 
 
@@ -117,25 +121,23 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 	RECT rc;
 	int x, y;
 
-	hInst = hInstance; // Store instance handle in our global variable
-
 	GetWindowRect(GetDesktopWindow(), &rc);
 	x = (rc.right - rc.left) - (rc.bottom - rc.top);
 	y = x * 2 / 3;
 	AdjustWindowRect(&rc, WS_OVERLAPPEDWINDOW & ~WS_THICKFRAME, FALSE);
 
-   hMainWindow = CreateWindow(szWindowClass, szTitle, WS_OVERLAPPEDWINDOW & ~WS_THICKFRAME,
+   g_hMainWindow = CreateWindow(szWindowClass, szTitle, WS_OVERLAPPEDWINDOW & ~WS_THICKFRAME,
 	   0, 0, x, y, NULL, NULL, hInstance, NULL);
       //CW_USEDEFAULT, 0, CW_USEDEFAULT, 0, NULL, NULL, hInstance, NULL);
   
-   if (!hMainWindow)
+   if (!g_hMainWindow)
    {
       return FALSE;
    }
 
-   ShowWindow(hMainWindow, nCmdShow);
-   UpdateWindow(hMainWindow);
-   //SetWindowPos(hMainWindow, NULL, 0, 0, 0, 0, SWP_SHOWWINDOW | SWP_NOSIZE | SWP_NOZORDER | SWP_DRAWFRAME);
+   ShowWindow(g_hMainWindow, nCmdShow);
+   UpdateWindow(g_hMainWindow);
+   //SetWindowPos(g_hMainWindow, NULL, 0, 0, 0, 0, SWP_SHOWWINDOW | SWP_NOSIZE | SWP_NOZORDER | SWP_DRAWFRAME);
    return TRUE;
 }
 
@@ -174,10 +176,13 @@ void MachineCalibrate(HWND hWnd)
 	}
 	else
 	{
-		tStatus status = postCommand(CNC_CMD_CALIBRATE);
-		if (status != retSuccess)
+		if (MessageBoxA(hWnd, "Ensure that the machine can freely move up and left before starting calibration. Click OK to proceed.", "CNC", MB_ICONEXCLAMATION) == IDOK)
 		{
-			MessageBoxA(hWnd, "Calibration command failed.", "CNC", MB_ICONERROR);
+			tStatus status = postCommand(CNC_CMD_CALIBRATE);
+			if (status != retSuccess)
+			{
+				MessageBoxA(hWnd, "Calibration command failed.", "CNC", MB_ICONERROR);
+			}
 		}
 	}
 }
@@ -400,7 +405,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			ComplexShapes(hWnd);
 			break;
 		case IDM_ABOUT:
-			DialogBox(hInst, MAKEINTRESOURCE(IDD_ABOUTBOX), hWnd, About);
+			DialogBox(NULL, MAKEINTRESOURCE(IDD_ABOUTBOX), hWnd, About);
 			break;
 		case IDM_EXIT:
 			DestroyWindow(hWnd);

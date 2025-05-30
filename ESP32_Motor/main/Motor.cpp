@@ -125,7 +125,7 @@ int DualMotor::GetLimit( )
   return ret;
 }
 
-bool Motor::SetDirection( int d )
+bool IRAM_ATTR Motor::SetDirection( int d )
 {
   if( curDir != d )
   {
@@ -138,7 +138,7 @@ bool Motor::SetDirection( int d )
   return false;
 }
 
-bool DualMotor::SetDirection( int d )
+bool IRAM_ATTR DualMotor::SetDirection( int d )
 {
   if( Motor::SetDirection( d ))
   {
@@ -148,7 +148,7 @@ bool DualMotor::SetDirection( int d )
   return false;  
 }
 
-uint64_t Motor::InitMove( long s, unsigned long t, uint64_t now )
+uint64_t IRAM_ATTR Motor::InitMove( long s, unsigned long t, uint64_t now )
 {
   int d = 1;
   
@@ -208,7 +208,7 @@ inline uint64_t IRAM_ATTR Motor::GetNextStepTime( )
     return nextStepTime;
 }
 
-void Motor::MovementTask( uint64_t now )
+void IRAM_ATTR Motor::MovementTask( uint64_t now )
 {
   if( pulseLevel == 0 )
   {
@@ -305,13 +305,13 @@ void IRAM_ATTR DualMotor::Pulse( bool on )
   gpio_set_level( stepPin2, on ? OD_CLOSED : OD_OPEN );
 }
 
-void DualMotor::PulseLeft( bool on )
+void IRAM_ATTR DualMotor::PulseLeft( bool on )
 {
   // Call the parent call so that only the left motor gets the pulse
   Motor::Pulse( on );
 }
 
-void DualMotor::PulseRight( bool on )
+void IRAM_ATTR DualMotor::PulseRight( bool on )
 {
   gpio_set_level( stepPin2, on ? OD_CLOSED : OD_OPEN );
 }
@@ -346,7 +346,7 @@ void Motor::CalibrationComplete( )
     if ((curPos < -CAL_ERROR_TRLD) || (curPos > CAL_ERROR_TRLD))
     {
       Events_SetDebug( (cal_state_flag << 16) | ( curPos & 0xFFFF ));
-      Events_SetState( CNC_STATE_POSITION_ERROR );
+      Events_SetState( CNC_STATE_CAL_ORIGIN_ERROR );
     }
   }
   curPos = 0;

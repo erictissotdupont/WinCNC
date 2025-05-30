@@ -40,6 +40,9 @@ DWORD ParserThread(PVOID pParam)
 	}
 	pJob->status = retSuccess;
 
+	int timeout = 100;
+	while (pJob->hDialog == NULL && --timeout >= 0) Sleep(100);
+
 	while (pt && !pJob->bStop)
 	{
 		int progress = (PROGRESS_RES * (pt - pJob->buffer)) / pJob->cbBuffer;
@@ -106,61 +109,28 @@ DWORD ParserThread(PVOID pParam)
 	return 0;
 }
 
-void ParserUpdate(HWND hWnd, WPARAM progress,LPARAM state)
-{
-	HWND hItem;
-	hItem = GetDlgItem(hWnd, IDC_PROGRESS);
-	SendMessage(hItem, PBM_SETPOS, progress, 0);
-
-	hItem = GetDlgItem(hWnd, IDC_PARSER_STATE);
-	SetWindowTextA(hItem, (char*)state);
-}
-
-tParserJob job;
-
-void ParserInit(HWND hWnd)
-{
-	HWND hItem = GetDlgItem(hWnd, IDC_PROGRESS);
-	SendMessage(hItem, PBM_SETRANGE, 0, MAKELONG(0, PROGRESS_RES));
-	job.hDialog = hWnd;
-}
-
-void ParserOnPause(HWND hWnd)
-{
-	HWND hItem = GetDlgItem(hWnd, IDD_PAUSE);
-	if (job.hDebugStepEvent == NULL)
-	{
-		job.hDebugStepEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
-		SetWindowText(hItem, L"RESUME");
-	}
-	else
-	{
-		HANDLE hEvent = job.hDebugStepEvent;
-		job.hDebugStepEvent = NULL;
-		SetEvent(hEvent);
-		CloseHandle(hEvent);
-		SetWindowText(hItem, L"PAUSE");
-	}
-	
-}
-
-void ParserOnStep(HWND hWnd)
-{
-	SetEvent(job.hDebugStepEvent);
-}
-
 BOOL CALLBACK FileParserProc(HWND hWnd,
 	UINT message,
 	WPARAM wParam,
 	LPARAM lParam)
 {
+	HWND hItem;
+	static tParserJob* pJob = NULL;
+	
 	switch (message)
 	{
 	case WM_UPDATE_PROGRESS:
-		ParserUpdate(hWnd,wParam,lParam);
+		hItem = GetDlgItem(hWnd, IDC_PROGRESS);
+		SendMessage(hItem, PBM_SETPOS, wParam, 0);
+		hItem = GetDlgItem(hWnd, IDC_PARSER_STATE);
+		SetWindowTextA(hItem, (char*)lParam);
 		break;
+
 	case WM_INITDIALOG:
-		ParserInit(hWnd);
+		pJob = (tParserJob*)lParam;
+		hItem = GetDlgItem(hWnd, IDC_PROGRESS);
+		SendMessage(hItem, PBM_SETRANGE, 0, MAKELONG(0, PROGRESS_RES));
+		pJob->hDialog = hWnd;
 		return TRUE;
 		break;
 
@@ -171,15 +141,30 @@ BOOL CALLBACK FileParserProc(HWND hWnd,
 		switch (LOWORD(wParam))
 		{
 		case IDD_PAUSE:
-			ParserOnPause(hWnd);
+			hItem = GetDlgItem(hWnd, IDD_PAUSE);
+			if (pJob->hDebugStepEvent == NULL)
+			{
+				pJob->hDebugStepEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
+				SetWindowText(hItem, L"RESUME");
+			}
+			else
+			{
+				HANDLE hEvent = pJob->hDebugStepEvent;
+				pJob->hDebugStepEvent = NULL;
+				SetEvent(hEvent);
+				CloseHandle(hEvent);
+				SetWindowText(hItem, L"PAUSE");
+			}
 			break;
+
 		case IDD_STEP:
-			ParserOnStep(hWnd);
+			SetEvent(pJob->hDebugStepEvent);
 			break;
+
 		case IDOK:
 			// Fall through.
 		case IDCANCEL:
-			if (job.bStop == false)
+			if (pJob->bStop == false)
 			{
 				if (MessageBox(hWnd,
 					L"This will stop the current program.\r\nAre you sure?",
@@ -187,11 +172,19 @@ BOOL CALLBACK FileParserProc(HWND hWnd,
 					MB_YESNO | MB_ICONEXCLAMATION) == IDYES)
 				{
 					ForceStop( );
-					job.bStop = true;
-					WaitForSingleObject(job.hThread, 5000);
+					pJob->bStop = true;
+					WaitForSingleObject(pJob->hThread, 5000);
 					EndDialog(hWnd, wParam);
 				}
-			} else EndDialog(hWnd, wParam);
+			} 
+			else
+			{
+				EndDialog(hWnd, wParam);
+			}
+
+			pJob->hDialog = NULL;
+			pJob = NULL;
+
 			return TRUE;
 		}
 	}
@@ -229,27 +222,36 @@ WCHAR* GetCNCErrorString(tStatus status)
 tStatus ParseBuffer( HWND hParent, char* pt, ULONG cbBuffer, tStatus(*cmd)(char*), BOOL bDebug )
 {
 	DWORD dwThread;
+	tParserJob job = { 0 };
+
 	job.buffer = pt;
 	job.cbBuffer = cbBuffer;
 	job.cmd = cmd;
 	job.hDialog = NULL;
 	job.bStop = false;
 	job.hDebugStepEvent = bDebug ? CreateEvent(NULL, FALSE, FALSE, NULL) : NULL;
+	job.status = retInternalError;
 	memcpy_s(job.buffer, cbBuffer, pt, cbBuffer);
 
 	job.hThread = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)ParserThread, &job, 0, &dwThread);
-
-	DialogBox(NULL,
-		MAKEINTRESOURCE(IDD_GCODE),
-		hParent,
-		(DLGPROC)FileParserProc);
-
-	if (job.status != retSuccess && job.status != retPreParseComplete )
+	if (job.hThread != NULL)
 	{
-		MessageBox(hParent, GetCNCErrorString(job.status), L"GCode", MB_OK | MB_ICONERROR);
+		DialogBoxParam(NULL,
+			MAKEINTRESOURCE(IDD_GCODE),
+			hParent,
+			(DLGPROC)FileParserProc,
+			(LPARAM)&job);
+
+		if (job.status != retSuccess &&
+			job.status != retPreParseComplete &&
+			job.status != retStopRequested)
+		{
+			MessageBox(hParent, GetCNCErrorString(job.status), L"GCode", MB_OK | MB_ICONERROR);
+		}
+		CloseHandle(job.hThread);
 	}
 
-	CloseHandle(job.hThread);
+	while (job.hDialog) Sleep(100);
 	return job.status;
 }
 

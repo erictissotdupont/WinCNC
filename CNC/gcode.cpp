@@ -259,7 +259,7 @@ tStatus dwell( long t )
 #define CMD_G91		910
 
 
-const int modal0[] = { 0, 10, 20, 30, 380, 820, 840, 850, 860, 870, 880, 890, -1 };   // Motion
+const int modal0[] = { 0, 10, 20, 30, 40, 380, 820, 840, 850, 860, 870, 880, 890, -1 };   // Motion
 const int modal1[] = { 170, 180, 190, -1 };                                           // Plane selection
 const int modal2[] = { 900, 910, -1 };                                                // Distance mode
 const int modal3[] = { 930, 940, -1 };                                                // Feed rate mode
@@ -483,11 +483,6 @@ tStatus doGcode(char* cmd)
 
 		switch( n )
 		{
-		case CMD_G4 : // G4 : Dwell
-			printf( "Dwell( %.3f sec).\n", M.P );
-			dwell( (long)(M.P * 1000));
-			break;
-
 		case CMD_G10 : // G10 : Reset home position to current
 			g_HomePos = curPos;
 			break;
@@ -567,6 +562,10 @@ tStatus doGcode(char* cmd)
 	// Depending on the active command in the motion group
 	switch( M.motion )
 	{
+	case CMD_G4: // Dwell
+		ret = dwell((long)(M.P * 1000));
+		break;
+
 	case CMD_G0 : // Rapid positioning
 		ret = rapidPosRel( M.X,M.Y,M.Z );
 		break;

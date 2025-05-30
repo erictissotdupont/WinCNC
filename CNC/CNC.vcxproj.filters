@@ -80,7 +80,7 @@
     <ClCompile Include="geometry.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="3Dview.cpp">
+    <ClCompile Include="MainView.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="fileParser.cpp">

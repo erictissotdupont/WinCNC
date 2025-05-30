@@ -117,7 +117,7 @@
     <ClCompile Include="motor.cpp" />
     <ClCompile Include="Shapes.cpp" />
     <ClCompile Include="Socket.cpp" />
-    <ClCompile Include="3Dview.cpp" />
+    <ClCompile Include="MainView.cpp" />
     <ClCompile Include="stdafx.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Create</PrecompiledHeader>

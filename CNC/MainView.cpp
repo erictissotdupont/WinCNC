@@ -11,8 +11,6 @@
 #include <psapi.h>
 #include <windowsx.h>
 
-extern HWND hMainWindow;
-
 #define VIEW_MARGIN			10
 #define VIEW_STATUS_FONT	L"Arial"
 #define VIEW_POSITION_FONT	L"Courier New"
@@ -460,7 +458,7 @@ tStatus buildPath(t3DPoint Start, t3DPoint End, long d )
 		DWORD current = timeGetTime();
 		if (current > prevTime + 50 || step == n )
 		{
-			PostMessage(hMainWindow, WM_UPDATE_POSITION, 0, 0);
+			PostMessage(GetMainWindow( ), WM_UPDATE_POSITION, 0, 0);
 			prevTime = current;
 		}
 		// Yield

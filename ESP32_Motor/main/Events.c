@@ -93,7 +93,7 @@ void Events_SignalMotorNotIdle( )
 
 bool Events_IsMotorIdle( )
 {
-  return(( xEventGroupWaitBits( g_eventGroupHandle, MOTOR_IDLE_BIT, pdFALSE, pdFALSE, 0 ) & MOTOR_IDLE_BIT ) == MOTOR_IDLE_BIT ); 
+  return(( xEventGroupGetBits( g_eventGroupHandle ) & MOTOR_IDLE_BIT ) == MOTOR_IDLE_BIT ); 
 }
 
 bool Events_WaitForMotorIdle( unsigned long timeoutMs )

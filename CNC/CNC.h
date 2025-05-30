@@ -36,3 +36,5 @@ typedef struct
 #define WM_UPDATE_POSITION	     WM_USER
 #define WM_UPDATE_PROGRESS	     (WM_USER + 1)
 #define WM_REDRAW				 (WM_USER + 2)
+
+HWND GetMainWindow();
