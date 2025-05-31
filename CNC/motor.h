@@ -20,12 +20,11 @@ void GetRealPosition( t3DPoint* P );
 void GetTheoricalPosition(t3DPoint* R);
 void UpdateTheoricalPosition(double X, double Y, double Z);
 
-void ResetMachinePosition( long x, long y, long z, int queueSize );
+void ResetMachinePosition( long x, long y, long z );
 
 double GetMotorSmalestStep( );
 double GetMaxMotorDistanceError( );
 
-void GetDisplayPosition(t3DPoint* pPos);
 tStatus MotorDoTheMode( void(*posAtStep)(t3DPoint*,int,int,void*), int stepCount, double duration, void* pArg );
 
 int SetMachineSpindleState( int state );

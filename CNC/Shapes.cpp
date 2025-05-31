@@ -1,4 +1,4 @@
-#include "CNC.h"
+#include "Main.h"
 #include "Windowsx.h"
 #include "Resource.h"
 #include "Shapes.h"

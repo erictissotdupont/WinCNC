@@ -1,40 +1,28 @@
-#pragma once
 
-#include "targetver.h"
+typedef enum {
+	cncStatus_Success = 0,
+	cncStatus_HeaderDecodingError = -1,
+	cncStatus_MessageIsTooShort = -2,
+	cncStatus_CommandDecodingError = -3,
+	cncStatus_PositionCRCmismatch = -4,
+	cncStatus_UnknownCommand = -5,
+	cncStatus_SequenceError = -6,
+} tCnCCmdStatus;
 
-#define WIN32_LEAN_AND_MEAN             // Exclude rarely-used stuff from Windows headers
-// Windows Header Files:
-#include <windows.h>
 
-// C RunTime Header Files
-#include <stdlib.h>
-#include <malloc.h>
-#include <memory.h>
-#include <tchar.h>
-#include <stdio.h>	// for printf
-#include <Strsafe.h>
+unsigned char CNC_GetPositionCRC(long x, long y, long z, unsigned long t, unsigned long flags);
+bool CNC_LockMachinePosition(bool bLock);
+void CNC_GetDisplayPosition(t3DPoint* pPos);
+int CNC_InitNetworkCom( );
+void CNC_Reboot( );
+tStatus CNC_Calibrate( );
+void CNC_SendManualUpdate(int x, int y, int z);
+void CNC_ForceStop( );
+void CNC_Resume();
 
-#include "resource.h"
-#include "status.h"
-#include "..\CNC_Protocol.h"
+tStatus CNC_PostMovementCommand(long x, long y, long z, unsigned long d, unsigned long s);
+void CNC_GetNetworkStatusString(char* szBuffer, size_t cbBuffer);
+void CNC_GetStateString(char* szBuffer, size_t cbBuffer, unsigned long mask);
+unsigned long CNC_GetState( );
 
-typedef struct
-{
-	double blockX;       // Dimension of the block being machined
-	double blockY;
-	double blockZ;       // Z position has no offset 
-	double offsetX;      // Position block relative to initial tool position
-	double offsetY;
-	double offsetZ;
-	double toolRadius;
-	double toolHeight;   // Max cutting height of the tool
-	ULONG gotWhatBlock;
-	ULONG gotWhatTool;
-	ULONG gotWhatStart;
-} tMetaData;
 
-#define WM_UPDATE_POSITION	     WM_USER
-#define WM_UPDATE_PROGRESS	     (WM_USER + 1)
-#define WM_REDRAW				 (WM_USER + 2)
-
-HWND GetMainWindow();

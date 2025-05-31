@@ -1,4 +1,4 @@
-#include "CNC.h"
+#include "Main.h"
 
 #include "status.h"
 #include "geometry.h"
@@ -503,9 +503,7 @@ tStatus doGcode(char* cmd)
 			for (j = 0; j<MG_COUNT; j++)
 			{
 				for(i=0; modalGroup[j][i]>=0; i++ )
-				{
-					//printf( "[%d,%d]=%d\n", j,i, modalGroup[j][i] );
-          
+				{          
 					if( n == modalGroup[j][i] )
 					{
 						cmdInGroup[j]++;
@@ -550,7 +548,6 @@ tStatus doGcode(char* cmd)
 	}
 	else
 	{
-		printf ("ERROR : Invalid distance mode.\n"); 
 		return retSyntaxError; 
 	}
 

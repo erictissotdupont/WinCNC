@@ -18,6 +18,7 @@ typedef enum {
 	retStopRequested = -14,
 	retInternalError = -15,
 	retNotImplemented = -16,
+	retFileReadFailed = -17,
 
 	retPreParseComplete = -98,
 	retQuit = -99,

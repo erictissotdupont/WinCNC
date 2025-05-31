@@ -70,6 +70,14 @@
 #define GOT_WIFI_SSID_PW	  BIT3
 #define MSG_SENT_BIT        BIT4
 
+typedef enum {
+  LEDColorNotSet, 
+  LEDColorOff,
+  LEDColorGreen, 
+  LEDColorBlue,
+  LEDColorRed
+} LEDColor_t;
+
 static led_strip_handle_t g_led_strip;
 static EventGroupHandle_t s_wifi_event_group;
 static char g_szSSID[MAX_SSID_NAME];
@@ -83,11 +91,29 @@ static const char* TAG = "WiFi";
 
 // ----------------------------------------------------------------------------
 
-bool WiFi_SetRGBLED( uint8_t r, uint8_t g, uint8_t b )
+bool WiFi_SetRGBLED( LEDColor_t newColor )
 {
 	bool bRet = true;
-	if( led_strip_set_pixel( g_led_strip, 0, r, g, b ) != ESP_OK ) bRet = false;
-	if( led_strip_refresh(g_led_strip) != ESP_OK ) bRet = false;
+  uint8_t r,g,b;
+  static LEDColor_t currentColor = LEDColorNotSet;
+  
+  if( newColor != currentColor )
+  {
+    switch( newColor )
+    {
+      default : bRet = false;break;
+      case LEDColorGreen : r = 0; g = 255; b = 0;break;
+      case LEDColorBlue : r = 0; g = 0; b = 255;break;
+      case LEDColorRed : r = 255; g = 0; b = 0;break;
+      case LEDColorOff : r = 0; g = 0; b = 0;break;
+    }
+    if( bRet )
+    {    
+      if( led_strip_set_pixel( g_led_strip, 0, r, g, b ) != ESP_OK ) bRet = false;
+      if( led_strip_refresh(g_led_strip) != ESP_OK ) bRet = false;
+      currentColor = newColor;
+    }
+  }
 	return bRet;
 }
 
@@ -435,7 +461,7 @@ void WiFi_IdleTask( )
     if( bootDownCnt > 3 )
     {
       WiFi_ClearCredential( );
-      WiFi_SetRGBLED( 0,0,0 );
+      WiFi_SetRGBLED( LEDColorOff );
       vTaskDelay( 1000 / portTICK_PERIOD_MS );
       while( gpio_get_level( BOOT_GPIO ) == 0 )
       {
@@ -455,22 +481,20 @@ void WiFi_IdleTask( )
     bootDownCnt = 0;
   }
   
+  LEDColor_t newLEDColor = (( Events_GetState( ) & CNC_STATE_ERROR_MASK ) != 0 ) ? LEDColorRed : LEDColorGreen;
+  
   if( !WiFi_IsIPconnected( ))
   {
-    // Not connected...
+    // Not connected: Blink
     // Blink green
     blinkCount++;
-		WiFi_SetRGBLED( 0, (blinkCount & 1) ? 0xFF : 0, 0 );
+		WiFi_SetRGBLED( (blinkCount & 1) ? newLEDColor : LEDColorOff );
     vTaskDelay( LED_BLINK_RATE_MS / portTICK_PERIOD_MS );
   }
   else
   {
-    if((blinkCount & 1) == 0 )
-    {
-      // Make it solid green the station reconnected when it was off
-    	WiFi_SetRGBLED( 0, 0xFF, 0 );
-      blinkCount = 1;
-    }
+    // Connected: Solid ON
+    WiFi_SetRGBLED( newLEDColor );
 
     bits = xEventGroupWaitBits(
       s_wifi_event_group,
@@ -582,7 +606,10 @@ int WiFi_Init( bool bWiFiSetup )
 	do
 	{
 		// Blink blue (SmartConfig) or green (WiFi STA)
-		WiFi_SetRGBLED( 0, !g_bSmartConfig && (n & 1) ? 0xFF : 0, g_bSmartConfig && (n & 1) ? 0xFF : 0 );
+    if( n & 1 )
+      WiFi_SetRGBLED( !g_bSmartConfig ? LEDColorGreen : LEDColorBlue );
+    else
+      WiFi_SetRGBLED( LEDColorOff );
 		n++;
 		
 		bits = xEventGroupWaitBits(
@@ -595,7 +622,7 @@ int WiFi_Init( bool bWiFiSetup )
 	} while(( bits & WIFI_CONNECTED_BIT ) == 0 );
 
 	// Turn LED solid ON blue or green
-	WiFi_SetRGBLED( 0, !g_bSmartConfig ? 0xFF : 0, g_bSmartConfig ? 0xFF : 0 );
+	WiFi_SetRGBLED( !g_bSmartConfig ? LEDColorGreen : LEDColorBlue );
 	
 	TaskHandle_t TaskHandle = NULL;
 	xTaskCreate(WiFi_ReceiveTask, "WiFi_ReceiveTask", 4096, NULL, 5, &TaskHandle );

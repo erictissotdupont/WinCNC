@@ -1,12 +1,12 @@
-#include "CNC.h"
+#include "Main.h"
 #include "Resource.h"
 #include "Windowsx.h"
 #include "math.h"
 
 #include "gcode.h"
-#include "fileParser.h"
+#include "Parser.h"
 #include "Shapes.h"
-#include "3Dview.h"
+#include "Simulator.h"
 
 typedef struct
 {

@@ -91,37 +91,36 @@
     <Text Include="ReadMe.txt" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="3Dview.h" />
+    <ClInclude Include="MainView.h" />
+    <ClInclude Include="ManualMode.h" />
+    <ClInclude Include="Simulator.h" />
     <ClInclude Include="Shapes.h" />
-    <ClInclude Include="CNC.h" />
-    <ClInclude Include="fileParser.h" />
+    <ClInclude Include="Main.h" />
+    <ClInclude Include="Parser.h" />
     <ClInclude Include="gcode.h" />
     <ClInclude Include="geometry.h" />
     <ClInclude Include="keyboard.h" />
     <ClInclude Include="motor.h" />
     <ClInclude Include="Resource.h" />
-    <ClInclude Include="socket.h" />
+    <ClInclude Include="CNC.h" />
     <ClInclude Include="status.h" />
     <ClInclude Include="stdafx.h" />
     <ClInclude Include="targetver.h" />
-    <ClInclude Include="unitTest.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="ManualMode.cpp" />
+    <ClCompile Include="Simulator.cpp" />
     <ClCompile Include="BasicShapes.cpp" />
     <ClCompile Include="BitmapShape.cpp" />
-    <ClCompile Include="CNC.cpp" />
+    <ClCompile Include="Main.cpp" />
     <ClCompile Include="ComplexShapes.cpp" />
-    <ClCompile Include="fileParser.cpp" />
+    <ClCompile Include="Parser.cpp" />
     <ClCompile Include="gcode.cpp" />
     <ClCompile Include="geometry.cpp" />
     <ClCompile Include="motor.cpp" />
     <ClCompile Include="Shapes.cpp" />
-    <ClCompile Include="Socket.cpp" />
+    <ClCompile Include="CNC.cpp" />
     <ClCompile Include="MainView.cpp" />
-    <ClCompile Include="stdafx.cpp">
-      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Create</PrecompiledHeader>
-      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Create</PrecompiledHeader>
-    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="CNC.rc" />

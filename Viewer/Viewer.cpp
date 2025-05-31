@@ -18,6 +18,7 @@
 #include <directxmath.h>
 #include <directxcolors.h>
 #include "resource.h"
+#include "..\Simulator_Intf.h"
 
 using namespace DirectX;
 
@@ -41,19 +42,6 @@ struct ConstantBuffer
 	XMFLOAT4 vLightColor[3];
 	XMFLOAT4 vOutputColor[2];
 };
-
-
-typedef struct
-{
-	DWORD id;
-	DWORD dx;
-	DWORD dy;
-	float res;
-	DWORD cbAlt;
-	float originX;
-	float originY;
-} header_t;
-
 
 //--------------------------------------------------------------------------------------
 // Global Variables
@@ -519,7 +507,7 @@ HRESULT InitDevice()
 	// Set primitive topology
 	g_pImmediateContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-	g_hFileChangeEvent = CreateEvent(NULL, FALSE, FALSE, L"Local\\AltFileChangeEvent");
+	g_hFileChangeEvent = CreateEvent(NULL, FALSE, FALSE, SIMULATOR_DATA_CHANGED_EVENT_NAME );
 	// FindFirstChangeNotification(g_szAltDataFile, FALSE, FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NOTIFY_CHANGE_LAST_ACCESS );
 	if (g_hFileChangeEvent)
 	{
@@ -546,7 +534,7 @@ HRESULT UpdateSurface( )
 		hMapFile = OpenFileMapping(
 			FILE_MAP_ALL_ACCESS,     // read/write access
 			FALSE,                   // do not inherit the name
-			L"CncAltSimulationData");// name of mapping object
+			SIMULATOR_DATA_FILE_NAME );// name of mapping object
 
 		if (hMapFile != NULL)
 		{

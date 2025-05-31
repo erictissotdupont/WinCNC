@@ -1,8 +1,8 @@
 
-#include "CNC.h"
+#include "Main.h"
 #include "status.h"
 #include "geometry.h"
-#include "socket.h"
+#include "CNC.h"
 #include "gcode.h"
 #include "motor.h"
 
@@ -11,11 +11,6 @@ t3DPoint g_TheoricalPosition = { 0.0, 0.0, 0.0 };
 tAxis* pMotor[] = {&XMotor,&YMotor,&ZMotor};
 tSpindle Spindle;
 tStatus(*g_pSimulation)(t3DPoint, t3DPoint, long) = NULL;
-
-// Queue to track the movements sent to the machine but not executed yet
-t3DPoint* g_CmdQueue;
-unsigned int g_CmdInIndex;
-unsigned int g_CmdQueueSize;
 
 // ----------------------------------------------------------------------------
 
@@ -40,47 +35,18 @@ void GetTheoricalPosition( t3DPoint* R )
 	*R = g_TheoricalPosition;
 }
 
-// Returns the estimated postion of the machine at a given time. This position
-// should ONLY be used for display. It uses the history of commands sent
-// to the machine and the reported number of commands currently in the queue
-// to estimate the position of the actual machine.
-//
-void GetDisplayPosition(t3DPoint* pPos)
-{
-	int inQueue = GetInQueueCount();
-	if (inQueue == 0 || g_CmdQueue == NULL )
-	{
-		GetRealPosition(pPos);
-	}
-	else
-	{
-		int oldestCmd = g_CmdInIndex - inQueue;
-		if (oldestCmd < 0) oldestCmd += g_CmdQueueSize;
-		*pPos = g_CmdQueue[oldestCmd];
-	}
-}
-
 // Called when first connecting to the machine and receiving its current
 // idle position. This resets both the REAL and THEORICAL positions.
 // This also initialize the command queue used to track the actual
 // position of the machine.
 //
-void ResetMachinePosition(long x, long y, long z, int cmdQueueSize)
+void ResetMachinePosition(long x, long y, long z)
 {
 	XMotor.step = x;
 	YMotor.step = y;
 	ZMotor.step = z;
 
 	GetRealPosition(&g_TheoricalPosition);
-
-	// Add one slot just in case
-	cmdQueueSize++;
-	if (cmdQueueSize != g_CmdQueueSize)
-	{
-		if (g_CmdQueue) free(g_CmdQueue);
-		g_CmdQueue = (t3DPoint*)malloc(sizeof(t3DPoint) * cmdQueueSize);
-		g_CmdQueueSize = cmdQueueSize;
-	}
 }
 
 // Called by every movement command to update the new theorical position
@@ -162,7 +128,7 @@ tStatus MotorDoTheMode(void(*posAtStep)(t3DPoint*, int, int, void*), int stepCou
 	// Convert that in uS for the CNC
 	d = (unsigned long)(duration * 1000);
 
-	LockMachinePosition(true);
+	CNC_LockMachinePosition(true);
 
 	for (i = 1; i <= stepCount; i++)
 	{
@@ -187,26 +153,13 @@ tStatus MotorDoTheMode(void(*posAtStep)(t3DPoint*, int, int, void*), int stepCou
 			// so that the machine can check if its position and distance 
 			// corresponds to what the host wants. Includes duration and
 			// flags
-			s = s | GetPosCRC(XMotor.step, YMotor.step, ZMotor.step, d, s);
+			s = s | CNC_GetPositionCRC(XMotor.step, YMotor.step, ZMotor.step, d, s);
 
-			sprintf_s(str, sizeof(str), "@" CNC_CMD_PARAMS, x, y, z, d, s);
-
-			status = postCommand(str);
-
-			if (status != retSuccess)
-			{
-				break;
-			}
-			else
-			{
-				GetRealPosition(&g_CmdQueue[g_CmdInIndex]);
-				g_CmdInIndex++;
-				if (g_CmdInIndex >= g_CmdQueueSize) g_CmdInIndex = 0;
-			}
+			status = CNC_PostMovementCommand(x, y, z, d, s);
 		}
 	}
 
-	LockMachinePosition(false);
+	CNC_LockMachinePosition(false);
 
 	return status;
 }
@@ -216,3 +169,4 @@ void MotorInit()
 	Spindle.currentState = 0;
 	Spindle.nextState = 0;
 }
+
