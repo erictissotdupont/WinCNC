@@ -40,6 +40,8 @@
 #define BLINK_GPIO           (gpio_num_t)18
 #define BOOT_GPIO            (gpio_num_t)0
 
+#define LIMIT_PULL_UP        (gpio_num_t)21
+
 // For code compatibility with Arduino
 #define LOW                  0
 #define HIGH                 1

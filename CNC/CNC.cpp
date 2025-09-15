@@ -230,6 +230,7 @@ void CNC_GetStateString(char* szBuffer, size_t cbBuffer, unsigned long mask )
 	if (state & CNC_STATE_IDLE_TIMEOUT_ERROR)  strcat_s(szBuffer, cbBuffer, "Idle timeout error" "\r\n");
 	
 	// Warning
+	if (state & CNC_STATE_LIMIT_CRC_ERROR)     strcat_s(szBuffer, cbBuffer, "Limit sensor CRC error." "\r\n");
 	if (state & CNC_STATE_CAL_ORIGIN_ERROR)    strcat_s(szBuffer, cbBuffer, "Calibration position error" "\r\n");
 	if (state & CNC_STATE_LIMITS_INACTIVE)     strcat_s(szBuffer, cbBuffer, "Limit sensors not available" "\r\n");
 	if (state & CNC_STATE_COMMAND_QUEUE_FULL)  strcat_s(szBuffer, cbBuffer, "Command queue is full" "\r\n");

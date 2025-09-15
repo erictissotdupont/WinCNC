@@ -59,7 +59,7 @@
 // Errors
 #define CNC_STATE_MOTOR_CRC_ERROR         0x80000000L // The CRC of a movement command did not match with the physical position
 #define CNC_STATE_NETWORK_CRC_ERROR       0x40000000L // The CRC in a UDP command message did not match with the network position
-#define CNC_STATE_LIMIT_ERROR             0x20000000L // Not used yet : A physical limit was triggered. Motors are powered down
+#define CNC_STATE_LIMIT_ERROR             0x20000000L // A physical limit was triggered. Motors are powered down
 #define CNC_STATE_LOGICAL_LIMIT_ERROR     0x10000000L // The end position of a movement went outside of the machine limits
 #define CNC_STATE_CALIBRATION_FAILED      0x08000000L // The calibration process failed because the machine was not idle, went too far or triggered a physical limit
 #define CNC_STATE_COMMUNICATION_ERROR     0x04000000L // A UDP message with the correct header was not formatted properly
@@ -69,7 +69,8 @@
 #define CNC_STATE_RECOVERABLE_ERROR_MASK  (CNC_STATE_ERROR_MASK & ~CNC_STATE_NETWORK_CRC_ERROR)
 
 // Warnings   
-// 4 more here
+// 3 more here
+#define CNC_STATE_LIMIT_CRC_ERROR         0x00100000L // One message from the origin sensors had a CRC error
 #define CNC_STATE_CAL_ORIGIN_ERROR        0x00080000L // From a calibrated state the origin position was off by more than 3 steps
 #define CNC_STATE_LIMITS_INACTIVE         0x00040000L // The limit sensor interface is not connected
 #define CNC_STATE_COMMAND_QUEUE_FULL      0x00020000L // The command queue is currently full

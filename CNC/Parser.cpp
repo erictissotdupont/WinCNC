@@ -102,6 +102,7 @@ DWORD ParserThread(PVOID pParam)
 	{
 		if (pJob->bStop == false)
 		{
+			pJob->bStop = true;
 			PostMessage(pJob->hDialog, WM_UPDATE_PROGRESS, PROGRESS_RES, 0);
 			Sleep(250);
 			if (pJob->hDialog) PostMessage(pJob->hDialog, WM_CLOSE, 0, 0);
@@ -191,6 +192,7 @@ BOOL CALLBACK FileParserProc(HWND hWnd,
 			} 
 			else
 			{
+				WaitForSingleObject(pJob->hThread, 10000);
 				EndDialog(hWnd, wParam);
 			}
 			pJob->hDialog = NULL;

@@ -3,6 +3,7 @@ idf_component_register(SRCS
 	"UDP.c"
   "Wifi.c"
   "Motor.cpp"
+  "Calibration.cpp"
   "Events.c"
   "Limits.c"
 	INCLUDE_DIRS ".")

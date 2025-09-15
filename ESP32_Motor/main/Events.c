@@ -16,7 +16,7 @@ int64_t g_Debug = 0x123456789ABCDEF0;
 
 static const char* TAG = "events";
 
-void Events_SetState( unsigned long flag )
+void IRAM_ATTR Events_SetState( unsigned long flag )
 {
   g_State |= flag; 
 }

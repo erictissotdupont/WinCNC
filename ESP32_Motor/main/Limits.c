@@ -12,6 +12,8 @@
 
 #define LHP                   50    // Limit clock half period in uS
 
+#define LIMIT_PULL_UP_TIMEOUT 20000
+
 static gptimer_handle_t g_limitsTimer = NULL;
 static int g_state = 0;
 uint32_t g_limitState = 0;
@@ -23,7 +25,8 @@ uint32_t g_BadLimitData = 0;
 
 extern unsigned char crc8_table[256];
 
-static void Limits_GPIO_ISR(void* arg);
+void static Limits_GPIO_ISR(void* arg);
+void static RemotePullUp_GPIO_ISR(void* arg);
 
 bool IRAM_ATTR Limits_TimerCallback(gptimer_handle_t timer, const gptimer_alarm_event_data_t *edata, void *user_data)
 {
@@ -39,7 +42,7 @@ bool IRAM_ATTR Limits_TimerCallback(gptimer_handle_t timer, const gptimer_alarm_
       gpio_set_level( LIMIT_OUT, LOW );
       break;
 
-    case 1: // Debounce interrupt g_state by checking signal stays low for half a period
+    case 1: // Debounce interrupt g_state by checking signal stays low for half a period    
       gpio_set_level( LIMIT_OUT, LOW );
       if( gpio_get_level( LIMIT_IN ) == HIGH )
       {
@@ -57,16 +60,15 @@ bool IRAM_ATTR Limits_TimerCallback(gptimer_handle_t timer, const gptimer_alarm_
     case 2: // Wait for half a period and check the limit sensor has released the interrupt g_state
       if( gpio_get_level( LIMIT_IN ) == LOW )
       {
-        // Interrupt g_state didn't clear, stop the timer and go back to idle
-        g_state = 0;
         g_ErrorB++;
+        g_state = 0;
       }
       else
       {
         mask = 1;
         data = 0;
         gpio_set_level( LIMIT_OUT, HIGH );
-        g_state = 3;
+        g_state = 3;        
         nextT = LHP;
       }
       break;
@@ -113,6 +115,7 @@ bool IRAM_ATTR Limits_TimerCallback(gptimer_handle_t timer, const gptimer_alarm_
           g_state = 7;
           g_CRCErrorCount++;
           g_BadLimitData = data;
+          Events_SetState( CNC_STATE_LIMIT_CRC_ERROR );
         }          
       }
       nextT = LHP;
@@ -132,6 +135,15 @@ bool IRAM_ATTR Limits_TimerCallback(gptimer_handle_t timer, const gptimer_alarm_
       gpio_set_level( LIMIT_OUT, LOW );
       g_state = 0;      
       break;
+     
+    case 8:
+      // Still low after 20ms, limit switch mist be activated
+      if( gpio_get_level( LIMIT_PULL_UP ) == LOW )
+      {
+        Events_SetState( CNC_STATE_LIMIT_ERROR );
+      }
+      g_state = 0;
+      break;
   }
 
   if( nextT )
@@ -145,6 +157,7 @@ bool IRAM_ATTR Limits_TimerCallback(gptimer_handle_t timer, const gptimer_alarm_
     ESP_ERROR_CHECK(gptimer_stop(g_limitsTimer));
     ESP_ERROR_CHECK(gptimer_set_raw_count(g_limitsTimer,0));
     gpio_isr_handler_add(LIMIT_IN, Limits_GPIO_ISR, (void*)NULL);
+    gpio_isr_handler_add(LIMIT_PULL_UP, RemotePullUp_GPIO_ISR, (void*)NULL);
   }
   
   // No need to yield
@@ -152,14 +165,15 @@ bool IRAM_ATTR Limits_TimerCallback(gptimer_handle_t timer, const gptimer_alarm_
 }
 
 static void IRAM_ATTR Limits_GPIO_ISR(void* arg)
-{
-  assert( g_state == 0 );
-  
+{  
   gptimer_alarm_config_t alarm_config = { 0 };
   
   if( gpio_get_level( LIMIT_IN ) == LOW )
   {    
     g_state = 1;
+    gpio_isr_handler_remove( LIMIT_IN );
+    gpio_isr_handler_remove( LIMIT_PULL_UP );
+    
     // Acknowledge the interrupt g_state by driving the output low
     gpio_set_level( LIMIT_OUT, HIGH );
     // Start the timer to generate the clock and read the data from 
@@ -167,12 +181,28 @@ static void IRAM_ATTR Limits_GPIO_ISR(void* arg)
     alarm_config.alarm_count = LHP;
     gptimer_set_alarm_action(g_limitsTimer, &alarm_config);
     gptimer_start(g_limitsTimer);
-    
-    gpio_isr_handler_remove( LIMIT_IN );
   }
   else
   {
     g_ErrorC++;
+  }
+}
+
+static void IRAM_ATTR RemotePullUp_GPIO_ISR(void* arg)
+{
+  gptimer_alarm_config_t alarm_config = { 0 };
+    
+  if( gpio_get_level( LIMIT_PULL_UP ) == LOW )
+  {    
+    g_state = 8;
+    gpio_isr_handler_remove( LIMIT_IN );
+    gpio_isr_handler_remove( LIMIT_PULL_UP );
+    
+    // Set the timer for 20m which is the pulse trigger for 
+    // motor error
+    alarm_config.alarm_count = LIMIT_PULL_UP_TIMEOUT;
+    gptimer_set_alarm_action(g_limitsTimer, &alarm_config);
+    gptimer_start(g_limitsTimer);
   }
 }
 
@@ -195,12 +225,13 @@ void Limits_Init( )
   // -----------  
   io_conf.intr_type = GPIO_INTR_NEGEDGE;
   io_conf.mode = GPIO_MODE_INPUT;
-  io_conf.pin_bit_mask = (1ULL<<LIMIT_IN);
+  io_conf.pin_bit_mask = (1ULL<<LIMIT_IN) | (1ULL<<LIMIT_PULL_UP);
   io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
   io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
   ESP_ERROR_CHECK(gpio_config(&io_conf));
   ESP_ERROR_CHECK(gpio_install_isr_service(0));
   ESP_ERROR_CHECK(gpio_isr_handler_add(LIMIT_IN, Limits_GPIO_ISR, (void*)NULL));
+  ESP_ERROR_CHECK(gpio_isr_handler_add(LIMIT_PULL_UP, RemotePullUp_GPIO_ISR, (void*)NULL));
   
   // TIMER
   // -----

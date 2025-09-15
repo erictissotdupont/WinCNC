@@ -6,9 +6,10 @@
 #define MAX_SPEED         150L
 #define NO_STEP_TIME      (-1ULL)
 
-#define REDUCED_RAPID_POSITIONING_SPEED   0x80000000l
-#define CALIBRATION_REVERSED              0x40000000l
-#define DIRECTION_REVERSED                0x20000000l
+#define REDUCED_RAPID_POSITIONING_SPEED   0x80000000L
+#define CALIBRATION_REVERSED              0x40000000L
+#define DIRECTION_REVERSED                0x20000000L
+#define CALIBRATION_OFFSET_INTERIOR       0x10000000L
 
 // Calculate the speed ramp for G0 accel / decel phases 
 #define STEP_FROM_RAMP( Min, Max, t ) ( Min - ((( Min - Max ) * t ) >> RAMP_SHIFT))
@@ -43,6 +44,7 @@ protected :
   gpio_num_t dirPin;          // GPIO for direction
   int reverseDir;             // Reverse the motor direction
   uint32_t endMask;           // Bitmask for limit detection
+  unsigned long motorFlags;   // Configutation flags for this axis
     
   long curDir;                // Current movement direction (+/- 1)
   unsigned long moveLength;   // Movement total length in steps
