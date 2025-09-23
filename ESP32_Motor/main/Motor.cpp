@@ -17,14 +17,14 @@ extern uint32_t g_limitState;
 // Instantiation and configuration of the stepper motor controlers.
 //-----------------------------------------------------------------
 //                   Step IO,  Direction IO,  EndMsk,  Configuration flags,               StepByInch           L/R axis offset
-DualMotor X ( MOTOR_X_L_STEP, MOTOR_X_L_DIR,  0x0004,
-              MOTOR_X_R_STEP, MOTOR_X_R_DIR,  0x0008,  CALIBRATION_REVERSED |
+DualMotor X ( MOTOR_X_L_STEP, MOTOR_X_L_DIR,  XL_LIM,
+              MOTOR_X_R_STEP, MOTOR_X_R_DIR,  XR_LIM,  CALIBRATION_REVERSED |
                                                        REDUCED_RAPID_POSITIONING_SPEED,   1.0f/X_AXIS_RES,     0.009f/X_AXIS_RES, 0.0f );
 
-Motor     Y ( MOTOR_Y_STEP,    MOTOR_Y_DIR,   0x0010,  CALIBRATION_REVERSED,              1.0f/Y_AXIS_RES );
+Motor     Y ( MOTOR_Y_STEP,    MOTOR_Y_DIR,    Y_LIM,  CALIBRATION_REVERSED,              1.0f/Y_AXIS_RES );
 
-DualMotor Z ( MOTOR_Z_L_STEP,  MOTOR_Z_L_DIR, 0x0001,
-              MOTOR_Z_R_STEP,  MOTOR_Z_R_DIR, 0x0002,  DIRECTION_REVERSED |
+DualMotor Z ( MOTOR_Z_L_STEP,  MOTOR_Z_L_DIR, ZL_LIM,
+              MOTOR_Z_R_STEP,  MOTOR_Z_R_DIR, ZR_LIM,  DIRECTION_REVERSED |
                                                        CALIBRATION_OFFSET_INTERIOR |
                                                        REDUCED_RAPID_POSITIONING_SPEED,   1.0f/Z_AXIS_RES,    0.22197f / Z_AXIS_RES, 36.0f );
 
@@ -65,7 +65,7 @@ Motor::Motor( gpio_num_t sp, gpio_num_t dp, uint32_t em, unsigned long flags, un
   {
     // Reduced speed for axis with weak motors or lots of intertia
     minSpeedStep = SPEED_TO_STEP( stepByInch, MIN_SPEED ) * 2;
-    maxSpeedStep = SPEED_TO_STEP( stepByInch, MAX_SPEED ) * 4;
+    maxSpeedStep = SPEED_TO_STEP( stepByInch, MAX_SPEED ) * 1.25;
   }
   
   gpio_config_t io_conf = {};

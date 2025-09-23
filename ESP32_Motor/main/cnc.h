@@ -40,7 +40,13 @@
 #define BLINK_GPIO           (gpio_num_t)18
 #define BOOT_GPIO            (gpio_num_t)0
 
-#define LIMIT_PULL_UP        (gpio_num_t)21
+#define LIMIT_XR             (gpio_num_t)35 // Warning : Connection board swap Green / Green white on the RJ45 socket
+#define LIMIT_XL             (gpio_num_t)36 // See above
+#define LIMIT_Y              (gpio_num_t)37
+#define LIMIT_ZL             (gpio_num_t)38
+#define LIMIT_ZR             (gpio_num_t)39
+#define LIMIT_SWITCH         (gpio_num_t)40
+
 
 // For code compatibility with Arduino
 #define LOW                  0
