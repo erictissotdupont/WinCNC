@@ -12,7 +12,7 @@ extern "C" {
 }
 #include "Motor.hpp"
 
-#define CAL_STEP_SPEED   1000
+#define CAL_STEP_SPEED   800
 #define CAL_PAUSE        50000
 #define CAL_STALL        100
 #define CAL_ERROR_TRLD   3
@@ -267,16 +267,16 @@ void DualMotor::CalibrateTask( uint64_t now )
             }
             else
             {
-              // cal_R : Ratio between the distance between the mootor axis and the sensor snd the totsl distance          
+              // cal_R : Ratio between the distance between the mootor axis and the sensor and the totsl distance          
            
               if( cal_delta < 0 )
               {
-                cal_dL = (-cal_delta) * (((1.0f / cal_R ) - 1.0f) / (2.0f - cal_R ));
+                cal_dL = (-cal_delta) / cal_R;
                 cal_dR = 0;
               }
               else
-              {
-                cal_dR = cal_delta * (((1.0f / cal_R ) - 1.0f) / (2.0f - cal_R ));
+              {                      
+                cal_dR = cal_delta / cal_R;
                 cal_dL = 0;
               }
 

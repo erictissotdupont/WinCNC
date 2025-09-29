@@ -3,8 +3,8 @@
 // -----------
 // Axis resolution in inches per step 
 #define Z_AXIS_RES           0.0003925f
-#define X_AXIS_RES           0.00049213f
-#define Y_AXIS_RES           0.00049213f
+#define X_AXIS_RES           0.000491634f // 0.000491023f //0.000492126f
+#define Y_AXIS_RES           0.000491634f // 0.000491023f //0.0004921f
 
 // Maximum positions per axis in steps
 #define X_AXIS_MIN           ((long)(  0.00f / X_AXIS_RES))
@@ -37,7 +37,7 @@
 #define MOTOR_ENABLE         (gpio_num_t)12
 #define LIMIT_IN             (gpio_num_t)13
 #define LIMIT_OUT            (gpio_num_t)14
-#define BLINK_GPIO           (gpio_num_t)18
+#define BLINK_GPIO           (gpio_num_t)48  // S2:18 - S3:48
 #define BOOT_GPIO            (gpio_num_t)0
 
 #define LIMIT_XR             (gpio_num_t)35 // Warning : Connection board swap Green / Green white on the RJ45 socket

@@ -93,7 +93,7 @@ private:
   long cal_offset;            // Position difference between the L and R calibration positions (in steps)
   long cal_delta;             // Difference of steps required between the L and R motor to reach each sensor
   long cal_dL, cal_dR;        // Number of steps to correct the slanting of the axis prior to calibration for L and R motors 
-  float cal_R;                // The ratio betweem the position of the sensors and the motors. Used to correct the slanting effect.
+  long cal_R;                // The ratio betweem the position of the sensors and the motors. Used to correct the slanting effect.
 
 
 public:

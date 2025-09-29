@@ -5,6 +5,7 @@ extern "C" {
   #include "driver/gpio.h"
   #include "driver/gptimer.h"
   #include "esp_timer.h"
+  #include "math.h"
 
   #include "UDP.h"  
   #include "Events.h"
@@ -90,7 +91,17 @@ DualMotor::DualMotor( gpio_num_t sp, gpio_num_t dp, uint32_t em, gpio_num_t sp2,
   dirPin2 = dp2;
   endMask2 = em2;
   cal_offset = cof;
-  cal_R = R;
+  
+  if( R != 0.0f && R != 2.0f )
+  {
+    cal_R = round((2.0f - R ) / ((1.0f / R ) - 1.0f));
+  }
+  else
+  {
+    // Avoid division by zero in the calibration algorithm
+    cal_R = 1;
+  }
+
   cal_cycle = 1;
   
   gpio_config_t io_conf = {};
