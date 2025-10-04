@@ -32,6 +32,7 @@ DualMotor Z ( MOTOR_Z_L_STEP,  MOTOR_Z_L_DIR, ZL_LIM,
 static Motor *g_pNextMotorToStep = NULL;
 static gptimer_handle_t g_motorTimer = NULL;
 static uint64_t g_MoveStart = 0;  // Time when the current move was started (uS)
+static enum { UNDEFINED, MOVEMENT, CALIBRATION } g_TimerMode = UNDEFINED;
 static const char* TAG = "motor";
 
 Motor::Motor( gpio_num_t sp, gpio_num_t dp, uint32_t em, unsigned long flags, unsigned long sbi )
@@ -161,7 +162,7 @@ bool IRAM_ATTR DualMotor::SetDirection( int d )
   return false;  
 }
 
-uint64_t IRAM_ATTR Motor::InitMove( long s, unsigned long t, uint64_t now )
+void IRAM_ATTR Motor::InitMove( long s, unsigned long t, uint64_t now )
 {
   int d = 1;
   
@@ -191,10 +192,13 @@ uint64_t IRAM_ATTR Motor::InitMove( long s, unsigned long t, uint64_t now )
     // Linear motion (G1)
     if( moveDuration )
     {
-      // Calculate the step duration in uS with 32:32bit precision
-      stepDuration = t / moveLength;
-      stepModulo = t % moveLength;
-      stepAcc = 0;
+      // Calculate the step duration
+      stepDuration = t / moveLength - STEP_PULSE_US;
+      if( stepDuration < (long)( STEP_PULSE_US * 2 ))
+      {
+        ESP_LOGE( TAG, "Step duration too small: %ld", stepDuration );
+        assert(false);
+      }
     }
     // Rapid positionning (G0)
     else
@@ -203,17 +207,16 @@ uint64_t IRAM_ATTR Motor::InitMove( long s, unsigned long t, uint64_t now )
       decelDist = moveLength;
       decelStart = 0;
     }
-    moveStep = 1;
+    moveStep = 0;
   }
   else 
   {
     moveStep = 0;
     nextStepTime = NO_STEP_TIME;
-    return NO_STEP_TIME;
+    return;
   }
   
   nextStepTime = stepDuration + now;
-  return stepDuration;
 }
 
 inline uint64_t IRAM_ATTR Motor::GetNextStepTime( )
@@ -231,27 +234,21 @@ void IRAM_ATTR Motor::MovementTask( uint64_t now )
   else
   {
     Pulse( 0 );
+    moveStep++;
+
     // Move is complete.
     if( moveStep >= moveLength )
     {
-      moveStep = 0;
       nextStepTime = NO_STEP_TIME;
     }
     // Movement with duration means linear motion (G1).
     else if( moveDuration != 0 )
     {      
-      nextStepTime += stepDuration - STEP_PULSE_US;
-      stepAcc += stepModulo;
-      if( stepAcc >= moveLength )
-      {
-        stepAcc -= moveLength;
-        nextStepTime++;
-      }
-      moveStep++;
+      nextStepTime += stepDuration;
     }
     // Zero duration means rapid positioning motion (G0).
     else
-    {      
+    {
       uint64_t t = now - g_MoveStart;
       // Deceleration phase. Checking for deceleration first handles
       // the case where the G0 movement is so short that there is not
@@ -292,8 +289,7 @@ void IRAM_ATTR Motor::MovementTask( uint64_t now )
       }
       // In the constant speed phase, just update the time for the
       // next half step.
-      nextStepTime += stepDuration - STEP_PULSE_US;
-      moveStep++;
+      nextStepTime += stepDuration;
     }
   }
 }
@@ -428,7 +424,7 @@ extern "C" {
       
     // Is this a movement command
     if( pCmd->dx != 0 || pCmd->dy != 0 || pCmd->dz != 0 )
-    {      
+    {
       long newPos[5];
       newPos[0] = X.GetPos() + pCmd->dx;
       newPos[1] = Y.GetPos() + pCmd->dy;
@@ -451,11 +447,16 @@ extern "C" {
       }
       else
       {
-        // Movements
-        gptimer_event_callbacks_t cbs = {
-          .on_alarm = Motor_MovementTimerCallback,
-        };
-        ESP_ERROR_CHECK(gptimer_register_event_callbacks(g_motorTimer, &cbs, NULL));
+        if( g_TimerMode != MOVEMENT )
+        {
+          // Movements
+          g_TimerMode = MOVEMENT;
+
+          gptimer_event_callbacks_t cbs = {
+            .on_alarm = Motor_MovementTimerCallback,
+          };
+          ESP_ERROR_CHECK(gptimer_register_event_callbacks(g_motorTimer, &cbs, NULL));
+        }
         
         // This calculates the interval between steps for each axis and returns the time
         // to the first step needs to occur ( NO_STEP_TIME if no move necessary).
@@ -489,10 +490,15 @@ extern "C" {
           .flags = 0,
         };
 
-        gptimer_event_callbacks_t cbs = {
-          .on_alarm = Motor_MovementTimerCallback,
-        };
-        ESP_ERROR_CHECK(gptimer_register_event_callbacks(g_motorTimer, &cbs, NULL));
+        if( g_TimerMode != MOVEMENT )
+        {
+          g_TimerMode = MOVEMENT;
+
+          gptimer_event_callbacks_t cbs = {
+            .on_alarm = Motor_MovementTimerCallback,
+          };
+          ESP_ERROR_CHECK(gptimer_register_event_callbacks(g_motorTimer, &cbs, NULL));
+        }
         gptimer_set_alarm_action(g_motorTimer, &alarm_config1);
         
         // If this was started from idle,
@@ -503,11 +509,16 @@ extern "C" {
       }
       else if( pCmd->flags & CMD_FLAG_CALIBRATION )
       {
-        // Calibration
-        gptimer_event_callbacks_t cbs = {
-          .on_alarm = Motor_CalibrationTimerCallback,
-        };
-        ESP_ERROR_CHECK(gptimer_register_event_callbacks(g_motorTimer, &cbs, NULL));
+        if( g_TimerMode != CALIBRATION )
+        {
+          // Calibration
+          g_TimerMode = CALIBRATION;
+
+          gptimer_event_callbacks_t cbs = {
+            .on_alarm = Motor_CalibrationTimerCallback,
+          };
+          ESP_ERROR_CHECK(gptimer_register_event_callbacks(g_motorTimer, &cbs, NULL));
+        }
         
         Events_SetState( CNC_STATE_CALIBRATING );
               
@@ -688,6 +699,7 @@ extern "C" {
     gptimer_event_callbacks_t cbs = {
         .on_alarm = Motor_MovementTimerCallback,
     };
+    g_TimerMode = MOVEMENT;
     ESP_ERROR_CHECK(gptimer_register_event_callbacks(g_motorTimer, &cbs, NULL));
     ESP_ERROR_CHECK(gptimer_enable(g_motorTimer));
     

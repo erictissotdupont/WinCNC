@@ -5,6 +5,7 @@
 #include "sdkconfig.h"
 
 #include "cnc.h"
+#include "Events.h"
 
 #define EVENT_NEW_STATE		   BIT0
 #define EVENT_CALLBACK_SET	 BIT1
@@ -16,26 +17,27 @@ int64_t g_Debug = 0x123456789ABCDEF0;
 
 static const char* TAG = "events";
 
-void IRAM_ATTR Events_SetState( unsigned long flag )
+inline void Events_SetState( unsigned long flag )
 {
   g_State |= flag; 
 }
-void Events_ClearState( unsigned long flag )
+
+inline void Events_ClearState( unsigned long flag )
 {
   g_State &= ~flag;
 }
 
-void Events_SetDebug( int64_t value )
+inline void Events_SetDebug( int64_t value )
 {
   g_Debug = value;
 }
 
-int64_t Events_GetDebug( )
+inline int64_t Events_GetDebug( )
 {
   return g_Debug;
 }
 
-unsigned long Events_GetState( )
+inline unsigned long Events_GetState( )
 {
   return g_State;
 }
@@ -71,7 +73,7 @@ int Events_Init( )
   return 0;
 }
 
-void IRAM_ATTR Events_SignalMotorIdleFromISR( )
+inline void Events_SignalMotorIdleFromISR( )
 {
   BaseType_t xHigherPriorityTaskWoken = pdFALSE;
   if( xEventGroupSetBitsFromISR( g_eventGroupHandle, MOTOR_IDLE_BIT, &xHigherPriorityTaskWoken ) == pdPASS )
@@ -85,18 +87,18 @@ void IRAM_ATTR Events_SignalMotorIdleFromISR( )
   Events_SetState( CNC_STATE_IDLE );
 }
 
-void Events_SignalMotorNotIdle( )
+inline void Events_SignalMotorNotIdle( )
 {
   xEventGroupClearBits( g_eventGroupHandle, MOTOR_IDLE_BIT );
   Events_ClearState( CNC_STATE_IDLE );
 }
 
-bool Events_IsMotorIdle( )
+inline bool Events_IsMotorIdle( )
 {
   return(( xEventGroupGetBits( g_eventGroupHandle ) & MOTOR_IDLE_BIT ) == MOTOR_IDLE_BIT ); 
 }
 
-bool Events_WaitForMotorIdle( unsigned long timeoutMs )
+inline bool Events_WaitForMotorIdle( unsigned long timeoutMs )
 {
   return(( xEventGroupWaitBits( g_eventGroupHandle, MOTOR_IDLE_BIT, pdFALSE, pdFALSE, timeoutMs / portTICK_PERIOD_MS ) & MOTOR_IDLE_BIT ) == MOTOR_IDLE_BIT );
 }

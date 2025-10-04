@@ -193,8 +193,10 @@ tStatus linearRel( double x, double y, double z )
   info.z = z;
   GetTheoricalPosition( &info.Origin );
 
-  // Make sure we don't send single move command taking longer than 1sec
-  steps = (long)( duration / 1000 );
+  // Make sure we don't send single move command taking longer than 1.42sec
+  // The off length is just to avoid getting in sync with the 1s periodic
+  // status report sent by the CNC.
+  steps = (long)( duration / 1420 );
   if (steps == 0)
   {
 	  steps = 1;

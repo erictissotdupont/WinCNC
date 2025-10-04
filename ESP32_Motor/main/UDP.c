@@ -369,7 +369,7 @@ const unsigned char crc8_table[256] = {
 	0xF4, 0x03, 0x4D, 0xBA, 0xD1, 0x26, 0x68, 0x9F
 };
 
-unsigned char crc8( unsigned char* pt, unsigned int nbytes, unsigned char crc )
+inline unsigned char crc8( unsigned char* pt, unsigned int nbytes, unsigned char crc )
 {
 	while( nbytes-- > 0 )
 	{

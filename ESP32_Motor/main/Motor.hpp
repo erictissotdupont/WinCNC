@@ -12,7 +12,7 @@
 #define CALIBRATION_OFFSET_INTERIOR       0x10000000L
 
 // Calculate the speed ramp for G0 accel / decel phases 
-#define STEP_FROM_RAMP( Min, Max, t ) ( Min - ((( Min - Max ) * t ) >> RAMP_SHIFT))
+#define STEP_FROM_RAMP( Min, Max, t ) (( Min - ((( Min - Max ) * t ) >> RAMP_SHIFT)) - STEP_PULSE_US )
 // Speed is in inch by minute, hence the 60M micro seconds
 #define SPEED_TO_STEP( sbi, s ) ( 60000000L / ((sbi) * (s)))
 
@@ -30,7 +30,7 @@ public :
   // Those functions are not to overloaded
   void Reset( );
   long GetPos( );
-  uint64_t InitMove( long s, unsigned long t, uint64_t now );
+  void InitMove( long s, unsigned long t, uint64_t now );
   uint64_t GetNextStepTime( );
   void MovementTask( uint64_t now );
   void CalibrateStart( uint64_t now, long max_step, unsigned long state_flag );
@@ -50,12 +50,9 @@ protected :
   unsigned long moveLength;   // Movement total length in steps
   unsigned long moveStep;     // Steps performed in movement
   unsigned long moveDuration; // Expected total duration of the movement
-  long stepDuration;          // Duration of a half step
-  long stepModulo;            // The remainder of the division
+  long stepDuration;          // Duration of a step in microseconds
   uint64_t nextStepTime;      // Time when the next half step should be made
   bool dirLevel;
-//uint64_t currentStepTime;   // Time when the current step is happening
-  long stepAcc;               // The fractional error accumulator
 
   // Rapid positionning (G0)
   long decelDist;             // Step in movement when deceleration starts
