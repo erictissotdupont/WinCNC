@@ -5,40 +5,13 @@
 #include "sdkconfig.h"
 
 #include "driver/gpio.h"
-#include "driver/gptimer.h"
 
 #include "cnc.h"
 #include "events.h"
 
-#define LHP                            50    // Limit clock half period in uS
-
-#define LIMIT_PULL_UP_TIMEOUT       20000
-#define LIMIT_CONSECUTIVE_READ_LOW      4
-
-static gptimer_handle_t g_limitsTimer = NULL;
-
 void static Limits_GPIO_ISR(void* arg);
 uint32_t g_limitState;
 
-bool IRAM_ATTR Limits_TimerCallback(gptimer_handle_t timer, const gptimer_alarm_event_data_t *edata, void *user_data)
-{
-  uint64_t nextT = 0;
-
-  if( nextT )
-  {
-    gptimer_alarm_config_t alarm_config = { 0 };
-    alarm_config.alarm_count = edata->alarm_value + nextT;
-    gptimer_set_alarm_action(g_limitsTimer, &alarm_config);
-  }
-  else
-  {
-    ESP_ERROR_CHECK(gptimer_stop(g_limitsTimer));
-    ESP_ERROR_CHECK(gptimer_set_raw_count(g_limitsTimer,0));
-  }
-  
-  // No need to yield
-  return false;
-}
 
 #define CNC_STATE_POS_SENSOR_XL           0x00010000L // The left side position sensor for the X axis is triggered
 #define CNC_STATE_POS_SENSOR_XR           0x00008000L // Same for the right side X axis.

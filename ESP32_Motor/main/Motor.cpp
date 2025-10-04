@@ -363,6 +363,11 @@ extern "C" {
       if( xQueueReceiveFromISR( g_cmd_queue, &cmd, &xTaskWokenByReceive ))
       {
         Motor_PrepareNextCommand( &cmd, now );
+		
+        // The above function will call this function again which will set
+        // the timer. Not returning here causes the timer to be initialized
+        // twice and cause jerkiness in back to back movements.
+        return;
       }
       else
       {                    
@@ -530,6 +535,11 @@ extern "C" {
         }
         else
         {
+          // No more movements to perform, stop the timer, reset
+          ESP_ERROR_CHECK(gptimer_stop(g_motorTimer));
+          ESP_ERROR_CHECK(gptimer_set_raw_count(g_motorTimer,0));
+          g_pNextMotorToStep = NULL;
+
           Events_SignalMotorIdleFromISR( );
         }
       }
