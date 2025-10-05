@@ -200,10 +200,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			{
 				MessageBoxA(hWnd, "Calibration cannot be performed when the machine is not idle or is in error state.", "CNC", MB_ICONERROR);
 			}
-			else if ((CNC_GetState() & CNC_STATE_LIMITS_INACTIVE) != 0)
-			{
-				MessageBoxA(hWnd, "Calibration cannot be performed when when the limit sensors are not available.", "CNC", MB_ICONERROR);
-			}
 			else
 			{
 				if (MessageBoxA(hWnd, "Ensure that the machine can freely move up and left before starting calibration. When ready, click OK to proceed.", "CNC", MB_OKCANCEL | MB_ICONEXCLAMATION) == IDOK)

@@ -69,6 +69,7 @@
 #define WIFI_FAIL_BIT       BIT2
 #define GOT_WIFI_SSID_PW	  BIT3
 #define MSG_SENT_BIT        BIT4
+#define STATE_CHANGED_BIT   BIT5
 
 typedef enum {
   LEDColorNotSet, 
@@ -115,6 +116,19 @@ bool WiFi_SetRGBLED( LEDColor_t newColor )
     }
   }
 	return bRet;
+}
+
+void WiFi_SignalStateChangeFromISR( )
+{
+  if( s_wifi_event_group == NULL ) return;
+  BaseType_t taskWoken = pdFALSE;
+  xEventGroupSetBitsFromISR( s_wifi_event_group, STATE_CHANGED_BIT, &taskWoken );
+}
+
+void WiFi_SignalStateChange( )
+{
+  if( s_wifi_event_group == NULL ) return;
+  xEventGroupSetBits( s_wifi_event_group, STATE_CHANGED_BIT );
 }
 
 bool WiFi_GetCredentials( wifi_config_t *pWifi_Config )
@@ -498,10 +512,10 @@ void WiFi_IdleTask( )
 
     bits = xEventGroupWaitBits(
       s_wifi_event_group,
-      MSG_SENT_BIT,
+      MSG_SENT_BIT | STATE_CHANGED_BIT,
       pdTRUE,
       pdFALSE,
-      (( Events_IsMotorIdle( ) ? 3 : 1 ) * CNC_IDLE_POS_TIMEOUT_MS ) / portTICK_PERIOD_MS );
+      ( Events_IsMotorIdle( ) ? CNC_IDLE_POS_TIMEOUT_MS : CNC_ACTIVE_POS_TIMEOUT_MS ) / portTICK_PERIOD_MS );
   
     if((( bits & MSG_SENT_BIT ) == 0 ) && ( g_host_addr.sin_port != 0 ) && ( g_host_sock >= 0 ))
     {

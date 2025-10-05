@@ -17,8 +17,6 @@ extern "C" {
 #define CAL_STALL        100
 #define CAL_ERROR_TRLD   3
 
-extern uint32_t g_limitState;
-
 void Motor::CalibrateStart( uint64_t now, long max_step, unsigned long state_flag )
 {
   cal_state = 1;

@@ -223,16 +223,15 @@ void CNC_GetStateString(char* szBuffer, size_t cbBuffer, unsigned long mask )
 	// Error
 	if (state & CNC_STATE_MOTOR_CRC_ERROR)     strcat_s(szBuffer, cbBuffer, "Motor CRC error" "\r\n");
 	if (state & CNC_STATE_NETWORK_CRC_ERROR)   strcat_s(szBuffer, cbBuffer, "Network CRC error" "\r\n");
-	if (state & CNC_STATE_LIMIT_ERROR)         strcat_s(szBuffer, cbBuffer, "Physical limit error" "\r\n");
+	if (state & CNC_STATE_HARD_ERROR)          strcat_s(szBuffer, cbBuffer, "Hardware error" "\r\n");
 	if (state & CNC_STATE_LOGICAL_LIMIT_ERROR) strcat_s(szBuffer, cbBuffer, "Logical limit error" "\r\n");
 	if (state & CNC_STATE_CALIBRATION_FAILED)  strcat_s(szBuffer, cbBuffer, "Calibration failed" "\r\n");
 	if (state & CNC_STATE_COMMUNICATION_ERROR) strcat_s(szBuffer, cbBuffer, "Communication error" "\r\n");
 	if (state & CNC_STATE_IDLE_TIMEOUT_ERROR)  strcat_s(szBuffer, cbBuffer, "Idle timeout error" "\r\n");
 	
 	// Warning
-	if (state & CNC_STATE_LIMIT_CRC_ERROR)     strcat_s(szBuffer, cbBuffer, "Limit sensor CRC error." "\r\n");
+	if (state & CNC_STATE_HARD_LIMIT)          strcat_s(szBuffer, cbBuffer, "Limit Sensor" "\r\n");
 	if (state & CNC_STATE_CAL_ORIGIN_ERROR)    strcat_s(szBuffer, cbBuffer, "Calibration position error" "\r\n");
-	if (state & CNC_STATE_LIMITS_INACTIVE)     strcat_s(szBuffer, cbBuffer, "Limit sensors not available" "\r\n");
 	if (state & CNC_STATE_COMMAND_QUEUE_FULL)  strcat_s(szBuffer, cbBuffer, "Command queue is full" "\r\n");
 	if (state & CNC_STATE_POS_SENSOR_XL)       strcat_s(szBuffer, cbBuffer, "Position sensor XL" "\r\n");
 	if (state & CNC_STATE_POS_SENSOR_XR)       strcat_s(szBuffer, cbBuffer, "Position sensor XR" "\r\n");

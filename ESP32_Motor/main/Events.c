@@ -6,6 +6,7 @@
 
 #include "cnc.h"
 #include "Events.h"
+#include "WiFi.h"
 
 #define EVENT_NEW_STATE		   BIT0
 #define EVENT_CALLBACK_SET	 BIT1
@@ -19,12 +20,36 @@ static const char* TAG = "events";
 
 inline void Events_SetState( unsigned long flag )
 {
+  unsigned long prevState = g_State;
   g_State |= flag; 
+  if( prevState != g_State )
+  {
+    if( xPortCanYield( ) == pdTRUE)
+    {
+      WiFi_SignalStateChangeFromISR( );
+    }
+    else
+    {
+      WiFi_SignalStateChange( );
+    }
+  }
 }
 
 inline void Events_ClearState( unsigned long flag )
 {
+  unsigned long prevState = g_State;
   g_State &= ~flag;
+  if( prevState != g_State )
+  {
+    if( xPortCanYield( ) == pdTRUE)
+    {
+      WiFi_SignalStateChangeFromISR( );
+    }
+    else
+    {
+      WiFi_SignalStateChange( );
+    }
+  }
 }
 
 inline void Events_SetDebug( int64_t value )
@@ -65,11 +90,8 @@ int Events_Init( )
   // By Default, motors are idle and limit sensors are not active
   xEventGroupSetBits(g_eventGroupHandle, MOTOR_IDLE_BIT);
   
-  Events_SetState( CNC_STATE_CONNECTED | CNC_STATE_IDLE | CNC_STATE_LIMITS_INACTIVE );
+  Events_SetState( CNC_STATE_CONNECTED | CNC_STATE_IDLE );
   
-  // Events_ClearState( CNC_STATE_LIMITS_INACTIVE );
-  // Events_SetState( CNC_STATE_Z_CALIBRATED | CNC_STATE_X_CALIBRATED | CNC_STATE_Y_CALIBRATED );
-
   return 0;
 }
 

@@ -2,12 +2,14 @@
  * Network.c
  *   Listener and talker socket
 */
+#include "driver/gpio.h"
 #include "Cnc.h"
 
 #include "UDP.h"
 #include "Events.h"
 #include "Motor.h"
 #include "Wifi.h"
+#include "Limits.h"
 
 #define CMD_QUEUE_SIZE                ( 256 )
 #define NACK_INTERVAL_MS              ( 100L )
@@ -88,12 +90,6 @@ bool UDP_MovementCommand( unsigned long seq, char* pt, bool bIgnoreCRC )
 bool UDP_CalibrateCommand( )
 {
   cmd_t cmd = { 0 };
-  
-  if( Events_GetState( ) & CNC_STATE_LIMITS_INACTIVE )
-  {
-    ESP_LOGW( TAG, "Cannot calibrate without limit sensor" );
-    return false;
-  }
   
   cmd.flags = CMD_FLAG_CALIBRATION;
   if( xQueueSend( g_cmd_queue, 

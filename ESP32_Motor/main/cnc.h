@@ -1,3 +1,8 @@
+#include "..\..\CNC_Protocol.h"
+#include "freertos/FreeRTOS.h"
+// For ESP_LOGx and ESP_ERROR_CHECK
+#include "esp_log.h"
+#include "string.h"
 
 //   A X I S   
 // -----------
@@ -35,17 +40,25 @@
 
 #define TOOL_ON_RELAY        (gpio_num_t)11
 #define MOTOR_ENABLE         (gpio_num_t)12
-#define LIMIT_IN             (gpio_num_t)13
-#define LIMIT_OUT            (gpio_num_t)14
-#define BLINK_GPIO           (gpio_num_t)48  // S2:18 - S3:48
+
+#ifdef CONFIG_IDF_TARGET_ESP32S2
+  #define BLINK_GPIO         (gpio_num_t)18
+#elif defined(CONFIG_IDF_TARGET_ESP32S3)
+  #define BLINK_GPIO         (gpio_num_t)48
+#else
+  #error "This code is only for ESP32-S2 or ESP32-S3"
+#endif
+
 #define BOOT_GPIO            (gpio_num_t)0
 
-#define LIMIT_XR             (gpio_num_t)35 // Warning : Connection board swap Green / Green white on the RJ45 socket
-#define LIMIT_XL             (gpio_num_t)36 // See above
-#define LIMIT_Y              (gpio_num_t)37
-#define LIMIT_ZL             (gpio_num_t)38
-#define LIMIT_ZR             (gpio_num_t)39
-#define LIMIT_SWITCH         (gpio_num_t)40
+#define SOFT_LIMIT_XR             (gpio_num_t)35 // Warning : Connection board hardware bug. Green / Green 
+                                            // white on the RJ45 socket are swapped. XR and XL are swapped.
+#define SOFT_LIMIT_XL             (gpio_num_t)36 // See above
+#define SOFT_LIMIT_Y              (gpio_num_t)37 // Y limit
+#define SOFT_LIMIT_ZL             (gpio_num_t)38 // Z left limit
+#define SOFT_LIMIT_ZR             (gpio_num_t)39 // Z right limit
+#define HARD_LIMIT_SWITCH         (gpio_num_t)40 // The direct input from the limit switch (not used for now)
+#define MOTOR_DISABLED            (gpio_num_t)41 // The motor drivers are disabled when this input is LOW
 
 
 // For code compatibility with Arduino
@@ -56,12 +69,6 @@
 
 // During WiFi setup
 #define LED_BLINK_RATE_MS    250
-
-#include "..\..\CNC_Protocol.h"
-#include "freertos/FreeRTOS.h"
-// For ESP_LOGx and ESP_ERROR_CHECK
-#include "esp_log.h"
-#include "string.h"
 
 typedef struct _cmd_t
 {

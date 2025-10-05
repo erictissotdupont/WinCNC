@@ -10,10 +10,9 @@ extern "C" {
   #include "UDP.h"  
   #include "Events.h"
   #include "Motor.h"
+  #include "Limits.h"
 }
 #include "Motor.hpp"
-
-extern uint32_t g_limitState;
 
 // Instantiation and configuration of the stepper motor controlers.
 //-----------------------------------------------------------------
@@ -29,6 +28,7 @@ DualMotor Z ( MOTOR_Z_L_STEP,  MOTOR_Z_L_DIR, ZL_LIM,
                                                        CALIBRATION_OFFSET_INTERIOR |
                                                        REDUCED_RAPID_POSITIONING_SPEED,   Z_AXIS_RES,    0.22197f * Z_AXIS_RES, 36.0f );
 
+static bool g_bMotorEnabled = false;
 static Motor *g_pNextMotorToStep = NULL;
 static gptimer_handle_t g_motorTimer = NULL;
 static uint64_t g_MoveStart = 0;  // Time when the current move was started (uS)
@@ -128,14 +128,14 @@ void Motor::Reset( )
 
 int Motor::GetLimit( )
 {
-  return ( g_limitState & endMask ) ? 1 : 0;
+  return ( GetLimitState( ) & endMask ) ? 1 : 0;
 }
 
 int DualMotor::GetLimit( )
 {
   int ret = 0;
-  if( g_limitState & endMask ) ret |= 1;
-  if( g_limitState & endMask2 ) ret |= 2;
+  if( GetLimitState( ) & endMask ) ret |= 1;
+  if( GetLimitState( ) & endMask2 ) ret |= 2;
   return ret;
 }
 
@@ -557,6 +557,25 @@ extern "C" {
     }
   }
 
+  void Motor_Enable( bool on )
+  {
+    if( on && g_bMotorEnabled == false )
+    {
+      ESP_LOGW( TAG, "Re-enabling the montor controllers." );
+      g_bMotorEnabled = true;
+      gpio_set_level( MOTOR_ENABLE, HIGH );
+
+      // Sleep for 100ms to allow the motors to energize
+      // before any movement is attempted.
+      vTaskDelay( pdMS_TO_TICKS( 100 ));
+    }
+    else if( !on && g_bMotorEnabled == true )
+    {
+      g_bMotorEnabled = false;
+      gpio_set_level( MOTOR_ENABLE, LOW );
+    }
+  }
+
   void Motor_MoveIfIdle( )
   {
     cmd_t cmd;
@@ -564,6 +583,13 @@ extern "C" {
     {
       if( xQueueReceive( g_cmd_queue, &cmd, 0 ) == pdTRUE )
       {
+        //ESP_LOGW( TAG, "Limit 0x%lx, State 0x%lx", GetLimitState( ), Events_GetState( ));
+
+        if(( Events_GetState( ) & ( CNC_STATE_ERROR_MASK | CNC_STATE_HARD_LIMIT )) == 0 ) 
+        {
+          Motor_Enable( true );
+        }
+
         Events_SignalMotorNotIdle( );
         Motor_PrepareNextCommand( &cmd, 0 );
       }
@@ -680,8 +706,14 @@ extern "C" {
     io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
     ESP_ERROR_CHECK(gpio_config(&io_conf));
     
+    // Tool off by default
     ESP_ERROR_CHECK(gpio_set_level( TOOL_ON_RELAY, LOW ));
-    ESP_ERROR_CHECK(gpio_set_level( MOTOR_ENABLE, HIGH ));
+
+    // Only enable the motors pulse if there is no error condition
+    if(( Events_GetState( ) & CNC_STATE_ERROR_MASK ) == 0 )
+    {
+      Motor_Enable( true );
+    }
 
     X.Reset( );
     Y.Reset( );
