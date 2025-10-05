@@ -561,7 +561,7 @@ extern "C" {
   {
     if( on && g_bMotorEnabled == false )
     {
-      ESP_LOGW( TAG, "Re-enabling the montor controllers." );
+      ESP_LOGW( TAG, "Enabling the montor controllers." );
       g_bMotorEnabled = true;
       gpio_set_level( MOTOR_ENABLE, HIGH );
 
