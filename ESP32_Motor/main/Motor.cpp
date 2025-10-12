@@ -19,14 +19,14 @@ extern "C" {
 //                   Step IO,  Direction IO,  EndMsk,  Configuration flags,               StepByInch           L/R axis offset
 DualMotor X ( MOTOR_X_L_STEP, MOTOR_X_L_DIR,  XL_LIM,
               MOTOR_X_R_STEP, MOTOR_X_R_DIR,  XR_LIM,  CALIBRATION_REVERSED |
-                                                       REDUCED_RAPID_POSITIONING_SPEED,   X_AXIS_RES,     0.009f * X_AXIS_RES, 0.0f );
+                                                       REDUCED_RAPID_POSITIONING_SPEED,   X_AXIS_RES,     0.0091f * X_AXIS_RES, 0.0f );
 
 Motor     Y ( MOTOR_Y_STEP,    MOTOR_Y_DIR,    Y_LIM,  CALIBRATION_REVERSED,              Y_AXIS_RES );
 
 DualMotor Z ( MOTOR_Z_L_STEP,  MOTOR_Z_L_DIR, ZL_LIM,
               MOTOR_Z_R_STEP,  MOTOR_Z_R_DIR, ZR_LIM,  DIRECTION_REVERSED |
                                                        CALIBRATION_OFFSET_INTERIOR |
-                                                       REDUCED_RAPID_POSITIONING_SPEED,   Z_AXIS_RES,    0.22197f * Z_AXIS_RES, 36.0f );
+                                                       REDUCED_RAPID_POSITIONING_SPEED,   Z_AXIS_RES,    0.2231f * Z_AXIS_RES, 36.0f );
 
 static bool g_bMotorEnabled = false;
 static Motor *g_pNextMotorToStep = NULL;
