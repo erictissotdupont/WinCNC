@@ -891,6 +891,7 @@ void BasicShapeOneCommand(HWND hWnd, bool bDebug )
 	}
 }
 
+#ifdef CAPTURE_CTRL_A
 WNDPROC g_oldBasicDlgdProc = NULL;
 BOOL CALLBACK BasicInterceptWndProc(HWND hWnd,
 	UINT message,
@@ -907,14 +908,14 @@ BOOL CALLBACK BasicInterceptWndProc(HWND hWnd,
 	}
 	return g_oldBasicDlgdProc(hWnd, message, wParam, lParam);
 }
+#endif
+
 
 BOOL CALLBACK BasicShapesProc(HWND hWnd,
 	UINT message,
 	WPARAM wParam,
 	LPARAM lParam)
 {
-	HWND hDlg;
-
 	switch (message)
 	{
 	case WM_INITDIALOG:
@@ -922,9 +923,13 @@ BOOL CALLBACK BasicShapesProc(HWND hWnd,
 		BasicShapeGetSet(FALSE, hWnd);
 
 		// This is to capture the CTRL+A on the GCode edit box
-		hDlg = GetDlgItem(hWnd, IDC_GCODE);
-		g_oldBasicDlgdProc = (WNDPROC)GetWindowLong(hDlg, GWL_WNDPROC);
-		SetWindowLong(hDlg, GWL_WNDPROC, (LONG)BasicInterceptWndProc);
+#ifdef CAPTURE_CTRL_A
+		{
+			HWND hDlg = GetDlgItem(hWnd, IDC_GCODE);
+			g_oldBasicDlgdProc = (WNDPROC)GetWindowLongPtrA(hDlg, GWLP_WNDPROC);
+			SetWindowLongPtrA(hDlg, GWLP_WNDPROC, (LONG)BasicInterceptWndProc);
+		}
+#endif
 		return TRUE;
 		break;
 

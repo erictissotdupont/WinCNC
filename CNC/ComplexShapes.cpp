@@ -266,6 +266,7 @@ void ComplexShapeOneCommand(HWND hWnd)
 	}
 }
 
+#ifdef CAPTURE_CTRL_A
 WNDPROC g_oldComplexDlgdProc = NULL;
 BOOL CALLBACK ComplexInterceptWndProc(HWND hWnd,
 	UINT message,
@@ -282,14 +283,13 @@ BOOL CALLBACK ComplexInterceptWndProc(HWND hWnd,
 	}
 	return g_oldComplexDlgdProc(hWnd, message, wParam, lParam);
 }
+#endif
 
 BOOL CALLBACK ComplexShapesProc(HWND hWnd,
 	UINT message,
 	WPARAM wParam,
 	LPARAM lParam)
 {
-	HWND hDlg;
-
 	switch (message)
 	{
 	case WM_INITDIALOG:
@@ -297,9 +297,13 @@ BOOL CALLBACK ComplexShapesProc(HWND hWnd,
 		ComplexShapeGetSet(FALSE, hWnd);
 
 		// This is to capture the CTRL+A on the GCode edit box
-		hDlg = GetDlgItem(hWnd, IDC_GCODE);
-		g_oldComplexDlgdProc = (WNDPROC)GetWindowLong(hDlg, GWL_WNDPROC);
-		SetWindowLong(hDlg, GWL_WNDPROC, (LONG)ComplexInterceptWndProc);
+#ifdef CAPTURE_CTRL_A
+		{
+			HWND hDlg = GetDlgItem(hWnd, IDC_GCODE);
+			g_oldComplexDlgdProc = (WNDPROC)GetWindowLong(hDlg, GWL_WNDPROC);
+			SetWindowLong(hDlg, GWL_WNDPROC, (LONG)ComplexInterceptWndProc);
+		}
+#endif
 		return TRUE;
 		break;
 

@@ -27,7 +27,7 @@ DWORD ParserThread(PVOID pParam)
 	tParserJob *pJob = (tParserJob*)pParam;
 	char* pt = pJob->buffer;
 	char* eol;
-	int l = 0;
+	size_t l = 0;
 	int cmdHistIdx = 0;
 	int cmdCount = 0;
 	char* cmdHistory[HISTORY_DEPTH];
@@ -42,7 +42,7 @@ DWORD ParserThread(PVOID pParam)
 
 	while (pt && !pJob->bStop)
 	{
-		int progress = (PROGRESS_RES * (pt - pJob->buffer)) / pJob->cbBuffer;
+		int progress = (int)((PROGRESS_RES * (pt - pJob->buffer)) / pJob->cbBuffer);
 
 		eol = strchr(pt, '\r');
 		if (!eol) eol = strchr(pt, '\n');

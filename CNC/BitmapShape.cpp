@@ -1935,7 +1935,7 @@ BOOL BitmapProcess(HWND hWnd)
 	return TRUE;
 }
 
-
+#ifdef CAPTURE_CTRL_A
 WNDPROC g_oldBitmapDlgdProc = NULL;
 BOOL CALLBACK BitmapInterceptWndProc(HWND hWnd,
 	UINT message,
@@ -1952,6 +1952,7 @@ BOOL CALLBACK BitmapInterceptWndProc(HWND hWnd,
 	}
 	return g_oldBitmapDlgdProc(hWnd, message, wParam, lParam);
 }
+#endif
 
 void Carve(HWND hWnd)
 {
@@ -1983,8 +1984,6 @@ BOOL CALLBACK BitmapShapesProc(HWND hWnd,
 	WPARAM wParam,
 	LPARAM lParam)
 {
-	HWND hDlg;
-
 	switch (message)
 	{
 	case WM_INITDIALOG:
@@ -1992,9 +1991,13 @@ BOOL CALLBACK BitmapShapesProc(HWND hWnd,
 		BitmapShapeGetSet(FALSE, hWnd);
 
 		// This is to capture the CTRL+A on the GCode edit box
-		hDlg = GetDlgItem(hWnd, IDC_GCODE);
-		g_oldBitmapDlgdProc = (WNDPROC)GetWindowLong(hDlg, GWL_WNDPROC);
-		SetWindowLong(hDlg, GWL_WNDPROC, (LONG)BitmapInterceptWndProc);
+#ifdef CAPTURE_CTRL_A
+		{
+			HWND hDlg = GetDlgItem(hWnd, IDC_GCODE);
+			g_oldBitmapDlgdProc = (WNDPROC)GetWindowLong(hDlg, GWL_WNDPROC);
+			SetWindowLong(hDlg, GWL_WNDPROC, (LONG)BitmapInterceptWndProc);
+		}
+#endif
 		return TRUE;
 		break;
 
