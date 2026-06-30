@@ -59,7 +59,11 @@
 #define CMD_FLAG_CALIBRATION              0x00000200L
 #define CMD_CALIBRATION_COMPLETE          0x00000400L // Used by CNC firmware. Not for host.
 #define CMD_FLAG_MANUAL_MOVE              0x00000800L
+#define CMD_SLOW_START_ENABLED            0x00800000L // Used by CNC firmware. Not for host.
+#define CMD_SLOW_START_MASK               0xFF000000L // Used by CNC firmware. Not for host.
+#define SLOW_FACTOR_FLAG_SHIFT            24
 
+#define CMD_FLAGS_EXCLUDED_FROM_CRC_MASK (CMD_FLAGS_CRC_MASK | CMD_SLOW_START_MASK | CMD_SLOW_START_ENABLED)
 
 //  E R R O R S
 //  -----------

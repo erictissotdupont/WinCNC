@@ -72,16 +72,24 @@ bool UDP_MovementCommand( unsigned long seq, char* pt, bool bIgnoreCRC )
     {
       ESP_LOGE( TAG, "Machine in error state" );
     }
-    else if( xQueueSend( g_cmd_queue, 
-                         &cmd, 
-                         ( NACK_INTERVAL_MS / portTICK_PERIOD_MS )) != pdPASS )
+    else 
     {
-      Events_SetState( CNC_STATE_COMMAND_QUEUE_FULL );
-    }
-    else
-    {
-      Events_ClearState( CNC_STATE_COMMAND_QUEUE_FULL );
-      return true;
+      if( cmd.duration > 0 )
+      {       
+        Motor_InitSlowStart( &cmd );
+      }
+
+      if( xQueueSend( g_cmd_queue, 
+                      &cmd, 
+                     ( NACK_INTERVAL_MS / portTICK_PERIOD_MS )) != pdPASS )
+      {
+        Events_SetState( CNC_STATE_COMMAND_QUEUE_FULL );
+      }
+      else
+      {
+        Events_ClearState( CNC_STATE_COMMAND_QUEUE_FULL );
+        return true;
+      }
     }
   }
   return false;

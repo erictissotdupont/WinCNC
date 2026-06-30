@@ -30,11 +30,16 @@ public :
   // Those functions are not to overloaded
   void Reset( );
   long GetPos( );
+  void SetIdle( );
   void InitMove( long s, unsigned long t, uint64_t now );
+  long GetStepDuration( );
   uint64_t GetNextStepTime( );
   void MovementTask( uint64_t now );
   void CalibrateStart( uint64_t now, long max_step, unsigned long state_flag );
   void CalibrationComplete( );
+  void CheckSlowStart( long d, cmd_t *pCmd );
+
+  bool isTheLongMove;         // True if this axis is the longest move in the current command.
   
 protected :
   long curPos;                // Current axis position in steps
@@ -52,7 +57,15 @@ protected :
   unsigned long moveDuration; // Expected total duration of the movement
   long stepDuration;          // Duration of a step in microseconds
   uint64_t nextStepTime;      // Time when the next half step should be made
+  uint64_t lastPulseTime;     // Time when the last pulse was sent
+  uint64_t moveStartTime;     // Time when the current move was started (uS)
   bool dirLevel;
+  long previousSpeed;         // The previous speed in steps per millisecond. 
+                              // Used to detect acceleration and deceleration 
+                              // for slow start
+  bool hasQueueHasBeenPeeked; // True if the command queue has been peeked for 
+                              // the next command.
+
 
   // Rapid positionning (G0)
   long decelDist;             // Step in movement when deceleration starts

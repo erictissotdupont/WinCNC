@@ -78,3 +78,5 @@ typedef struct _cmd_t
   unsigned long duration;
   unsigned long flags;
 } cmd_t;
+
+#define ABS(x) ((x) < 0 ? -(x) : (x))
