@@ -60,7 +60,7 @@ protected :
   uint64_t lastPulseTime;     // Time when the last pulse was sent
   uint64_t moveStartTime;     // Time when the current move was started (uS)
   bool dirLevel;
-  long previousSpeed;         // The previous speed in steps per millisecond. 
+  float previousSpeed;        // The previous speed in steps per seconds. 
                               // Used to detect acceleration and deceleration 
                               // for slow start
   bool hasQueueHasBeenPeeked; // True if the command queue has been peeked for 

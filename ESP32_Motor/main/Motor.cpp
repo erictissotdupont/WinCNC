@@ -19,12 +19,18 @@ extern "C"
 //-----------------------------------------------------------------
 //                   Step IO,  Direction IO,  EndMsk,  Configuration flags,               StepByInch           L/R axis offset
 DualMotor X(MOTOR_X_L_STEP, MOTOR_X_L_DIR, XL_LIM,
-            MOTOR_X_R_STEP, MOTOR_X_R_DIR, XR_LIM, CALIBRATION_REVERSED | REDUCED_RAPID_POSITIONING_SPEED, X_AXIS_RES, 0.0091f * X_AXIS_RES, 0.0f);
+            MOTOR_X_R_STEP, MOTOR_X_R_DIR, XR_LIM, 
+            CALIBRATION_REVERSED | REDUCED_RAPID_POSITIONING_SPEED, X_AXIS_RES, 
+            0.0091f * X_AXIS_RES, 0.0f);
 
-Motor Y(MOTOR_Y_STEP, MOTOR_Y_DIR, Y_LIM, CALIBRATION_REVERSED, Y_AXIS_RES);
+    Motor Y(MOTOR_Y_STEP, MOTOR_Y_DIR, Y_LIM, 
+            CALIBRATION_REVERSED, Y_AXIS_RES);
 
 DualMotor Z(MOTOR_Z_L_STEP, MOTOR_Z_L_DIR, ZL_LIM,
-            MOTOR_Z_R_STEP, MOTOR_Z_R_DIR, ZR_LIM, DIRECTION_REVERSED | CALIBRATION_OFFSET_INTERIOR | REDUCED_RAPID_POSITIONING_SPEED, Z_AXIS_RES, 0.2231f * Z_AXIS_RES, 36.0f);
+            MOTOR_Z_R_STEP, MOTOR_Z_R_DIR, ZR_LIM, 
+            DIRECTION_REVERSED | CALIBRATION_OFFSET_INTERIOR | REDUCED_RAPID_POSITIONING_SPEED, 
+            Z_AXIS_RES, 
+            0.2231f * Z_AXIS_RES, 36.0f);
 
 #define SLOW_FACTOR_STEP_COUNT    2
 #define SLOW_FACTOR_RES           4
@@ -868,25 +874,33 @@ void Motor::CheckSlowStart( long d, cmd_t *pCmd )
 {
   if( d == 0 )
   {
-    previousSpeed = 0;
+    previousSpeed = 0.0f;
   }
   else
   {
+    // Get the current slow factor for the move command
     long currentSlowFactor = (pCmd->flags & CMD_SLOW_START_MASK) >> SLOW_FACTOR_FLAG_SHIFT;
-    long speed = (long)pCmd->duration / d;
-    long newSpeedFactor = ( minSpeedStep * SLOW_FACTOR_ONE ) / ABS(speed); 
+    // Calculate the absolute (always positive) stepp duration
+    long stepTime = (long)pCmd->duration / ABS(d);
+    // Calculate the speed in steps per second
+    float speed = 1000000.0f / (float)stepTime;
+    // Calculate the factor this move should apply to start at the safe startup speed
+    long newSlowFactor = ( minSpeedStep * SLOW_FACTOR_ONE ) / stepTime; 
 
-    pCmd->flags &= ~(CMD_SLOW_START_MASK | CMD_SLOW_START_ENABLED);
-    pCmd->flags |= newSpeedFactor << SLOW_FACTOR_FLAG_SHIFT;
-
-    if(( speed * previousSpeed <= 0 ) && 
-       ( speed < (long)minSpeedStep ) && 
-       ( speed > (long)(-minSpeedStep)))
+    // If that factor is greater than the current slow factor, update the move command
+    // to use that new slow factor
+    if( newSlowFactor > currentSlowFactor )
+    {
+      pCmd->flags &= ~(CMD_SLOW_START_MASK | CMD_SLOW_START_ENABLED);
+      pCmd->flags |= newSlowFactor << SLOW_FACTOR_FLAG_SHIFT;
+    }
+    
+    // If the change in speed is an acceleration or deceleration greater than 1000 steps 
+    // per second, enable the slow start for this move command
+    if((( speed - previousSpeed ) > 1000.0f ) ||
+       (( speed - previousSpeed ) < -1000.0f ))
     {      
-      if( newSpeedFactor > currentSlowFactor)
-      {
-        pCmd->flags |= CMD_SLOW_START_ENABLED;
-      }
+      pCmd->flags |= CMD_SLOW_START_ENABLED;
     }
 
     previousSpeed = speed;

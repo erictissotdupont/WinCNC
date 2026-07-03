@@ -32,11 +32,24 @@ void Motor::CalibrationComplete( )
 {
   // Done! We're calibrated
   cal_state = 0;
+
+  switch( cal_state_flag )
+  {
+  case CNC_STATE_X_CALIBRATED :
+    Events_SetDebug( (int64_t)curPos, 0xFFFFULL );
+    break;
+  case CNC_STATE_Y_CALIBRATED :
+    Events_SetDebug( (int64_t)curPos << 16, 0xFFFF0000ULL );
+    break;
+  case CNC_STATE_Z_CALIBRATED :
+    Events_SetDebug( (int64_t)curPos << 32, 0xFFFF00000000ULL );
+    break;
+  }
+
   if( cal_checkCurPos )
   {
     if ((curPos < -CAL_ERROR_TRLD) || (curPos > CAL_ERROR_TRLD))
     {
-      Events_SetDebug( (cal_state_flag << 16) | ( curPos & 0xFFFF ));
       Events_SetState( CNC_STATE_CAL_ORIGIN_ERROR );
     }
   }
@@ -251,9 +264,7 @@ void DualMotor::CalibrateTask( uint64_t now )
             CalibrationComplete( );
           }
           else
-          {
-            Events_SetDebug( cal_delta );
-            
+          {            
             // If the position sensors are outside of the motor axis the
             // calibration algorithm removes the slanting automatically
             // because when one side stops and the other continues the 

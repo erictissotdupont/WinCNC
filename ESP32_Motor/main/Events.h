@@ -1,5 +1,5 @@
 
-void Events_SetDebug( int64_t value );
+void Events_SetDebug( int64_t value, int64_t mask );
 int64_t Events_GetDebug( );
 void Events_SetState( unsigned long flag );
 void Events_ClearState( unsigned long flag );

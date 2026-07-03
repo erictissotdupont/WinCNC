@@ -52,9 +52,10 @@ inline void Events_ClearState( unsigned long flag )
   }
 }
 
-inline void Events_SetDebug( int64_t value )
+inline void Events_SetDebug( int64_t value, int64_t mask )
 {
-  g_Debug = value;
+  g_Debug &= ~mask;
+  g_Debug |= (value & mask);
 }
 
 inline int64_t Events_GetDebug( )
