@@ -56,9 +56,12 @@
 // -------------
 #define CMD_FLAGS_CRC_MASK                0x000000FFL
 #define CMD_FLAG_SPINDLE_ON               0x00000100L
-#define CMD_FLAG_CALIBRATION              0x00000200L
-#define CMD_CALIBRATION_COMPLETE          0x00000400L // Used by CNC firmware. Not for host.
-#define CMD_FLAG_MANUAL_MOVE              0x00000800L
+#define CMD_FLAG_CALIBRATION_X            0x00000200L
+#define CMD_FLAG_CALIBRATION_Y            0x00000400L
+#define CMD_FLAG_CALIBRATION_Z            0x00000800L
+#define CMD_FLAG_CALIBRATION              (CMD_FLAG_CALIBRATION_X|CMD_FLAG_CALIBRATION_Y|CMD_FLAG_CALIBRATION_Z)
+#define CMD_CALIBRATION_COMPLETE          0x00001000L // Used by CNC firmware. Not for host.
+#define CMD_FLAG_MANUAL_MOVE              0x00002000L
 #define CMD_SLOW_START_ENABLED            0x00800000L // Used by CNC firmware. Not for host.
 #define CMD_SLOW_START_MASK               0xFF000000L // Used by CNC firmware. Not for host.
 #define SLOW_FACTOR_FLAG_SHIFT            24

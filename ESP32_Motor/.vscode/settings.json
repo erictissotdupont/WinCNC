@@ -12,5 +12,6 @@
     "--background-index",
     "--query-driver=C:\\Users\\Admin\\.espressif\\tools\\xtensa-esp-elf\\esp-13.2.0_20240530\\xtensa-esp-elf\\bin\\xtensa-esp32s3-elf-gcc.exe",
     "--compile-commands-dir=c:\\Users\\Admin\\Documents\\Projects\\WinCNC\\ESP32_Motor\\build"
-  ]
+  ],
+  "idf.currentSetup": "c:\\Users\\Admin\\Documents\\esp-idf"
 }

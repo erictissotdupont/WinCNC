@@ -394,9 +394,11 @@ tStatus CNC_PostMovementCommand( long x, long y, long z, unsigned long d, unsign
 	return status;
 }
 
-tStatus CNC_Calibrate()
+tStatus CNC_Calibrate(unsigned long axis_flags)
 {
-	return postCommand(CNC_CMD_CALIBRATE);
+	char szCmd[64];
+	sprintf_s(szCmd, sizeof(szCmd), CNC_CMD_CALIBRATE "|%X|", axis_flags);
+	return postCommand(szCmd);
 }
 
 tStatus postCommand(char* cmd)

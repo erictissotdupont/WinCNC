@@ -15,7 +15,7 @@ bool CNC_LockMachinePosition(bool bLock);
 void CNC_GetDisplayPosition(t3DPoint* pPos);
 int CNC_InitNetworkCom( );
 void CNC_Reboot( );
-tStatus CNC_Calibrate( );
+tStatus CNC_Calibrate(unsigned long axis_flags);
 void CNC_SendManualUpdate(int x, int y, int z);
 void CNC_ForceStop( );
 void CNC_Resume();

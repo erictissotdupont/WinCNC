@@ -30,7 +30,10 @@ DualMotor Z(MOTOR_Z_L_STEP, MOTOR_Z_L_DIR, ZL_LIM,
             MOTOR_Z_R_STEP, MOTOR_Z_R_DIR, ZR_LIM, 
             DIRECTION_REVERSED | CALIBRATION_OFFSET_INTERIOR | REDUCED_RAPID_POSITIONING_SPEED, 
             Z_AXIS_RES, 
-            0.2231f * Z_AXIS_RES, 36.0f);
+            0.2353f * Z_AXIS_RES, 36.0f);
+//          0.2231f * Z_AXIS_RES, 36.0f);
+
+// 0.010236
 
 #define SLOW_FACTOR_STEP_COUNT    2
 #define SLOW_FACTOR_RES           4
@@ -638,9 +641,9 @@ extern "C"
 
         Events_SetState(CNC_STATE_CALIBRATING);
 
-        X.CalibrateStart(now, X_AXIS_LENGTH, CNC_STATE_X_CALIBRATED);
-        Y.CalibrateStart(now, Y_AXIS_LENGTH, CNC_STATE_Y_CALIBRATED);
-        Z.CalibrateStart(now, Z_AXIS_LENGTH, CNC_STATE_Z_CALIBRATED);
+        if( pCmd->flags & CMD_FLAG_CALIBRATION_X ) X.CalibrateStart(now, X_AXIS_LENGTH, CNC_STATE_X_CALIBRATED);
+        if( pCmd->flags & CMD_FLAG_CALIBRATION_Y ) Y.CalibrateStart(now, Y_AXIS_LENGTH, CNC_STATE_Y_CALIBRATED);        
+        if( pCmd->flags & CMD_FLAG_CALIBRATION_Z ) Z.CalibrateStart(now, Z_AXIS_LENGTH, CNC_STATE_Z_CALIBRATED);
 
         Motor_PrepareNextStep(now);
       }

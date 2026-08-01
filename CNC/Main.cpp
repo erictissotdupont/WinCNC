@@ -3,6 +3,7 @@
 
 #include "Main.h"
 #include <Commdlg.h>
+#include <Windowsx.h>
 #include "Shapes.h"
 
 #include "MainView.h"
@@ -163,6 +164,60 @@ void OnRunGCode(HWND hWnd,BOOL bDebug)
 	}
 }
 
+BOOL CALLBACK CalibrationProc(HWND hWnd,
+	UINT message,
+	WPARAM wParam,
+	LPARAM lParam)
+{
+	tStatus status;
+	static unsigned long flags = 0;
+
+	switch (message)
+	{
+	case WM_INITDIALOG:
+		EnableWindow(GetDlgItem(hWnd, IDOK), flags != 0);
+		Button_SetCheck(GetDlgItem(hWnd, IDC_CALIBRATE_X), flags & CMD_FLAG_CALIBRATION_X );
+		Button_SetCheck(GetDlgItem(hWnd, IDC_CALIBRATE_Y), flags & CMD_FLAG_CALIBRATION_Y );
+		Button_SetCheck(GetDlgItem(hWnd, IDC_CALIBRATE_Z), flags & CMD_FLAG_CALIBRATION_Z );
+		return TRUE;
+		break;
+
+	case WM_CLOSE:
+		break;
+
+	case WM_COMMAND:
+		if (HIWORD(wParam) == BN_CLICKED)
+		{
+			switch (LOWORD(wParam))
+			{
+			// Update options based on new state of those items
+			case IDC_CALIBRATE_X:
+			case IDC_CALIBRATE_Y:
+			case IDC_CALIBRATE_Z:
+				flags = 0;
+				flags |= Button_GetCheck(GetDlgItem(hWnd, IDC_CALIBRATE_X)) ? CMD_FLAG_CALIBRATION_X : 0;
+				flags |= Button_GetCheck(GetDlgItem(hWnd, IDC_CALIBRATE_Y)) ? CMD_FLAG_CALIBRATION_Y : 0;
+				flags |= Button_GetCheck(GetDlgItem(hWnd, IDC_CALIBRATE_Z)) ? CMD_FLAG_CALIBRATION_Z : 0;
+				EnableWindow(GetDlgItem(hWnd, IDOK), flags != 0);
+				break;
+
+			case IDOK:
+				status = CNC_Calibrate(flags);
+				if (status != retSuccess)
+				{
+					MessageBoxA(hWnd, "Calibration command failed.", "CNC", MB_ICONERROR);
+				}
+
+				// Fallthough
+			case IDCANCEL:
+				EndDialog(hWnd, wParam);
+				return TRUE;
+			}
+		}
+	}
+	return FALSE;
+}
+
 //
 //  FUNCTION: WndProc(HWND, UINT, WPARAM, LPARAM)
 //
@@ -191,6 +246,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		case IDM_DEBUG_GCODE:
 			OnRunGCode(hWnd, TRUE);
 			break;
+
 		case IDM_SIMULATE_GCODE:
 			Start3DSimulator(hWnd);
 			break;
@@ -202,14 +258,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			}
 			else
 			{
-				if (MessageBoxA(hWnd, "Ensure that the machine can freely move up and left before starting calibration. When ready, click OK to proceed.", "CNC", MB_OKCANCEL | MB_ICONEXCLAMATION) == IDOK)
-				{
-					tStatus status = CNC_Calibrate();
-					if (status != retSuccess)
-					{
-						MessageBoxA(hWnd, "Calibration command failed.", "CNC", MB_ICONERROR);
-					}
-				}
+				DialogBox(NULL,
+					MAKEINTRESOURCE(IDD_CALIBRATION),
+					hWnd,
+					(DLGPROC)CalibrationProc);
 			}
 			break;
 

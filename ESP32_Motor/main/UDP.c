@@ -95,11 +95,16 @@ bool UDP_MovementCommand( unsigned long seq, char* pt, bool bIgnoreCRC )
   return false;
 }
 
-bool UDP_CalibrateCommand( )
+bool UDP_CalibrateCommand( unsigned long calibrationFlags )
 {
   cmd_t cmd = { 0 };
+
+  if(( calibrationFlags & CMD_FLAG_CALIBRATION) == 0 )
+  {
+    return false;
+  }
   
-  cmd.flags = CMD_FLAG_CALIBRATION;
+  cmd.flags = calibrationFlags;
   if( xQueueSend( g_cmd_queue, 
                   &cmd, 
                   1000 / portTICK_PERIOD_MS ) != pdPASS )
@@ -224,10 +229,22 @@ int UDP_ParseMessage( char* msgbuf, int nbytes, char* outBuf )
         }
         else if( strncmp( pt, CNC_CMD_CALIBRATE, CNC_CMD_CALIBRATE_LEN ) == 0 )
         {
-          if(( bStatus = UDP_CalibrateCommand( )) == false )
+          unsigned long calibrationFlags = 0;          
+          pt += CNC_CMD_CALIBRATE_LEN;
+          if(( *pt != '|' ) || ( sscanf( pt + 1, "%lx", &calibrationFlags ) != 1 ))
           {
-            ESP_LOGE( TAG, "Initiating calibration failed" );
-            Events_SetState( CNC_STATE_CALIBRATION_FAILED );
+            ESP_LOGE( TAG, "Calibration command format error." );
+            Events_SetState( CNC_STATE_COMMUNICATION_ERROR );
+            bStatus = false;
+          }
+          else
+          {
+            ESP_LOGW( TAG, "Calibration command received." );
+            if(( bStatus = UDP_CalibrateCommand(calibrationFlags)) == false )
+            {
+              ESP_LOGE( TAG, "Initiating calibration failed" );
+              Events_SetState( CNC_STATE_CALIBRATION_FAILED );
+            }
           }
         }
         else if( strncmp( pt, CNC_CMD_FLUSH, CNC_CMD_FLUSH_LEN ) == 0 )
